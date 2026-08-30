@@ -19,6 +19,11 @@ impl LibraryItemId {
         let name = format!("marina:{provider}:{entity}:{id}");
         Self(Uuid::new_v5(&Uuid::NAMESPACE_URL, name.as_bytes()))
     }
+
+    /// Parses an ID previously formatted with [`Display`](fmt::Display).
+    pub fn parse(value: &str) -> Option<Self> {
+        Uuid::parse_str(value).ok().map(Self)
+    }
 }
 
 impl fmt::Display for LibraryItemId {

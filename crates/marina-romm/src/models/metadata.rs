@@ -1,18 +1,25 @@
 //! A "ROM" in RomM.
-//! 
-//! 
+//!
+//!
 //! An invididual ROM contains a LOT of metadata so it's useful to have a typed
 //! representation of it available to callers.
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[serde(default)]
 pub struct RomMetadata {
     pub rom_id: i32,
+    #[serde(default)]
     pub genres: Vec<String>,
+    #[serde(default)]
     pub franchises: Vec<String>,
+    #[serde(default)]
     pub collections: Vec<String>,
+    #[serde(default)]
     pub companies: Vec<String>,
+    #[serde(default)]
     pub game_modes: Vec<String>,
+    #[serde(default)]
     pub age_ratings: Vec<String>,
     pub player_count: String,
     pub first_release_date: Option<i64>,
@@ -61,6 +68,7 @@ pub struct IgdbRelatedGame {
 }
 /// Metadata according to IGDB.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[serde(default)]
 pub struct IgdbMetadata {
     pub total_rating: Option<String>,
     pub aggregated_rating: Option<String>,
@@ -93,6 +101,7 @@ pub struct MobyPlatform {
 }
 /// Metadata according to MobyGames.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[serde(default)]
 pub struct MobyMetadata {
     pub moby_score: Option<String>,
     pub genres: Vec<String>,
@@ -109,6 +118,7 @@ pub struct SsAgeRating {
 
 /// Metadata according to ScreenScraper.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[serde(default)]
 pub struct SsMetadata {
     pub bezel_url: Option<String>,
     pub box2d_url: Option<String>,
@@ -163,6 +173,7 @@ pub struct LaunchboxImage {
 
 /// Metadata from Launchbox.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[serde(default)]
 pub struct LaunchboxMetadata {
     pub first_release_date: Option<i64>,
     pub max_players: i32,
@@ -182,6 +193,7 @@ pub struct LaunchboxMetadata {
 
 /// Metadata from Hasheous.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[serde(default)]
 pub struct HasheousMetadata {
     pub tosec_match: bool,
     pub mame_arcade_match: bool,
@@ -197,6 +209,7 @@ pub struct HasheousMetadata {
 
 /// Metadata from the Flashpoint database.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[serde(default)]
 pub struct FlashpointMetadata {
     pub franchises: Vec<String>,
     pub companies: Vec<String>,
@@ -211,6 +224,7 @@ pub struct FlashpointMetadata {
 }
 /// Metadata from How Long to Beat.
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[serde(default)]
 pub struct HltbMetadata {
     pub main_story: i32,
     pub main_story_count: i32,
@@ -228,6 +242,7 @@ pub struct HltbMetadata {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[serde(default)]
 pub struct GamelistMetadata {
     pub box2d_url: Option<String>,
     pub box2d_back_url: Option<String>,
@@ -272,6 +287,7 @@ pub struct ManualMetadata {
     pub youtube_video_id: Option<String>,
 }
 #[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
+#[serde(default)]
 pub struct RaMetadata {
     pub first_release_date: Option<i64>,
     pub genres: Vec<String>,

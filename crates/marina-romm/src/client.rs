@@ -1,6 +1,7 @@
 use crate::error::Error;
 use crate::models::{Heartbeat, Platform, PlatformQuery, Rom, RomPage, RomQuery};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+use futures_util::{Stream, StreamExt, stream};
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
 use serde::de::DeserializeOwned;
 
@@ -69,6 +70,44 @@ impl Client {
         }
 
         self.get_url(url).await
+    }
+
+    /// Streams ROM pages matching `query`, following RomM's limit/offset pages.
+    pub fn paginate_roms(
+        &self,
+        query: RomQuery,
+    ) -> impl Stream<Item = Result<RomPage, Error>> + '_ {
+        let offset = query.offset.unwrap_or_default();
+        stream::try_unfold(
+            (self, query, offset, false),
+            |(client, mut query, offset, finished)| async move {
+                if finished {
+                    return Ok(None);
+                }
+
+                query.offset = Some(offset);
+                let page = client.list_roms(&query).await?;
+                let page_len = page.items.len() as i64;
+                if page_len == 0 {
+                    return Ok(None);
+                }
+
+                let next_offset = offset + page_len;
+                let finished = page.total.is_some_and(|total| next_offset >= total);
+                Ok(Some((page, (client, query, next_offset, finished))))
+            },
+        )
+    }
+
+    /// Lists every ROM matching `query` by collecting [`paginate_roms`].
+    pub async fn list_all_roms(&self, query: &RomQuery) -> Result<Vec<Rom>, Error> {
+        let mut roms = Vec::new();
+        let pages = self.paginate_roms(query.clone());
+        futures_util::pin_mut!(pages);
+        while let Some(page) = pages.next().await {
+            roms.extend(page?.items);
+        }
+        Ok(roms)
     }
 
     pub async fn list_platforms(&self, query: &PlatformQuery) -> Result<Vec<Platform>, Error> {

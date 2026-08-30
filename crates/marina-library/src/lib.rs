@@ -79,6 +79,13 @@ pub trait LibraryRead {
     async fn platforms(&self) -> Result<Vec<Platform>, LibraryError>;
 }
 
+#[allow(async_fn_in_trait)]
+pub trait LibraryWrite {
+    async fn add(&self, item: LibraryItem) -> Result<LibraryItem, LibraryError>;
+    async fn update(&self, item: LibraryItem) -> Result<LibraryItem, LibraryError>;
+    async fn remove(&self, id: &LibraryItemId) -> Result<(), LibraryError>;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

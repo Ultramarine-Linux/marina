@@ -26,8 +26,8 @@ pub struct RomProviderMetadata {
     pub launchbox_id: Option<i32>,
     pub hasheous_id: Option<i32>,
     pub tgdb_id: Option<i32>,
-    pub flashpoint_id: Option<i32>,
+    pub flashpoint_id: Option<String>,
     pub hltb_id: Option<i32>,
-    pub gamelist_id: Option<i32>,
-    pub libretro_id: Option<i32>,
+    pub gamelist_id: Option<String>,
+    pub libretro_id: Option<String>,
 }

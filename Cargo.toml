@@ -2,7 +2,7 @@
 resolver = "3"
 members = [
     "crates/marina-core", "crates/marina-library",
-    "crates/marina-romm",
+    "crates/marina-romm", "crates/marina-store-surrealdb", "crates/marina-test",
 ]
 
 [workspace.package]
@@ -14,6 +14,7 @@ license = "Apache-2.0"
 base64 = "0.23"
 chrono = { version = "0.4", default-features = false, features = ["serde", "clock"] }
 dotenvy = "0.15"
+futures-util = "0.3"
 reqwest = { version = "0.13", default-features = false, features = ["json", "query", "rustls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -25,3 +26,5 @@ uuid = { version = "1", features = ["v4", "v5"] }
 # marina
 marina-core = { path = "crates/marina-core" }
 marina-romm = { path = "crates/marina-romm" }
+marina-library = { path = "crates/marina-library" }
+marina-store-surrealdb = { path = "crates/marina-store-surrealdb" }
