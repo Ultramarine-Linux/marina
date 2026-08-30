@@ -17,17 +17,87 @@ pub use users::*;
 
 impl From<Rom> for marina_core::LibraryItem {
     fn from(rom: Rom) -> Self {
-        let title = rom.name.unwrap_or(rom.files.fs_name);
+        let title = rom
+            .name
+            .clone()
+            .unwrap_or_else(|| rom.files.fs_name.clone());
         let id = marina_core::LibraryItemId::from_provider("romm", "rom", &rom.id.to_string());
-        let mut item = marina_core::LibraryItem {
+        let mut provider_ids = std::collections::HashMap::from([
+            ("romm_id".to_owned(), rom.id.to_string()),
+            // ("platform".to_owned(), rom.platform.platform_slug.clone()),
+        ]);
+        if let Some(slug) = &rom.slug {
+            provider_ids.insert("romm_slug".to_owned(), slug.clone());
+        }
+
+        let release_date = rom
+            .provider_metadata
+            .metadatum
+            .as_ref()
+            .and_then(|metadata| metadata.first_release_date)
+            .or_else(|| {
+                rom.provider_metadata
+                    .igdb_metadata
+                    .as_ref()
+                    .and_then(|metadata| metadata.first_release_date)
+            })
+            .and_then(|timestamp| DateTime::from_timestamp(timestamp, 0))
+            .map(|datetime| datetime.fixed_offset());
+
+        let mut assets = Vec::new();
+        if rom.assets.url_cover.is_some()
+            || rom.assets.path_cover_small.is_some()
+            || rom.assets.path_cover_large.is_some()
+        {
+            assets.push(marina_core::LibraryAsset {
+                url: rom.assets.url_cover.clone(),
+                path: rom
+                    .assets
+                    .path_cover_small
+                    .clone()
+                    .or_else(|| rom.assets.path_cover_large.clone()),
+            });
+        }
+        if rom.assets.path_manual.is_some() {
+            assets.push(marina_core::LibraryAsset {
+                url: None,
+                path: rom.assets.path_manual.clone(),
+            });
+        }
+        if rom.assets.path_video.is_some() {
+            assets.push(marina_core::LibraryAsset {
+                url: None,
+                path: rom.assets.path_video.clone(),
+            });
+        }
+
+        marina_core::LibraryItem {
             id,
             title,
             kind: marina_core::ItemKind::Game,
-            provider_ids: std::collections::HashMap::new(),
-        };
-        item.provider_ids
-            .insert("romm_id".into(), rom.id.to_string());
-        item
+            platform_slug: Some(rom.platform.platform_slug.clone()),
+            provider_ids,
+            summary: rom.summary.clone(),
+            alternative_names: rom.alternative_names.clone(),
+            tags: rom.tags.clone(),
+            languages: rom.languages.clone(),
+            regions: rom.regions.clone(),
+            cover: rom.cover_path().map(str::to_owned),
+            created_at: rom.created_at,
+            released_at: release_date,
+            updated_at: rom.updated_at,
+            files: rom
+                .files
+                .files
+                .iter()
+                .map(|file| marina_core::LibraryItemFile {
+                    name: file.file_name.clone(),
+                    path: file.full_path.clone(),
+                    size_bytes: u64::try_from(file.file_size_bytes).ok(),
+                })
+                .collect(),
+            assets,
+        }
     }
 }
 impl RomResponse {

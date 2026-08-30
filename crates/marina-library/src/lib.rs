@@ -66,17 +66,31 @@ impl LibraryError {
     }
 }
 
+/// Read-only access to platform metadata.
+#[allow(async_fn_in_trait)]
+pub trait PlatformRead {
+    async fn platforms(&self) -> Result<Vec<Platform>, LibraryError>;
+}
+
+/// Write access to platform metadata.
+#[allow(async_fn_in_trait)]
+pub trait PlatformWrite {
+    async fn add_platform(&self, platform: Platform) -> Result<Platform, LibraryError>;
+    async fn update_platform(&self, platform: Platform) -> Result<Platform, LibraryError>;
+    async fn remove_platform(&self, slug: &str) -> Result<(), LibraryError>;
+}
+
 /// Read-only access to library metadata.
 ///
 /// This trait contains no database-specific types. A backend may implement it using
 /// any storage engine and may perform work asynchronously.
 #[allow(async_fn_in_trait)]
-pub trait LibraryRead {
+pub trait LibraryRead: PlatformRead {
     async fn search(&self, query: SearchQuery) -> Result<Vec<LibraryItem>, LibraryError>;
 
     async fn get(&self, id: &LibraryItemId) -> Result<Option<LibraryItem>, LibraryError>;
 
-    async fn platforms(&self) -> Result<Vec<Platform>, LibraryError>;
+    async fn list(&self, limit: u32) -> Result<Vec<LibraryItem>, LibraryError>;
 }
 
 #[allow(async_fn_in_trait)]
@@ -102,6 +116,12 @@ mod tests {
 
     struct EmptyLibrary;
 
+    impl PlatformRead for EmptyLibrary {
+        async fn platforms(&self) -> Result<Vec<Platform>, LibraryError> {
+            Ok(Vec::new())
+        }
+    }
+
     impl LibraryRead for EmptyLibrary {
         async fn search(&self, _query: SearchQuery) -> Result<Vec<LibraryItem>, LibraryError> {
             Ok(Vec::new())
@@ -111,7 +131,7 @@ mod tests {
             Ok(None)
         }
 
-        async fn platforms(&self) -> Result<Vec<Platform>, LibraryError> {
+        async fn list(&self, _limit: u32) -> Result<Vec<LibraryItem>, LibraryError> {
             Ok(Vec::new())
         }
     }
