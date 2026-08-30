@@ -1,7 +1,7 @@
 [workspace]
 resolver = "3"
 members = [
-    "crates/marina-core",
+    "crates/marina-core", "crates/marina-library",
     "crates/marina-romm",
 ]
 
