@@ -1,7 +1,19 @@
 use chrono::{DateTime, FixedOffset};
 use serde::{Deserialize, Serialize};
 
-use crate::Platform;
+mod assets;
+mod files;
+mod hashes;
+mod providers;
+mod siblings;
+mod users;
+
+pub use assets::*;
+pub use files::*;
+pub use hashes::*;
+pub use providers::*;
+pub use siblings::*;
+pub use users::*;
 
 impl From<Rom> for marina_core::LibraryItem {
     fn from(rom: Rom) -> Self {
@@ -82,126 +94,11 @@ pub struct RomPlatform {
 }
 
 impl RomPlatform {
-    async fn get_platform(&self) -> Platform {
+    async fn get_platform(&self) -> super::Platform {
         todo!()
     }
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
-pub struct RomFiles {
-    pub fs_name: String,
-    pub fs_name_no_tags: String,
-    pub fs_name_no_ext: String,
-    pub fs_extension: String,
-    pub fs_path: String,
-    pub fs_size_bytes: i64,
-    pub full_path: String,
-    pub has_simple_single_file: bool,
-    pub has_nested_single_file: bool,
-    pub has_multiple_files: bool,
-    #[serde(default)]
-    pub files: Vec<RomFile>,
-}
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
-pub struct RomFile {
-    pub id: i32,
-    pub rom_id: i32,
-    pub file_name: String,
-    pub file_path: String,
-    pub file_size_bytes: i64,
-    pub full_path: String,
-    pub is_top_level: bool,
-    pub created_at: DateTime<FixedOffset>,
-    pub updated_at: DateTime<FixedOffset>,
-    pub last_modified: String,
-    #[serde(flatten)]
-    pub hashes: RomHashes,
-    #[serde(default)]
-    pub archive_members: Vec<serde_json::Value>,
-    pub category: String,
-    pub track_meta: Option<serde_json::Value>,
-}
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
-pub struct RomAssets {
-    pub path_cover_small: Option<String>,
-    pub path_cover_large: Option<String>,
-    pub url_cover: Option<String>,
-    pub has_manual: Option<bool>,
-    pub has_soundtrack: Option<bool>,
-    pub path_manual: Option<String>,
-    pub url_manual: Option<String>,
-    pub path_video: Option<String>,
-    #[serde(default)]
-    pub merged_screenshots: Vec<String>,
-    #[serde(default)]
-    pub user_screenshots: Vec<serde_json::Value>,
-    #[serde(default)]
-    pub all_user_screenshots: Vec<serde_json::Value>,
-}
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
-pub struct RomProviderMetadata {
-    pub youtube_video_id: Option<String>,
-    pub metadatum: Option<serde_json::Value>,
-    pub igdb_metadata: Option<serde_json::Value>,
-    pub moby_metadata: Option<serde_json::Value>,
-    pub ss_metadata: Option<serde_json::Value>,
-    pub launchbox_metadata: Option<serde_json::Value>,
-    pub hasheous_metadata: Option<serde_json::Value>,
-    pub flashpoint_metadata: Option<serde_json::Value>,
-    pub hltb_metadata: Option<serde_json::Value>,
-    pub gamelist_metadata: Option<serde_json::Value>,
-    pub manual_metadata: Option<serde_json::Value>,
-    pub rom_user: Option<serde_json::Value>,
-    pub merged_ra_metadata: Option<serde_json::Value>,
-    pub igdb_id: Option<serde_json::Value>,
-    pub sgdb_id: Option<serde_json::Value>,
-    pub moby_id: Option<serde_json::Value>,
-    pub ss_id: Option<serde_json::Value>,
-    pub ra_id: Option<serde_json::Value>,
-    pub launchbox_id: Option<serde_json::Value>,
-    pub hasheous_id: Option<serde_json::Value>,
-    pub tgdb_id: Option<serde_json::Value>,
-    pub flashpoint_id: Option<serde_json::Value>,
-    pub hltb_id: Option<serde_json::Value>,
-    pub gamelist_id: Option<serde_json::Value>,
-    pub libretro_id: Option<serde_json::Value>,
-}
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
-pub struct RomHashes {
-    pub crc_hash: Option<String>,
-    pub md5_hash: Option<String>,
-    pub sha1_hash: Option<String>,
-    pub ra_hash: Option<String>,
-    pub chd_sha1_hash: Option<String>,
-}
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
-pub struct RomSaves {
-    pub user_saves: Option<serde_json::Value>,
-    pub all_user_saves: Option<serde_json::Value>,
-    pub user_collections: Option<serde_json::Value>,
-}
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
-pub struct RomNotes {
-    pub all_user_notes: Option<serde_json::Value>,
-}
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
-pub struct RomSavestates {
-    pub user_states: Option<serde_json::Value>,
-    pub all_user_states: Option<serde_json::Value>,
-}
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
-pub struct RomSibling {
-    pub id: i32,
-    pub name: String,
-    pub fs_name_no_tags: String,
-    pub fs_name_no_ext: String,
-    pub is_main_sibling: bool,
-    pub sort_comparator: String,
-}
-#[derive(Clone, Debug, Default, Deserialize, Serialize, PartialEq)]
-pub struct RomSiblings {
-    pub sibling_roms: Option<Vec<RomSibling>>,
-}
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct RomPage {
     pub items: Vec<Rom>,

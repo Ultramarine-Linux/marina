@@ -1,3 +1,4 @@
+pub mod metadata;
 pub mod platforms;
 pub mod roms;
 
