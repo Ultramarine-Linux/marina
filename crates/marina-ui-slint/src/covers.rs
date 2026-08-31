@@ -1,20 +1,29 @@
-//! Asynchronous cover pipeline: disk cache -> network fetch -> decode -> model patch.
+//! Bounded cover residency: cache/network loading plus visible-range eviction.
 
-use std::path::PathBuf;
+use std::{
+    collections::HashSet,
+    path::PathBuf,
+    rc::Rc,
+    sync::{Arc, Mutex},
+};
 
+use marina_library::{LibraryError, LibraryRead};
 use slint::{ComponentHandle, Image, Model, SharedPixelBuffer};
 use tracing::{debug, warn};
 
-use crate::{MainWindow, cache};
+use crate::{GameCardData, MainWindow, cache};
 
-/// Where a card's cover can be found: a deterministic disk cache location
-/// and/or a remote URL to fetch (and backfill the cache) from.
+const COVER_HEIGHT: f32 = 200.0;
+const CARD_SPACING: f32 = 16.0;
+const CONTENT_PADDING_LEFT: f32 = 4.0;
+const PREFETCH_CARDS: usize = 3;
+
+#[derive(Clone)]
 pub struct CoverSource {
     pub url: Option<String>,
     pub cache_path: Option<PathBuf>,
 }
 
-/// Builds the cover source for a stored cover path/URL.
 pub fn source_for(cover: Option<&str>, base_url: Option<&str>) -> CoverSource {
     CoverSource {
         url: resolve_url(cover, base_url),
@@ -22,48 +31,149 @@ pub fn source_for(cover: Option<&str>, base_url: Option<&str>) -> CoverSource {
     }
 }
 
-/// Spawns a background load per cover and patches the corresponding model
-/// row as each one arrives, so the UI shows immediately with skeletons and
-/// covers stream in progressively.
-///
-/// Bytes are read/fetched on tokio workers; the `slint::Image` is created on
-/// the UI thread (it is `!Send`) via `upgrade_in_event_loop`.
-pub fn spawn_loader(window: &MainWindow, http: reqwest::Client, sources: Vec<CoverSource>) {
-    let weak = window.as_weak();
+/// Loads metadata only; artwork is requested by `CoverLoader` as cards enter
+/// the viewport plus a small prefetch buffer.
+pub fn spawn_loader(
+    window: &MainWindow,
+    http: reqwest::Client,
+    sources: Vec<CoverSource>,
+) -> Rc<std::cell::RefCell<CoverLoader>> {
+    let loader = Rc::new(std::cell::RefCell::new(CoverLoader {
+        window: window.as_weak(),
+        http,
+        sources,
+        state: Arc::new(Mutex::new(LoaderState::default())),
+    }));
+    loader
+}
 
-    for (index, source) in sources.into_iter().enumerate() {
-        if source.url.is_none() && source.cache_path.is_none() {
-            continue;
+pub struct CoverLoader {
+    window: slint::Weak<MainWindow>,
+    http: reqwest::Client,
+    sources: Vec<CoverSource>,
+    state: Arc<Mutex<LoaderState>>,
+}
+
+#[derive(Default)]
+struct LoaderState {
+    loading: HashSet<usize>,
+    resident: HashSet<usize>,
+}
+
+impl CoverLoader {
+    pub fn update(&mut self, scroll_x: f32, viewport_width: f32) {
+        // Slint exposes Flickable::viewport-x as the content translation, so
+        // scrolling right produces negative values. Convert to a positive
+        // distance through the content before calculating card positions.
+        let scroll_x = (-scroll_x).max(0.0);
+        let Some(window) = self.window.upgrade() else {
+            return;
+        };
+        let games = window.get_games();
+
+        // Cards have variable widths, so derive their actual positions from
+        // the current ratios instead of assuming a fixed slot size.
+        let viewport_end = scroll_x + viewport_width;
+        let mut cursor = CONTENT_PADDING_LEFT;
+        let mut first_visible = None;
+        let mut last_visible = None;
+        for index in 0..games.row_count() {
+            let ratio = games
+                .row_data(index)
+                .map(|row| row.cover_ratio.clamp(0.4, 2.0))
+                .unwrap_or(1.0);
+            let width = COVER_HEIGHT * ratio;
+            let card_end = cursor + width;
+            if card_end >= scroll_x && cursor <= viewport_end {
+                first_visible.get_or_insert(index);
+                last_visible = Some(index);
+            }
+            cursor = card_end + CARD_SPACING;
         }
-        let http = http.clone();
-        let weak = weak.clone();
 
-        tokio::spawn(async move {
-            let Some(bytes) = load_bytes(&http, &source).await else {
-                return;
+        let first = first_visible.unwrap_or(0).saturating_sub(PREFETCH_CARDS);
+        let last = last_visible
+            .map(|index| (index + PREFETCH_CARDS + 1).min(self.sources.len()))
+            .unwrap_or(0);
+        let wanted: HashSet<_> = (first..last).collect();
+        debug!(
+            scroll_x,
+            viewport_width, first, last, "updating cover residency range"
+        );
+        let evict: Vec<_> = self
+            .state
+            .lock()
+            .expect("cover loader state poisoned")
+            .resident
+            .difference(&wanted)
+            .copied()
+            .collect();
+        debug!(?evict, "evicting cover rows");
+        for index in evict {
+            if let Some(mut row) = games.row_data(index) {
+                row.cover = Image::default();
+                games.set_row_data(index, row);
+            }
+            self.state
+                .lock()
+                .expect("cover loader state poisoned")
+                .resident
+                .remove(&index);
+        }
+
+        for index in wanted {
+            let should_load = {
+                let mut state = self.state.lock().expect("cover loader state poisoned");
+                !state.resident.contains(&index) && state.loading.insert(index)
             };
+            if !should_load {
+                continue;
+            }
+            debug!(index, "queueing cover row");
+            let Some(source) = self.sources.get(index).cloned() else {
+                self.state
+                    .lock()
+                    .expect("cover loader state poisoned")
+                    .loading
+                    .remove(&index);
+                continue;
+            };
+            let http = self.http.clone();
+            let weak = self.window.clone();
+            let state = self.state.clone();
 
-            let result = weak.upgrade_in_event_loop(move |window| {
-                let Some((image, ratio)) = decode(&bytes) else {
-                    warn!("cover decode failed, keeping placeholder");
+            tokio::spawn(async move {
+                let Some(bytes) = load_bytes(&http, &source).await else {
+                    state
+                        .lock()
+                        .expect("cover loader state poisoned")
+                        .loading
+                        .remove(&index);
                     return;
                 };
-                let games = window.get_games();
-                if let Some(mut row) = games.row_data(index) {
-                    row.cover = image;
-                    row.cover_ratio = ratio;
-                    games.set_row_data(index, row);
+                {
+                    let mut state = state.lock().expect("cover loader state poisoned");
+                    state.loading.remove(&index);
+                    state.resident.insert(index);
                 }
+                debug!(index, "cover bytes loaded");
+                let _ = weak.upgrade_in_event_loop(move |window| {
+                    let Some((image, ratio)) = decode(&bytes) else {
+                        warn!("cover decode failed, keeping placeholder");
+                        return;
+                    };
+                    let games = window.get_games();
+                    if let Some(mut row) = games.row_data(index) {
+                        row.cover = image;
+                        row.cover_ratio = ratio;
+                        games.set_row_data(index, row);
+                    }
+                });
             });
-            if result.is_err() {
-                debug!("event loop gone, dropping cover");
-            }
-        });
+        }
     }
 }
 
-/// Decodes raw image bytes into a Slint `Image` and returns the natural
-/// aspect ratio (width / height). `None` if the format is unsupported.
 pub fn decode(bytes: &[u8]) -> Option<(Image, f32)> {
     let img = image::load_from_memory(bytes).ok()?.to_rgba8();
     let (w, h) = img.dimensions();
@@ -74,8 +184,6 @@ pub fn decode(bytes: &[u8]) -> Option<(Image, f32)> {
     Some((Image::from_rgba8(buffer), w as f32 / h as f32))
 }
 
-/// Reads a cover from the disk cache, falling back to a network fetch that
-/// backfills the cache (best-effort).
 async fn load_bytes(http: &reqwest::Client, source: &CoverSource) -> Option<Vec<u8>> {
     if let Some(path) = &source.cache_path {
         if let Ok(bytes) = tokio::fs::read(path).await {
@@ -83,43 +191,25 @@ async fn load_bytes(http: &reqwest::Client, source: &CoverSource) -> Option<Vec<
             return Some(bytes);
         }
     }
-
     let url = source.url.as_deref()?;
-    debug!(url, "fetching cover");
-    let bytes = match http
+    let bytes = http
         .get(url)
         .send()
         .await
-        .and_then(|response| response.error_for_status())
-    {
-        Ok(response) => match response.bytes().await {
-            Ok(bytes) => bytes,
-            Err(error) => {
-                warn!(url, %error, "cover read failed");
-                return None;
-            }
-        },
-        Err(error) => {
-            warn!(url, %error, "cover fetch failed");
-            return None;
-        }
-    };
+        .ok()?
+        .error_for_status()
+        .ok()?
+        .bytes()
+        .await
+        .ok()?;
 
     if let Some(path) = &source.cache_path {
-        match path.parent() {
-            Some(parent) => {
-                if let Err(error) = tokio::fs::create_dir_all(parent).await {
-                    warn!(path = %path.display(), %error, "cover cache dir creation failed");
-                } else if let Err(error) = tokio::fs::write(path, &bytes).await {
-                    warn!(path = %path.display(), %error, "cover cache write failed");
-                } else {
-                    debug!(path = %path.display(), "cover cached");
-                }
+        if let Some(parent) = path.parent() {
+            if tokio::fs::create_dir_all(parent).await.is_ok() {
+                let _ = tokio::fs::write(path, &bytes).await;
             }
-            None => warn!(path = %path.display(), "cover cache path has no parent"),
         }
     }
-
     Some(bytes.to_vec())
 }
 
@@ -128,7 +218,28 @@ fn resolve_url(cover: Option<&str>, base_url: Option<&str>) -> Option<String> {
     if cover.starts_with("http://") || cover.starts_with("https://") {
         return Some(cover.to_owned());
     }
-    let base = base_url?.trim_end_matches('/');
-    let path = cover.trim_start_matches('/');
-    Some(format!("{base}/{path}"))
+    Some(format!("{}/{cover}", base_url?.trim_end_matches('/')))
+}
+
+pub async fn load_games_metadata(
+    library: &marina_store_surrealdb::SurrealLibrary,
+    base_url: Option<&str>,
+) -> Result<(Vec<GameCardData>, Vec<CoverSource>), LibraryError> {
+    let items = library.list(100).await?;
+    Ok(items
+        .into_iter()
+        .map(|item| {
+            let source = source_for(item.cover.as_deref(), base_url);
+            let card = GameCardData {
+                title: item.title.into(),
+                platform: item
+                    .platform_slug
+                    .unwrap_or_else(|| "Unknown".into())
+                    .into(),
+                cover: Image::default(),
+                cover_ratio: 1.0,
+            };
+            (card, source)
+        })
+        .unzip())
 }

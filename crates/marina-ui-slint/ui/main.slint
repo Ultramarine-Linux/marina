@@ -5,6 +5,9 @@ import { Shelf } from "shelf.slint";
 export component MainWindow inherits Window {
     in property <[GameCardData]> games;
     in property <length> shelf-height;
+    out property <length> shelf-scroll-x: shelf.viewport-x;
+    out property <length> shelf-viewport-width: shelf.viewport-width;
+    callback viewport-changed;
 
     width: 1280px;
     height: 720px;
@@ -15,10 +18,11 @@ export component MainWindow inherits Window {
         padding: Tokens.spacing-2xl;
         spacing: Tokens.spacing-2xl;
 
-        Shelf {
+        shelf := Shelf {
             title: "Library";
             games: root.games;
             content-height: root.shelf-height;
+            viewport-changed => { root.viewport-changed(); }
         }
     }
 }
