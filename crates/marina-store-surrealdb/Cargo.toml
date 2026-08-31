@@ -7,10 +7,12 @@ license.workspace = true
 [dependencies]
 chrono.workspace = true
 surrealdb = { version = "3.2.4", features = ["kv-mem", "kv-surrealkv"] }
+surrealkit = "0.7"
 marina-core.workspace = true
 marina-library.workspace = true
 serde.workspace = true
 thiserror.workspace = true
+tracing.workspace = true
 
 [dev-dependencies]
 tokio.workspace = true

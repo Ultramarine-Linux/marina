@@ -14,6 +14,9 @@ pub enum SurrealLibraryError {
     #[error("SurrealDB operation failed: {0}")]
     Database(#[from] surrealdb::Error),
 
+    #[error("SurrealDB schema synchronization failed: {0}")]
+    Schema(#[from] surrealkit::anyhow::Error),
+
     #[error("stored library item has an invalid id: {0}")]
     InvalidItemId(String),
 
@@ -67,5 +70,10 @@ impl SurrealLibrary {
 
 async fn select_database(db: &Surreal<Any>) -> Result<(), SurrealLibraryError> {
     db.use_ns("marina").use_db("library").await?;
+    tracing::info!("selected database, running schema sync");
+    surrealkit::Sync::embedded(crate::embedded_schema::SCHEMA)
+        .prune(false)
+        .run(db)
+        .await?;
     Ok(())
 }

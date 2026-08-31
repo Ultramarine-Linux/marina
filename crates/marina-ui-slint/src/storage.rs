@@ -7,6 +7,9 @@ use crate::config::Config;
 
 /// Connects to the configured SurrealDB endpoint, authenticating as root for
 /// remote (`ws://`/`wss://`) endpoints.
+// by default we should only be using the SurrealKV backend,
+// but we may want to connect to a remote endpoint instead for
+// debugging
 #[instrument(skip_all, fields(uri = %config.storage_uri))]
 pub async fn connect(config: &Config) -> Result<SurrealLibrary, SurrealLibraryError> {
     if config.storage_uri.starts_with("ws://") || config.storage_uri.starts_with("wss://") {

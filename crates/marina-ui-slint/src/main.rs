@@ -6,6 +6,7 @@ use tracing_subscriber::EnvFilter;
 
 slint::include_modules!();
 
+mod app;
 mod cache;
 mod config;
 mod covers;
@@ -19,13 +20,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .init();
     dotenvy::dotenv().ok();
 
-    let config = config::Config::from_env();
-
-    info!(uri = %config.storage_uri, "connecting to library store");
-    let library = storage::connect(&config).await?;
+    let state = app::AppState::initialize().await?;
 
     info!("loading game metadata");
-    let (games, cover_sources) = shelf::load_games(&library, config.romm_url.as_deref()).await?;
+    let (games, cover_sources) =
+        shelf::load_games(&state.library, state.config.romm_url.as_deref()).await?;
     info!(count = games.len(), "library loaded");
 
     let window = MainWindow::new()?;
@@ -34,7 +33,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Covers stream in asynchronously (disk cache first, then network);
     // cards show skeletons until then.
-    let loader = covers::spawn_loader(&window, reqwest::Client::new(), cover_sources);
+    let loader = covers::spawn_loader(&window, state.http.clone(), cover_sources);
     let loader_for_scroll = loader.clone();
     let weak_window = window.as_weak();
     window.on_viewport_changed(move || {

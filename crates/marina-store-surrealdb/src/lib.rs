@@ -4,6 +4,8 @@
 //! ephemeral test database or `surrealkv://./marina.db` for a local persistent
 //! database.
 
+surrealkit::embed_schema!();
+
 mod connection;
 mod library;
 mod platform;

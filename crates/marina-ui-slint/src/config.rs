@@ -4,6 +4,7 @@ use std::env;
 
 use tracing::warn;
 
+#[derive(Debug)]
 pub struct Config {
     pub storage_uri: String,
     pub storage_username: String,
