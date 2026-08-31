@@ -1,0 +1,8 @@
+[package]
+name = "marina-ui-slint"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+slint = "1.12.1"

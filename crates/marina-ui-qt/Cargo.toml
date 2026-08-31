@@ -1,0 +1,8 @@
+[package]
+name = "marina-ui-qt"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+qtbridge = "0.2.0"

@@ -2,13 +2,20 @@
 resolver = "3"
 members = [
     "crates/marina-core", "crates/marina-library",
-    "crates/marina-romm", "crates/marina-store-surrealdb", "crates/marina-test",
+    "crates/marina-romm", "crates/marina-store-surrealdb", "crates/marina-test", "crates/marina-ui-qt", "crates/marina-ui-slint",
 ]
 
 [workspace.package]
 version = "0.1.0"
 edition = "2024"
 license = "Apache-2.0"
+
+[profile.release]
+opt-level = "z"          # Optimization level (0-3, s, z)
+lto = true             # Link-Time Optimization
+codegen-units = 1      # Better optimization, slower compile
+panic = "abort"        # Smaller binary, no unwinding
+strip = true           # Strip debug symbols
 
 [workspace.dependencies]
 base64 = "0.23"
