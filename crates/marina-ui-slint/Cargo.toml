@@ -16,6 +16,6 @@ marina-core.workspace = true
 marina-library.workspace = true
 marina-store-surrealdb.workspace = true
 reqwest.workspace = true
-tokio.workspace = true
+tokio = { workspace = true, features = ["fs"] }
 tracing.workspace = true
 tracing-subscriber.workspace = true
