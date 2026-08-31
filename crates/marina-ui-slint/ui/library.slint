@@ -1,6 +1,8 @@
+import { ListView } from "std-widgets.slint";
 import { Tokens } from "slintcn/theme/tokens.slint";
 import { Button, ButtonVariant, ButtonSize } from "slintcn/components/button.slint";
 import { Input } from "slintcn/components/input.slint";
+import { Skeleton } from "slintcn/components/skeleton.slint";
 import { Text as Typography } from "slintcn/components/text.slint";
 import { TextVariant, TextTone } from "slintcn/components/text.slint";
 import { PlatformCard, PlatformCardData } from "platform-card.slint";
@@ -17,6 +19,7 @@ export component LibraryPage inherits Rectangle {
     in-out property <string> selected-platform;
     in-out property <string> selected-platform-name;
 
+    in property <bool> initial-loading: false;
     in-out property <bool> loading: false;
     in-out property <bool> details-loading: false;
 
@@ -70,30 +73,29 @@ export component LibraryPage inherits Rectangle {
             background: Tokens.color-border-hairline;
         }
 
-        Flickable {
-            viewport-width: grid.preferred-width;
-            viewport-height: grid.preferred-height;
+        if root.initial-loading: HorizontalLayout {
+            spacing: Tokens.spacing-md;
+            vertical-stretch: 1;
+            for _ in 5: Skeleton {
+                width: (parent.width - 4 * Tokens.spacing-md) / 5;
+                height: 158px;
+                radius: Tokens.radius-lg;
+            }
+        }
 
-            grid := GridLayout {
-                width: max(parent.width, 1px);
+        if !root.initial-loading: ListView {
+            vertical-stretch: 1;
+            for platform[i] in root.platforms: PlatformCard {
+                width: parent.width;
+                platform: platform;
+                clicked => {
+                    root.selected-platform = platform.slug;
+                    root.selected-platform-name = platform.name;
 
-                spacing: Tokens.spacing-md;
-                padding-bottom: Tokens.spacing-lg;
-
-                for platform[i] in root.platforms: PlatformCard {
-                    col: Math.mod(i, 5);
-                    row: i / 5;
-                    width: (parent.width - 4 * Tokens.spacing-md) / 5;
-                    platform: platform;
-                    clicked => {
-                        root.selected-platform = platform.slug;
-                        root.selected-platform-name = platform.name;
-
-                        root.page = 1;
-                        root.loading = true;
-                        root.details-loading = true;
-                        root.platform-query(platform.slug);
-                    }
+                    root.page = 1;
+                    root.loading = true;
+                    root.details-loading = true;
+                    root.platform-query(platform.slug);
                 }
             }
         }
@@ -130,7 +132,24 @@ export component LibraryPage inherits Rectangle {
             background: Tokens.color-border-hairline;
         }
 
-        PlatformGameList {
+        if root.loading: Rectangle {
+            vertical-stretch: 1;
+            HorizontalLayout {
+                spacing: Tokens.spacing-lg;
+                Skeleton {
+                    width: 34%;
+                    height: 400px;
+                    radius: Tokens.radius-md;
+                }
+                Skeleton {
+                    horizontal-stretch: 1;
+                    height: 400px;
+                    radius: Tokens.radius-md;
+                }
+            }
+        }
+
+        if !root.loading: PlatformGameList {
             games: root.games;
             details: root.details;
             details-loading <=> root.details-loading;

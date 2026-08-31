@@ -24,6 +24,7 @@ async fn main() -> Result<(), slint::PlatformError> {
     let window = MainWindow::new()?;
     window.set_games(ModelRc::from(std::rc::Rc::new(VecModel::from(Vec::new()))));
     window.set_platform_games(ModelRc::from(std::rc::Rc::new(VecModel::from(Vec::new()))));
+    window.set_selected_game(empty_game_card());
     window.set_game_details(empty_preview_details());
     window.set_shelf_height(shelf::shelf_height());
     window.set_loading(true);
@@ -91,6 +92,52 @@ async fn main() -> Result<(), slint::PlatformError> {
                 }
                 Ok(None) | Err(_) => {
                     let _ = window.upgrade_in_event_loop(|window| {
+                        window.set_game_details_loading(false);
+                    });
+                }
+            }
+        });
+    });
+
+    let open_state = library_state.clone();
+    let open_window = window.as_weak();
+    window.on_game_opened(move |id| {
+        let Some(window) = open_window.upgrade() else {
+            return;
+        };
+        let games = window.get_games();
+        let Some(game) = (0..games.row_count())
+            .filter_map(|index| games.row_data(index))
+            .find(|game| game.id == id)
+        else {
+            return;
+        };
+        window.set_selected_game(game);
+        window.set_game_page_visible(true);
+        window.set_game_details_loading(true);
+
+        let state = open_state
+            .lock()
+            .expect("library state lock poisoned")
+            .clone();
+        let Some(state) = state else {
+            return;
+        };
+        let Ok(item_id) = LibraryItemId::parse(id.as_str()).ok_or(()) else {
+            return;
+        };
+        let detail_window = window.as_weak();
+        tokio::spawn(async move {
+            match state.library.get(&item_id).await {
+                Ok(Some(item)) => {
+                    let details = preview_details(item);
+                    let _ = detail_window.upgrade_in_event_loop(move |window| {
+                        window.set_game_details(details);
+                        window.set_game_details_loading(false);
+                    });
+                }
+                Ok(None) | Err(_) => {
+                    let _ = detail_window.upgrade_in_event_loop(|window| {
                         window.set_game_details_loading(false);
                     });
                 }
@@ -206,6 +253,16 @@ async fn main() -> Result<(), slint::PlatformError> {
     });
 
     window.run()
+}
+
+fn empty_game_card() -> GameCardData {
+    GameCardData {
+        id: SharedString::default(),
+        title: SharedString::default(),
+        platform: SharedString::default(),
+        cover: Image::default(),
+        cover_ratio: 1.0,
+    }
 }
 
 fn game_cards(metadata: Vec<shelf::GameMetadata>) -> Vec<GameCardData> {

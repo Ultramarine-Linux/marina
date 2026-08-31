@@ -1,0 +1,140 @@
+import { Tokens } from "slintcn/theme/tokens.slint";
+import { Button, ButtonVariant, ButtonSize } from "slintcn/components/button.slint";
+import { Skeleton } from "slintcn/components/skeleton.slint";
+import { Text as Typography } from "slintcn/components/text.slint";
+import { TextVariant, TextTone } from "slintcn/components/text.slint";
+import { GameCardData } from "card.slint";
+import { PreviewDetailsData } from "preview-details.slint";
+
+export component GamePage inherits Rectangle {
+    in property <GameCardData> game;
+    in property <PreviewDetailsData> details;
+    in property <bool> loading: false;
+    callback back;
+    callback play;
+
+    background: Tokens.color-background;
+
+    VerticalLayout {
+        padding: Tokens.spacing-xl;
+        spacing: Tokens.spacing-lg;
+
+        HorizontalLayout {
+            height: 40px;
+            spacing: Tokens.spacing-md;
+
+            Button {
+                width: 40px;
+                height: 36px;
+                variant: ButtonVariant.ghost;
+                size: ButtonSize.icon;
+                text: "←";
+                clicked => { root.back(); }
+            }
+
+            Typography {
+                text: root.details.title != "" ? root.details.title : root.game.title;
+                variant: TextVariant.headline;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+        }
+
+        Rectangle {
+            height: 1px;
+            background: Tokens.color-border-hairline;
+        }
+
+        HorizontalLayout {
+            spacing: Tokens.spacing-xl;
+            vertical-stretch: 1;
+
+            Rectangle {
+                width: 300px;
+                background: Tokens.color-surface-1;
+                border-radius: Tokens.radius-lg;
+                clip: true;
+
+                if root.game.cover.width == 0: Skeleton {
+                    width: parent.width;
+                    height: 420px;
+                    radius: Tokens.radius-lg;
+                }
+                if root.game.cover.width > 0: Image {
+                    width: parent.width;
+                    height: 420px;
+                    source: root.game.cover;
+                    image-fit: cover;
+                }
+            }
+
+            Rectangle {
+                horizontal-stretch: 1;
+                background: Tokens.color-surface-1;
+                border-radius: Tokens.radius-lg;
+
+                VerticalLayout {
+                    padding: Tokens.spacing-xl;
+                    spacing: Tokens.spacing-lg;
+
+                    HorizontalLayout {
+                        height: 40px;
+
+                        Typography {
+                            text: root.game.platform;
+                            variant: TextVariant.body-lg;
+                            tone: TextTone.muted;
+                            vertical-alignment: center;
+                        }
+
+                        Rectangle { horizontal-stretch: 1; }
+
+                        Button {
+                            width: 120px;
+                            variant: ButtonVariant.default;
+                            text: "▶  Play";
+                            clicked => { root.play(); }
+                        }
+                    }
+
+                    Typography {
+                        text: root.loading
+                            ? "Loading details..."
+                            : (root.details.summary != ""
+                                ? root.details.summary
+                                : "No description available for this game yet.");
+                        variant: TextVariant.body-lg;
+                        tone: TextTone.muted;
+                        wrap: word-wrap;
+                    }
+
+                    VerticalLayout {
+                        spacing: Tokens.spacing-sm;
+
+                        if root.details.released-at != "": Typography {
+                            text: "Released: " + root.details.released-at;
+                            variant: TextVariant.body;
+                        }
+                        if root.details.languages != "": Typography {
+                            text: "Languages: " + root.details.languages;
+                            variant: TextVariant.body;
+                            tone: TextTone.muted;
+                        }
+                        if root.details.regions != "": Typography {
+                            text: "Regions: " + root.details.regions;
+                            variant: TextVariant.body;
+                            tone: TextTone.muted;
+                        }
+                        if root.details.tags != "": Typography {
+                            text: "Tags: " + root.details.tags;
+                            variant: TextVariant.body;
+                            tone: TextTone.muted;
+                        }
+                    }
+
+                    Rectangle { vertical-stretch: 1; }
+                }
+            }
+        }
+    }
+}

@@ -8,11 +8,14 @@ import { Shelf, ShelfSkeleton } from "shelf.slint";
 import { LibraryPage } from "library.slint";
 import { PlatformCardData } from "platform-card.slint";
 import { PreviewDetailsData } from "preview-details.slint";
+import { GamePage } from "game-page.slint";
 
 export component MainWindow inherits Window {
     in property <[GameCardData]> games;
     in property <[PlatformCardData]> platforms;
     in property <[GameCardData]> platform-games;
+    in-out property <GameCardData> selected-game;
+    in-out property <bool> game-page-visible: false;
     in-out property <PreviewDetailsData> game-details;
     in-out property <bool> game-details-loading: false;
     in-out property <bool> library-loading: false;
@@ -23,8 +26,11 @@ export component MainWindow inherits Window {
     callback cover-context-changed(int);
     callback platform-query(string);
     callback game-selected(string, int);
+    callback game-opened(string);
 
     in-out property <int> active-tab: 0;
+    private property <int> content-tab: 0;
+    private property <bool> switching-tabs: false;
     in-out property <string> search-query;
     property <[NavigationItem]> navigation-items: [
         { label: "Home" },
@@ -38,7 +44,17 @@ export component MainWindow inherits Window {
 
 
     changed active-tab => {
+        root.switching-tabs = true;
         root.cover-context-changed(root.active-tab);
+    }
+
+    Timer {
+        interval: 1ms;
+        running: root.switching-tabs;
+        triggered => {
+            root.content-tab = root.active-tab;
+            root.switching-tabs = false;
+        }
     }
 
     AppShell {
@@ -47,28 +63,49 @@ export component MainWindow inherits Window {
         search-query <=> root.search-query;
         navigate(index) => { root.active-tab = index; }
 
-        if root.active-tab == 0 && root.loading: ShelfSkeleton {
+        if root.switching-tabs: Rectangle {
+            background: transparent;
+
+            Typography {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                text: "Loading...";
+                variant: TextVariant.body-lg;
+                tone: TextTone.muted;
+            }
+        }
+
+        if !root.switching-tabs && root.game-page-visible: GamePage {
+            game: root.selected-game;
+            details: root.game-details;
+            loading: root.game-details-loading;
+            back => { root.game-page-visible = false; }
+        }
+
+        if !root.switching-tabs && !root.game-page-visible && root.content-tab == 0 && root.loading: ShelfSkeleton {
             content-height: root.shelf-height;
         }
 
-        if root.active-tab == 0 && !root.loading: shelf := Shelf {
+        if !root.switching-tabs && !root.game-page-visible && root.content-tab == 0 && !root.loading: shelf := Shelf {
             title: "Library";
             games: root.games;
             content-height: root.shelf-height;
             viewport-changed(x, width) => { root.viewport-changed(x, width); }
+            game-opened(id) => { root.game-opened(id); }
         }
 
-        if root.active-tab == 1: LibraryPage {
+        if !root.switching-tabs && !root.game-page-visible && root.content-tab == 1: LibraryPage {
             platforms: root.platforms;
             games: root.platform-games;
             details: root.game-details;
             details-loading <=> root.game-details-loading;
+            initial-loading: root.loading;
             loading <=> root.library-loading;
             platform-query(slug) => { root.platform-query(slug); }
             game-selected(id, index) => { root.game-selected(id, index); }
         }
 
-        if root.active-tab == 2: Rectangle {
+        if !root.switching-tabs && !root.game-page-visible && root.content-tab == 2: Rectangle {
             background: transparent;
 
             Typography {

@@ -13,6 +13,7 @@ export struct GameCardData {
 }
 
 export component GameCard inherits Card {
+    callback clicked;
     in property <string> title;
     in property <string> platform;
     in property <image> cover-image;
@@ -54,6 +55,11 @@ export component GameCard inherits Card {
         width: root.cover-width;
         height: root.cover-height;
         image-fit: cover;
+    }
+
+    game-touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
     }
 
     Rectangle {

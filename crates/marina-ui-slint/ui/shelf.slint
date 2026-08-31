@@ -44,6 +44,7 @@ export component Shelf inherits Rectangle {
     in property <[GameCardData]> games;
     in property <length> content-height;
     callback viewport-changed(length, length);
+    callback game-opened(string);
 
     background: transparent;
 
@@ -90,6 +91,7 @@ export component Shelf inherits Rectangle {
                             platform: game.platform;
                             cover-image: game.cover;
                             cover-aspect-ratio: game.cover_ratio;
+                            clicked => { root.game-opened(game.id); }
                         }
                     }
                 }
