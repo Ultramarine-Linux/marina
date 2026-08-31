@@ -1,68 +1,90 @@
-use futures_util::future;
 use marina_library::{LibraryError, LibraryRead};
 use marina_store_surrealdb::SurrealLibrary;
+use slint::{ComponentHandle, Model};
 use tracing::{debug, instrument, warn};
 
-use crate::GameCardData;
+use crate::{GameCardData, MainWindow};
 
 use super::card;
 
-const CARD_BASE_WIDTH: f32 = 180.0;
 const CARD_METADATA_HEIGHT: f32 = 58.0;
-// Keep in sync with max-cover-height in card.slint.
-const MAX_COVER_HEIGHT: f32 = 240.0;
+// Uniform cover height. Keep in sync with cover-height-scale in card.slint.
+const COVER_HEIGHT: f32 = 200.0;
 const SHELF_VERTICAL_PADDING: f32 = 20.0;
 const SCROLLBAR_PADDING: f32 = 8.0;
 
+/// Loads game metadata with square placeholder covers. Returns the cards and
+/// each card's resolved cover URL for asynchronous fetching.
 #[instrument(skip_all)]
 pub async fn load_games(
     library: &SurrealLibrary,
-    http: &reqwest::Client,
     romm_base_url: Option<&str>,
-) -> Result<Vec<GameCardData>, LibraryError> {
+) -> Result<(Vec<GameCardData>, Vec<Option<String>>), LibraryError> {
     let items = library.list(100).await?;
     debug!(count = items.len(), "fetched library items");
 
-    // Split metadata from cover URLs so we can fetch covers concurrently.
     let (cards, urls): (Vec<_>, Vec<_>) = items.into_iter().map(card::from_library_item).unzip();
-
-    // Resolve relative cover paths against the RomM base URL.
-    let resolved_urls: Vec<Option<String>> = urls
+    let urls = urls
         .into_iter()
         .map(|url| resolve_cover_url(url.as_deref(), romm_base_url))
         .collect();
 
-    // Fetch all cover URLs concurrently. Bytes are Send; Image creation happens
-    // below on the main thread to avoid slint::Image's !Send bound.
-    let fetches = resolved_urls.iter().map(|url| async move {
-        let url = url.as_deref()?;
-        debug!(url, "fetching cover");
-        match http.get(url).send().await.ok() {
-            Some(resp) => resp.bytes().await.ok(),
-            None => {
-                warn!(url, "cover fetch failed");
-                None
-            }
-        }
-    });
-    let cover_bytes = future::join_all(fetches).await;
+    Ok((cards, urls))
+}
 
-    // Decode covers on the main thread and merge with card metadata.
-    let games = cards
-        .into_iter()
-        .zip(cover_bytes)
-        .map(|(mut card, bytes)| {
-            if let Some((image, ratio)) = bytes.as_deref().and_then(card::decode_cover) {
-                card.cover = image;
-                card.cover_ratio = ratio;
-            } else {
-                warn!(title = %card.title, "no cover loaded, using placeholder");
-            }
-            card
-        })
-        .collect();
+/// Spawns a background fetch per cover and patches the corresponding model
+/// row as each one arrives, so the UI shows immediately with skeletons and
+/// covers stream in progressively.
+///
+/// Bytes are fetched on tokio workers; the `slint::Image` is created on the
+/// UI thread (it is `!Send`) via `upgrade_in_event_loop`.
+pub fn spawn_cover_loader(window: &MainWindow, http: reqwest::Client, urls: Vec<Option<String>>) {
+    let weak = window.as_weak();
 
-    Ok(games)
+    for (index, url) in urls.into_iter().enumerate() {
+        let Some(url) = url else { continue };
+        let http = http.clone();
+        let weak = weak.clone();
+
+        tokio::spawn(async move {
+            debug!(url, "fetching cover");
+            let bytes = match http.get(&url).send().await {
+                Ok(response) => match response.bytes().await {
+                    Ok(bytes) => bytes,
+                    Err(error) => {
+                        warn!(url, %error, "cover read failed");
+                        return;
+                    }
+                },
+                Err(error) => {
+                    warn!(url, %error, "cover fetch failed");
+                    return;
+                }
+            };
+
+            let result = weak.upgrade_in_event_loop(move |window| {
+                let Some((image, ratio)) = card::decode_cover(&bytes) else {
+                    warn!("cover decode failed, keeping placeholder");
+                    return;
+                };
+                let games = window.get_games();
+                if let Some(mut row) = games.row_data(index) {
+                    row.cover = image;
+                    row.cover_ratio = ratio;
+                    games.set_row_data(index, row);
+                }
+            });
+            if result.is_err() {
+                debug!("event loop gone, dropping cover");
+            }
+        });
+    }
+}
+
+/// Fixed shelf viewport height. Covers all render at the same height, so
+/// the row height is constant and never shifts as covers stream in.
+pub fn shelf_height() -> f32 {
+    COVER_HEIGHT + CARD_METADATA_HEIGHT + SHELF_VERTICAL_PADDING + SCROLLBAR_PADDING
 }
 
 fn resolve_cover_url(cover: Option<&str>, base_url: Option<&str>) -> Option<String> {
@@ -74,21 +96,4 @@ fn resolve_cover_url(cover: Option<&str>, base_url: Option<&str>) -> Option<Stri
     let base = base.trim_end_matches('/');
     let path = cover.trim_start_matches('/');
     Some(format!("{base}/{path}"))
-}
-
-/// Height of the tallest card in the shelf, used to size the row viewport.
-/// Cards keep their natural heights and are bottom-aligned within the row.
-/// Covers are height-capped, mirroring the clamp in card.slint.
-fn max_card_height(games: &[GameCardData]) -> f32 {
-    games
-        .iter()
-        .map(|game| {
-            let cover_height = (CARD_BASE_WIDTH / game.cover_ratio.max(0.01)).min(MAX_COVER_HEIGHT);
-            cover_height + CARD_METADATA_HEIGHT
-        })
-        .fold(CARD_BASE_WIDTH + CARD_METADATA_HEIGHT, f32::max)
-}
-
-pub fn height_for_games(games: &[GameCardData]) -> f32 {
-    max_card_height(games) + SHELF_VERTICAL_PADDING + SCROLLBAR_PADDING
 }

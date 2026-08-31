@@ -18,28 +18,26 @@ export component GameCard inherits Card {
     // Derived from the cover image's intrinsic dimensions by the Rust loader.
     // Falls back to 1:1 square until a cover is loaded.
     in property <float> cover-aspect-ratio: 1.0;
-    // Covers at or below the height cap render at this width.
-    in property <length> base-width: 180px;
-    // Tall (portrait) covers clamp to this height and shrink in width
-    // instead, so no card grows unboundedly tall.
-    // Keep in sync with MAX_COVER_HEIGHT in shelf.rs.
-    in property <length> max-cover-height: 240px;
+    // Uniform cover height: every cover scales to this and varies in width
+    // instead. Wide covers (US SNES, JP GBA) get wide cards — cheap on a
+    // horizontal shelf — while tall covers (JP SFC) stay bounded.
+    // Keep in sync with COVER_HEIGHT in shelf.rs.
+    in property <length> cover-height-scale: 200px;
 
-    // Height-capped cover box at the cover's natural aspect ratio.
-    private property <length> cover-height:
-        min(root.base-width / root.cover-aspect-ratio, root.max-cover-height);
-    private property <length> cover-width:
-        root.cover-height * root.cover-aspect-ratio;
+    // Extreme ratios are clamped so a stray banner or scan can't blow the
+    // row apart; image-fit: cover crops the overflow instead.
+    private property <float> clamped-ratio:
+        min(max(root.cover-aspect-ratio, 0.4), 2.0);
+    private property <length> cover-height: root.cover-height-scale;
+    private property <length> cover-width: root.cover-height * root.clamped-ratio;
 
     card-padding: CardPadding.none;
     card-radius: CardRadius.lg;
     variant: CardVariant.raised;
 
-    // Card width follows the cover, so wide covers make wide cards and
-    // clamped portrait covers make narrow ones.
+    // Card width follows the cover: narrow for tall JP boxart, wide for
+    // landscape covers, square for placeholders.
     width: root.cover-width;
-    // Natural height: the cover box plus the label panel. The Shelf
-    // bottom-aligns whole cards, so there is no internal gap.
     height: root.cover-height + 58px;
     clip: true;
 

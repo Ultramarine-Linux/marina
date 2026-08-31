@@ -12,7 +12,6 @@ slint = "1.12.1"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "bmp"] }
 
 dotenvy.workspace = true
-futures-util.workspace = true
 marina-core.workspace = true
 marina-library.workspace = true
 marina-store-surrealdb.workspace = true

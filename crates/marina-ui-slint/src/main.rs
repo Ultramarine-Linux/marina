@@ -28,16 +28,17 @@ async fn main() -> Result<(), Box<dyn Error>> {
         tracing::warn!("ROMM_URL not set — relative cover paths will not resolve");
     }
 
-    info!("loading games and covers");
-    let http = reqwest::Client::new();
-    let games = ui::shelf::load_games(&library, &http, romm_url.as_deref()).await?;
+    info!("loading game metadata");
+    let (games, cover_urls) = ui::shelf::load_games(&library, romm_url.as_deref()).await?;
     info!(count = games.len(), "library loaded");
-
-    let shelf_height = ui::shelf::height_for_games(&games);
 
     let window = MainWindow::new()?;
     window.set_games(ModelRc::from(std::rc::Rc::new(VecModel::from(games))));
-    window.set_shelf_height(shelf_height);
+    window.set_shelf_height(ui::shelf::shelf_height());
+
+    // Covers stream in asynchronously; cards show skeletons until then.
+    ui::shelf::spawn_cover_loader(&window, reqwest::Client::new(), cover_urls);
+
     window.run()?;
 
     Ok(())

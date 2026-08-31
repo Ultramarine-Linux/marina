@@ -4354,7 +4354,6 @@ name = "marina-ui-slint"
 version = "0.1.0"
 dependencies = [
  "dotenvy",
- "futures-util",
  "image",
  "marina-core",
  "marina-library",
