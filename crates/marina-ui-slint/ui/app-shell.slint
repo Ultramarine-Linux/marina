@@ -9,6 +9,10 @@ import { TextVariant, TextTone } from "slintcn/components/text.slint";
 // separate from shell navigation state.
 export component AppShell inherits Rectangle {
     in property <[NavigationItem]> navigation-items;
+    in property <string> profile-name: "User";
+    in property <string> profile-username: "user";
+    in property <string> profile-initials: "U";
+    in property <image> profile-image;
     in-out property <int> active-tab: 0;
     in-out property <string> search-query;
     callback navigate(int);
@@ -34,7 +38,8 @@ export component AppShell inherits Rectangle {
                     alignment: start;
 
                     Avatar {
-                        fallback: "C";
+                        source: root.profile-image;
+                        fallback: root.profile-initials;
                         size: 36px;
                     }
 
@@ -42,13 +47,13 @@ export component AppShell inherits Rectangle {
                         alignment: center;
 
                         Typography {
-                            text: "Cappy";
+                            text: root.profile-name;
                             variant: TextVariant.body;
                             tone: TextTone.default;
                         }
 
                         Typography {
-                            text: "Profile";
+                            text: root.profile-username;
                             variant: TextVariant.caption;
                             tone: TextTone.muted;
                         }

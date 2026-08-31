@@ -21,7 +21,25 @@ async fn main() -> Result<(), slint::PlatformError> {
         .init();
     dotenvy::dotenv().ok();
 
+    let (username, display_name, initials) = profile_identity();
     let window = MainWindow::new()?;
+    window.set_profile_name(SharedString::from(display_name));
+    window.set_profile_username(SharedString::from(username.clone()));
+    window.set_profile_initials(SharedString::from(initials));
+    window.set_profile_image(Image::default());
+
+    let profile_window = window.as_weak();
+    tokio::spawn(async move {
+        let icon_path = format!("/var/lib/AccountsService/icons/{username}");
+        let Some(bytes) = tokio::fs::read(icon_path).await.ok() else {
+            return;
+        };
+        let _ = profile_window.upgrade_in_event_loop(move |window| {
+            if let Some((image, _)) = covers::decode(&bytes) {
+                window.set_profile_image(image);
+            }
+        });
+    });
     window.set_games(ModelRc::from(std::rc::Rc::new(VecModel::from(Vec::new()))));
     window.set_platform_games(ModelRc::from(std::rc::Rc::new(VecModel::from(Vec::new()))));
     window.set_selected_game(empty_game_card());
@@ -253,6 +271,46 @@ async fn main() -> Result<(), slint::PlatformError> {
     });
 
     window.run()
+}
+
+fn profile_identity() -> (String, String, String) {
+    let username = std::env::var("USER").unwrap_or_else(|_| "user".into());
+    let gecos = std::fs::read_to_string("/etc/passwd")
+        .ok()
+        .and_then(|passwd| {
+            passwd.lines().find_map(|line| {
+                let fields: Vec<_> = line.split(':').collect();
+                if fields.first().copied() != Some(username.as_str()) {
+                    return None;
+                }
+                fields
+                    .get(4)
+                    .and_then(|gecos| gecos.split(',').next())
+                    .map(str::trim)
+                    .filter(|name| !name.is_empty())
+                    .map(str::to_owned)
+            })
+        });
+    let display_name = gecos.unwrap_or_else(|| username.clone());
+    let initials = profile_initials(&display_name);
+    (username, display_name, initials)
+}
+
+fn profile_initials(name: &str) -> String {
+    let initials: String = name
+        .split_whitespace()
+        .filter_map(|word| word.chars().next())
+        .take(2)
+        .collect();
+    if initials.is_empty() {
+        name.chars()
+            .next()
+            .unwrap_or('U')
+            .to_uppercase()
+            .to_string()
+    } else {
+        initials.to_uppercase()
+    }
 }
 
 fn empty_game_card() -> GameCardData {
