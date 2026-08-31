@@ -1,28 +1,51 @@
 import { Tokens } from "slintcn/theme/tokens.slint";
+import { Text as Typography } from "slintcn/components/text.slint";
+import { TextVariant, TextTone } from "slintcn/components/text.slint";
+import { NavigationItem } from "slintcn/components/navigation-menu.slint";
+import { AppShell } from "app-shell.slint";
 import { GameCardData } from "card.slint";
 import { Shelf } from "shelf.slint";
 
 export component MainWindow inherits Window {
     in property <[GameCardData]> games;
     in property <length> shelf-height;
-    out property <length> shelf-scroll-x: shelf.viewport-x;
-    out property <length> shelf-viewport-width: shelf.viewport-width;
-    callback viewport-changed;
+    callback viewport-changed(length, length);
+
+    in-out property <int> active-tab: 0;
+    in-out property <string> search-query;
+    property <[NavigationItem]> navigation-items: [
+        { label: "Home" },
+        { label: "Library" },
+        { label: "Collections" },
+    ];
 
     width: 1280px;
     height: 720px;
     title: "Marina";
-    background: Tokens.color-background;
 
-    VerticalLayout {
-        padding: Tokens.spacing-2xl;
-        spacing: Tokens.spacing-2xl;
+    AppShell {
+        navigation-items: root.navigation-items;
+        active-tab <=> root.active-tab;
+        search-query <=> root.search-query;
+        navigate(index) => { root.active-tab = index; }
 
-        shelf := Shelf {
+        if root.active-tab == 0: shelf := Shelf {
             title: "Library";
             games: root.games;
             content-height: root.shelf-height;
-            viewport-changed => { root.viewport-changed(); }
+            viewport-changed(x, width) => { root.viewport-changed(x, width); }
+        }
+
+        if root.active-tab != 0: Rectangle {
+            background: transparent;
+
+            Typography {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                text: root.active-tab == 1 ? "Library is coming soon" : "Collections are coming soon";
+                variant: TextVariant.body-lg;
+                tone: TextTone.muted;
+            }
         }
     }
 }

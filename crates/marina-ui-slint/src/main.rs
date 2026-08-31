@@ -35,18 +35,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // cards show skeletons until then.
     let loader = covers::spawn_loader(&window, state.http.clone(), cover_sources);
     let loader_for_scroll = loader.clone();
-    let weak_window = window.as_weak();
-    window.on_viewport_changed(move || {
-        if let Some(window) = weak_window.upgrade() {
-            loader_for_scroll.borrow_mut().update(
-                window.get_shelf_scroll_x(),
-                window.get_shelf_viewport_width(),
-            );
-        }
+    window.on_viewport_changed(move |scroll_x, viewport_width| {
+        loader_for_scroll
+            .borrow_mut()
+            .update(scroll_x, viewport_width);
     });
-    loader
-        .borrow_mut()
-        .update(0.0, window.get_shelf_viewport_width());
 
     window.run()?;
 

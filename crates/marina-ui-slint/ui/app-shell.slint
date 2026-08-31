@@ -1,0 +1,71 @@
+import { Tokens } from "slintcn/theme/tokens.slint";
+import { Button, ButtonVariant, ButtonSize } from "slintcn/components/button.slint";
+import { Input } from "slintcn/components/input.slint";
+import { NavigationMenu, NavigationItem } from "slintcn/components/navigation-menu.slint";
+
+// Shared application chrome. Screens are supplied as children and are kept
+// separate from shell navigation state.
+export component AppShell inherits Rectangle {
+    in property <[NavigationItem]> navigation-items;
+    in-out property <int> active-tab: 0;
+    in-out property <string> search-query;
+    callback navigate(int);
+
+    background: Tokens.color-background;
+
+    VerticalLayout {
+        padding: Tokens.spacing-2xl;
+        spacing: Tokens.spacing-2xl;
+
+        // Equal-width regions keep the nav centered regardless of side controls.
+        HorizontalLayout {
+            height: 36px;
+            spacing: 0px;
+
+            Rectangle {
+                horizontal-stretch: 1;
+
+                Input {
+                    x: 0px;
+                    y: (parent.height - self.height) / 2;
+                    width: 260px;
+                    placeholder: "Search games...";
+                    text <=> root.search-query;
+                }
+            }
+
+            Rectangle {
+                horizontal-stretch: 1;
+
+                NavigationMenu {
+                    width: self.preferred-width;
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    items: root.navigation-items;
+                    active <=> root.active-tab;
+                    navigate(index) => {
+                        root.active-tab = index;
+                        root.navigate(index);
+                    }
+                }
+            }
+
+            Rectangle {
+                horizontal-stretch: 1;
+
+                Button {
+                    x: parent.width - 36px;
+                    y: 0px;
+                    width: 36px;
+                    height: 36px;
+                    variant: ButtonVariant.ghost;
+                    size: ButtonSize.icon;
+                    text: "⚙";
+                    // Settings screen will be wired here later.
+                }
+            }
+        }
+
+        @children
+    }
+}

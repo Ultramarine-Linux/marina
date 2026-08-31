@@ -1,0 +1,96 @@
+import { Tokens } from "../theme/tokens.slint";
+
+// Horizontal navigation strip — a list of items with an active highlight, like
+// a header nav. The active item is yours to drive (bind `active`); clicks fire
+// `navigate(index)`. Distinct from Tabs (Tabs owns its content; NavigationMenu
+// is just the nav surface — you switch screens / routes yourself).
+export struct NavigationItem { label: string }
+
+export component NavigationMenu inherits Rectangle {
+    // Items shown in the nav strip (left-to-right).
+    in property <[NavigationItem]> items;
+    // Index of the highlighted item; bound two-way so consumers drive routing.
+    in-out property <int> active: 0;
+    // Fired when an item is clicked; `active` is updated first.
+    callback navigate(int);
+
+    background: transparent;
+    preferred-width:  row.preferred-width;
+    preferred-height: row.preferred-height;
+    // Keyboard nav: ←/→ moves `active`, Enter / Space fires `navigate` on it.
+    forward-focus: nav-focus;
+    nav-focus := FocusScope {
+        key-pressed(event) => {
+            if (event.text == Key.LeftArrow) {
+                if (root.items.length > 0) {
+                    root.active = max(0, root.active - 1);
+                    root.navigate(root.active);
+                }
+                return accept;
+            }
+            if (event.text == Key.RightArrow) {
+                if (root.items.length > 0) {
+                    root.active = min(root.items.length - 1, root.active + 1);
+                    root.navigate(root.active);
+                }
+                return accept;
+            }
+            if (event.text == "\n" || event.text == " ") {
+                root.navigate(root.active);
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    row := HorizontalLayout {
+        spacing: 4px;
+        for it[i] in root.items: Rectangle {
+            height: 36px;
+            // Intrinsic width must live on the item itself: the label now sits
+            // inside `surface` (width: parent.width), so without this the item
+            // collapses to 0 in the horizontal row. 14px padding each side.
+            min-width: lab.preferred-width + 28px;
+
+            surface := Rectangle {
+                x: 0;
+                y: ta.pressed ? 1px : 0px;
+                width: parent.width;
+                height: parent.height;
+                border-radius: Tokens.radius-sm;
+                background: i == root.active
+                    ? Tokens.color-surface-2
+                    : (ta.has-hover ? Tokens.color-surface-1 : transparent);
+
+                HorizontalLayout {
+                    padding-left: 14px;
+                    padding-right: 14px;
+                    lab := Text {
+                        text: it.label;
+                        color: i == root.active
+                            ? Tokens.color-foreground
+                            : Tokens.color-muted-foreground;
+                        font-size: Tokens.typography-body-sm-size;
+                        font-weight: i == root.active
+                            ? Tokens.typography-weight-semibold
+                            : Tokens.typography-weight-medium;
+                        vertical-alignment: center;
+                    }
+                }
+
+                animate y, background {
+                    duration: Tokens.motion-fast;
+                    easing: Tokens.motion-easing-standard;
+                }
+            }
+
+            ta := TouchArea {
+                mouse-cursor: pointer;
+                clicked => {
+                    root.active = i;
+                    root.navigate(i);
+                }
+            }
+        }
+    }
+}

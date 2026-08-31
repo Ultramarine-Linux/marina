@@ -7,9 +7,7 @@ export component Shelf inherits Rectangle {
     in property <string> title;
     in property <[GameCardData]> games;
     in property <length> content-height;
-    out property <length> viewport-x: flick.viewport-x;
-    out property <length> viewport-width: flick.width;
-    callback viewport-changed;
+    callback viewport-changed(length, length);
 
     // The layout's intrinsic width — exact even with per-card widths varying
     // by cover aspect ratio.
@@ -34,7 +32,8 @@ export component Shelf inherits Rectangle {
             flick := Flickable {
                 width: parent.width;
                 height: parent.height;
-                changed viewport-x => { root.viewport-changed(); }
+                changed viewport-x => { root.viewport-changed(self.viewport-x, self.width); }
+                init => { root.viewport-changed(self.viewport-x, self.width); }
                 viewport-height: parent.height;
                 viewport-width: root.content-width;
 
