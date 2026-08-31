@@ -225,7 +225,7 @@ pub async fn load_games_metadata(
     library: &marina_store_surrealdb::SurrealLibrary,
     base_url: Option<&str>,
 ) -> Result<(Vec<GameCardData>, Vec<CoverSource>), LibraryError> {
-    let items = library.list(100).await?;
+    let items = library.list_cards(100).await?;
     Ok(items
         .into_iter()
         .map(|item| {
@@ -233,7 +233,7 @@ pub async fn load_games_metadata(
             let card = GameCardData {
                 title: item.title.into(),
                 platform: item
-                    .platform_slug
+                    .platform_name
                     .unwrap_or_else(|| "Unknown".into())
                     .into(),
                 cover: Image::default(),

@@ -7,7 +7,7 @@
 
 use std::error::Error;
 
-pub use marina_core::{ItemKind, LibraryItem, LibraryItemId, Platform};
+pub use marina_core::{ItemKind, LibraryCard, LibraryItem, LibraryItemId, Platform};
 use thiserror::Error as DeriveError;
 
 /// Parameters used when searching library entries.
@@ -91,6 +91,10 @@ pub trait LibraryRead: PlatformRead {
     async fn get(&self, id: &LibraryItemId) -> Result<Option<LibraryItem>, LibraryError>;
 
     async fn list(&self, limit: u32) -> Result<Vec<LibraryItem>, LibraryError>;
+
+    async fn list_cards(&self, limit: u32) -> Result<Vec<LibraryCard>, LibraryError>;
+
+    async fn search_cards(&self, query: SearchQuery) -> Result<Vec<LibraryCard>, LibraryError>;
 }
 
 #[allow(async_fn_in_trait)]
@@ -132,6 +136,17 @@ mod tests {
         }
 
         async fn list(&self, _limit: u32) -> Result<Vec<LibraryItem>, LibraryError> {
+            Ok(Vec::new())
+        }
+
+        async fn list_cards(&self, _limit: u32) -> Result<Vec<LibraryCard>, LibraryError> {
+            Ok(Vec::new())
+        }
+
+        async fn search_cards(
+            &self,
+            _query: SearchQuery,
+        ) -> Result<Vec<LibraryCard>, LibraryError> {
             Ok(Vec::new())
         }
     }

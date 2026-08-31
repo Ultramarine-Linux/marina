@@ -24,7 +24,10 @@ impl From<Rom> for marina_core::LibraryItem {
         let id = marina_core::LibraryItemId::from_provider("romm", "rom", &rom.id.to_string());
         let mut provider_ids = std::collections::HashMap::from([
             ("romm_id".to_owned(), rom.id.to_string()),
-            // ("platform".to_owned(), rom.platform.platform_slug.clone()),
+            (
+                "romm_platform_slug".to_owned(),
+                rom.platform.platform_slug.clone(),
+            ),
         ]);
         if let Some(slug) = &rom.slug {
             provider_ids.insert("romm_slug".to_owned(), slug.clone());
@@ -75,7 +78,8 @@ impl From<Rom> for marina_core::LibraryItem {
             id,
             title,
             kind: marina_core::ItemKind::Game,
-            platform_slug: Some(rom.platform.platform_slug.clone()),
+            // Marina uses RomM's filesystem slug as the stable platform/directory ID.
+            platform_slug: Some(rom.platform.platform_fs_slug.clone()),
             provider_ids,
             summary: rom.summary.clone(),
             alternative_names: rom.alternative_names.clone(),

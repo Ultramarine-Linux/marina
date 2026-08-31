@@ -47,11 +47,25 @@ pub enum ItemKind {
     App,
 }
 
+/// a minimal card of a library item, used for quick display in the UI
+/// without loading the full item details
+#[derive(Clone, Debug, Eq, PartialEq, Default)]
+pub struct LibraryCard {
+    pub id: LibraryItemId,
+    pub title: String,
+    pub kind: ItemKind,
+    /// full pretty name for platform, e.g. "PC (Steam)", "Game Boy Advance"
+    pub platform_name: Option<String>,
+    pub regions: Vec<String>,
+    pub cover: Option<String>,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Default)]
 pub struct LibraryItem {
     pub id: LibraryItemId,
     pub title: String,
     pub kind: ItemKind,
+    /// RomM's filesystem slug, used as Marina's platform/directory ID.
     pub platform_slug: Option<String>,
     // insert more stuff here like uh covers n shit idk
     pub provider_ids: HashMap<String, String>,

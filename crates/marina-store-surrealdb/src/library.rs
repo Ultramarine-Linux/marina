@@ -3,7 +3,8 @@ use std::collections::HashMap;
 use chrono::{DateTime, FixedOffset};
 use marina_core::{LibraryAsset, LibraryItemFile};
 use marina_library::{
-    ItemKind, LibraryError, LibraryItem, LibraryItemId, LibraryRead, LibraryWrite, SearchQuery,
+    ItemKind, LibraryCard, LibraryError, LibraryItem, LibraryItemId, LibraryRead, LibraryWrite,
+    SearchQuery,
 };
 use serde::{Deserialize, Serialize};
 use surrealdb::types::{RecordId, RecordIdKey, SurrealValue, Uuid as SurrealUuid};
@@ -37,6 +38,36 @@ pub(crate) struct StoredItem {
     pub(crate) updated_at: Option<String>,
     pub(crate) files: Option<Vec<StoredFile>>,
     pub(crate) assets: Option<Vec<StoredAsset>>,
+}
+
+#[derive(Debug, Serialize, Deserialize, SurrealValue)]
+pub(crate) struct StoredLibraryCard {
+    pub(crate) item_id: SurrealUuid,
+    pub(crate) title: String,
+    pub(crate) kind: String,
+    pub(crate) platform_slug: Option<String>,
+    pub(crate) platform_name: Option<String>,
+    pub(crate) regions: Option<Vec<String>>,
+    pub(crate) cover: Option<String>,
+}
+
+impl From<StoredLibraryCard> for LibraryCard {
+    fn from(value: StoredLibraryCard) -> Self {
+        Self {
+            id: LibraryItemId::from_uuid(value.item_id.into_inner()),
+            title: value.title,
+            kind: match value.kind.as_str() {
+                "app" => ItemKind::App,
+                _ => ItemKind::Game,
+            },
+            platform_name: value
+                .platform_name
+                .filter(|name| !name.trim().is_empty())
+                .or(value.platform_slug),
+            regions: value.regions.unwrap_or_default(),
+            cover: value.cover,
+        }
+    }
 }
 
 #[derive(Debug, Serialize, Deserialize, SurrealValue)]
@@ -217,6 +248,61 @@ impl LibraryRead for SurrealLibrary {
             .map(TryInto::try_into)
             .collect::<Result<Vec<_>, SurrealLibraryError>>()
             .map_err(LibraryError::backend)
+    }
+
+    async fn list_cards(&self, limit: u32) -> Result<Vec<LibraryCard>, LibraryError> {
+        let mut response = self
+            .db
+            .query(format!(
+                "SELECT item_id, title, kind, platform_slug, platform.name AS platform_name, regions, cover FROM {ITEMS_TABLE} LIMIT $limit"
+            ))
+            .bind(("limit", limit))
+            .await
+            .map_err(LibraryError::backend)?;
+        let cards: Vec<StoredLibraryCard> = response.take(0).map_err(LibraryError::backend)?;
+
+        Ok(cards.into_iter().map(Into::into).collect())
+    }
+
+    async fn search_cards(&self, query: SearchQuery) -> Result<Vec<LibraryCard>, LibraryError> {
+        let mut filters = Vec::new();
+        if query.text.is_some() {
+            filters.push("string::lowercase(title) CONTAINS $text");
+        }
+        if query.platform.is_some() {
+            filters.push("platform_slug = $platform");
+        }
+
+        let where_clause = if filters.is_empty() {
+            String::new()
+        } else {
+            format!(" WHERE {}", filters.join(" AND "))
+        };
+        let limit = query
+            .limit
+            .map(|limit| u32::try_from(limit).unwrap_or(u32::MAX))
+            .unwrap_or(100);
+        let offset = u32::try_from(query.offset).unwrap_or(u32::MAX);
+
+        let mut request = self
+            .db
+            .query(format!(
+                "SELECT item_id, title, kind, platform_slug, platform.name AS platform_name, regions, cover FROM {ITEMS_TABLE}{where_clause} ORDER BY title LIMIT $limit START $offset"
+            ))
+            .bind(("limit", limit))
+            .bind(("offset", offset));
+
+        if let Some(text) = query.text {
+            request = request.bind(("text", text.to_lowercase()));
+        }
+        if let Some(platform) = query.platform {
+            request = request.bind(("platform", platform));
+        }
+
+        let mut response = request.await.map_err(LibraryError::backend)?;
+        let cards: Vec<StoredLibraryCard> = response.take(0).map_err(LibraryError::backend)?;
+
+        Ok(cards.into_iter().map(Into::into).collect())
     }
 }
 

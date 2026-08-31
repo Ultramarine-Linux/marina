@@ -38,8 +38,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 let name = platform
                     .custom_name
                     .as_deref()
-                    .unwrap_or(&platform.display_name);
-                MarinaPlatform::new(&platform.slug, name)
+                    .filter(|name| !name.trim().is_empty())
+                    .or_else(|| {
+                        (!platform.display_name.trim().is_empty())
+                            .then_some(platform.display_name.as_str())
+                    })
+                    .unwrap_or(platform.fs_slug.as_str());
+                MarinaPlatform::new(&platform.fs_slug, name)
             }))
             .await?;
         println!("Imported {} platform(s)", imported_platforms.len());
