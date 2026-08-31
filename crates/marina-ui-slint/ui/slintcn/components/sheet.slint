@@ -1,0 +1,90 @@
+// slintcn Sheet — side-anchored panel (drawer): Scrim + sliding SheetPanel.
+//
+// Mount as the LAST child of Window, sized to the window via
+// `width: parent.width; height: parent.height`. `side` controls anchor edge
+// and slide direction. Panel uses fixed cross-axis dimension (panel-extent).
+// For your own overlay root, install `sheet-panel` and mount `SheetPanel`.
+//
+// Focus trap policy: Sheet does NOT trap Tab — its @children body is
+// consumer-supplied and often contains its own focusables. Escape dismisses.
+
+import { Tokens } from "../theme/tokens.slint";
+import { Scrim } from "popup-helpers.slint";
+import { SheetPanel } from "sheet-panel.slint";
+
+export enum SheetSide { top, right, bottom, left }
+
+export component Sheet inherits Rectangle {
+    // Two-way; consumer sets true to slide in, slintcn sets false on close.
+    in-out property <bool> open: false;
+    // Edge to attach to — `top`, `right`, `bottom`, `left`.
+    in property <SheetSide> side: SheetSide.right;
+    // Heading inside the sheet.
+    in property <string> title;
+    // Body text under the title.
+    in property <string> description;
+    // When true, clicking outside the sheet closes it.
+    in property <bool>   dismiss-on-backdrop: true;
+    // Cross-axis dimension of the panel: width for left/right, height for top/bottom.
+    in property <length> panel-extent: 360px;
+    // Fired when the sheet closes for any reason.
+    callback dismissed();
+
+    background: transparent;
+
+    property <bool> is-horizontal:
+        side == SheetSide.left || side == SheetSide.right;
+
+    Scrim {
+        x: 0; y: 0;
+        width:  root.width;
+        height: root.height;
+        shown: root.open;
+        clicked => {
+            if (root.dismiss-on-backdrop) {
+                root.open = false;
+                root.dismissed();
+            }
+        }
+    }
+
+    panel := SheetPanel {
+        title: root.title;
+        description: root.description;
+
+        width:  root.is-horizontal ? root.panel-extent : root.width;
+        height: root.is-horizontal ? root.height       : root.panel-extent;
+
+        x: root.side == SheetSide.left
+            ? (root.open ? 0px : -self.width) :
+           root.side == SheetSide.right
+            ? (root.open ? root.width - self.width : root.width) :
+           /* top/bottom */ 0px;
+
+        y: root.side == SheetSide.top
+            ? (root.open ? 0px : -self.height) :
+           root.side == SheetSide.bottom
+            ? (root.open ? root.height - self.height : root.height) :
+           /* left/right */ 0px;
+
+        animate x, y {
+            duration: Tokens.motion-base;
+            easing: Tokens.motion-easing-standard;
+        }
+
+        @children
+    }
+
+    forward-focus: focus-scope;
+    focus-scope := FocusScope {
+        enabled: root.open;
+        key-pressed(event) => {
+            if (event.text == "\u{1b}") {
+                root.open = false;
+                root.dismissed();
+                return accept;
+            }
+            return reject;
+        }
+    }
+}

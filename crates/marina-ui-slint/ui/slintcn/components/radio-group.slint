@@ -1,0 +1,212 @@
+// slintcn RadioGroup — single-selection list, vertical or horizontal.
+//
+// Usage:
+//   RadioGroup {
+//       items: [
+//           { value: "small",  label: "Small" },
+//           { value: "medium", label: "Medium" },
+//           { value: "large",  label: "Large" },
+//       ];
+//       selected <=> size-index;
+//       orientation: RadioOrientation.horizontal;   // default: vertical
+//   }
+//
+// Keyboard: ↑/↓ (vertical) or ←/→ (horizontal) move the selection with
+// wrap-around. Tab focuses the group as a whole; Space is a no-op since
+// arrow movement already commits.
+
+import { Tokens } from "../theme/tokens.slint";
+import { FocusRing } from "focus-ring.slint";
+
+export struct RadioItem {
+    value: string,
+    label: string,
+}
+
+export enum RadioOrientation { vertical, horizontal }
+
+// Local helper — one circle + label row. Active state and disabled flow
+// down from the surrounding group; clicking notifies via callback.
+component RadioRow inherits Rectangle {
+    // Label text rendered next to this RadioItem.
+    in property <string> label;
+    // Whether this RadioItem is selected.
+    in property <bool> active: false;
+    // When true, the focus ring renders even without keyboard focus.
+    in property <bool> show-focus: false;
+    // When true, this control dims and stops responding.
+    in property <bool> disabled: false;
+    // Fired when this RadioItem is activated.
+    callback clicked();
+    // Fired on left-button pointer-down (used by RadioGroup to set pointer-focus).
+    callback pointer-down();
+
+    background: transparent;
+    height: 22px;
+
+    HorizontalLayout {
+        spacing: 10px;
+        alignment: start;
+
+        circle := Rectangle {
+            width:  16px;
+            height: 16px;
+            y: (parent.height - self.height) / 2;
+            background: root.active
+                ? Tokens.color-primary
+                : Tokens.color-surface-1;
+            border-color: root.active
+                ? Tokens.color-primary
+                : Tokens.color-border-hairline-strong;
+            border-width: 1px;
+            border-radius: 8px;
+
+            if root.active: Rectangle {
+                width:  6px;
+                height: 6px;
+                x: (parent.width  - self.width)  / 2;
+                y: (parent.height - self.height) / 2;
+                background: Tokens.color-primary-foreground;
+                border-radius: 3px;
+            }
+
+            if root.show-focus : FocusRing {
+                host-width:  parent.width;
+                host-height: parent.height;
+                offset:     2px;
+                ring-width: 2px;
+                radius:     10px;
+                ring-color: Tokens.color-ring-muted;
+            }
+
+            animate background, border-color {
+                duration: Tokens.motion-fast;
+                easing: Tokens.motion-easing-standard;
+            }
+        }
+
+        Text {
+            text: root.label;
+            color: root.disabled
+                ? Tokens.color-muted-foreground
+                : Tokens.color-foreground;
+            font-size: Tokens.typography-body-size;
+            vertical-alignment: center;
+        }
+    }
+
+    opacity: root.disabled ? 0.5 : 1.0;
+
+    TouchArea {
+        mouse-cursor: root.disabled ? default : pointer;
+        clicked => { if (!root.disabled) { root.clicked(); } }
+        pointer-event(ev) => {
+            if (!root.disabled
+                    && ev.button == PointerEventButton.left
+                    && ev.kind == PointerEventKind.down) {
+                root.pointer-down();
+            }
+        }
+    }
+}
+
+export component RadioGroup inherits Rectangle {
+    // Options shown in the group.
+    in property <[RadioItem]> items;
+    // Two-way; index of the chosen item.
+    in-out property <int> selected: 0;
+    // When true, this control dims and stops responding.
+    in property <bool> disabled: false;
+    // `vertical` (default) or `horizontal`.
+    in property <RadioOrientation> orientation: RadioOrientation.vertical;
+    // Fired with the new `selected` index.
+    callback changed(int);
+
+    // True while focus arrived from a pointer press — suppresses the ring so it
+    // is keyboard-only (focus-visible emulation).
+    property <bool> pointer-focus: false;
+
+    // `inherits Rectangle` + explicit min sizes so parent layouts honor the
+    // RadioGroup's footprint. Without this, sibling columns squished the
+    // group to 0-width and Radio items spilled into adjacent columns
+    // (bug fixed in v0.8.1).
+    background: transparent;
+    min-width: 120px;
+    preferred-width: 120px;
+
+    forward-focus: nav;
+    nav := FocusScope {
+        // Zero-size so the scope cannot intercept the first pointer press
+        // (default FocusScope fills its parent and swallows that click).
+        width: 0px;
+        height: 0px;
+        enabled: !root.disabled;
+        key-pressed(event) => {
+            root.pointer-focus = false;
+            if (root.items.length <= 0) { return reject; }
+
+            if (root.orientation == RadioOrientation.vertical) {
+                if (event.text == Key.UpArrow) {
+                    root.selected = mod(root.selected + root.items.length - 1, root.items.length);
+                    root.changed(root.selected);
+                    return accept;
+                }
+                if (event.text == Key.DownArrow) {
+                    root.selected = mod(root.selected + 1, root.items.length);
+                    root.changed(root.selected);
+                    return accept;
+                }
+            } else {
+                if (event.text == Key.LeftArrow) {
+                    root.selected = mod(root.selected + root.items.length - 1, root.items.length);
+                    root.changed(root.selected);
+                    return accept;
+                }
+                if (event.text == Key.RightArrow) {
+                    root.selected = mod(root.selected + 1, root.items.length);
+                    root.changed(root.selected);
+                    return accept;
+                }
+            }
+            return reject;
+        }
+    }
+
+    if orientation == RadioOrientation.vertical: VerticalLayout {
+        spacing: 10px;
+        alignment: start;
+        for item[idx] in items: RadioRow {
+            label: item.label;
+            active: idx == root.selected;
+            show-focus: nav.has-focus && idx == root.selected && !root.pointer-focus;
+            disabled: root.disabled;
+            clicked => {
+                if (root.selected != idx) {
+                    root.selected = idx;
+                    root.changed(idx);
+                }
+                nav.focus();
+            }
+            pointer-down => { root.pointer-focus = true; }
+        }
+    }
+
+    if orientation == RadioOrientation.horizontal: HorizontalLayout {
+        spacing: 20px;
+        alignment: start;
+        for item[idx] in items: RadioRow {
+            label: item.label;
+            active: idx == root.selected;
+            show-focus: nav.has-focus && idx == root.selected && !root.pointer-focus;
+            disabled: root.disabled;
+            clicked => {
+                if (root.selected != idx) {
+                    root.selected = idx;
+                    root.changed(idx);
+                }
+                nav.focus();
+            }
+            pointer-down => { root.pointer-focus = true; }
+        }
+    }
+}

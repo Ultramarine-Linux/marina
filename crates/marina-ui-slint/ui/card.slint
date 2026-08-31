@@ -1,52 +1,85 @@
+import { Tokens } from "slintcn/theme/tokens.slint";
+import { Card, CardVariant, CardPadding, CardRadius } from "slintcn/components/card.slint";
+import { Skeleton } from "slintcn/components/skeleton.slint";
+import { Text as Typography } from "slintcn/components/text.slint";
+import { TextVariant, TextTone } from "slintcn/components/text.slint";
+
 export struct GameCardData {
     title: string,
     platform: string,
+    cover: image,
     cover_ratio: float,
 }
 
-export component GameCard inherits Rectangle {
+export component GameCard inherits Card {
     in property <string> title;
     in property <string> platform;
     in property <image> cover-image;
+    // Derived from the cover image's intrinsic dimensions by the Rust loader.
+    // Falls back to 1:1 square until a cover is loaded.
     in property <float> cover-aspect-ratio: 1.0;
+    // Covers at or below the height cap render at this width.
+    in property <length> base-width: 180px;
+    // Tall (portrait) covers clamp to this height and shrink in width
+    // instead, so no card grows unboundedly tall.
+    // Keep in sync with MAX_COVER_HEIGHT in shelf.rs.
+    in property <length> max-cover-height: 240px;
 
-    width: 180px;
-    height: self.width / root.cover-aspect-ratio + 58px;
-    background: #2b3242;
-    border-radius: 8px;
+    // Height-capped cover box at the cover's natural aspect ratio.
+    private property <length> cover-height:
+        min(root.base-width / root.cover-aspect-ratio, root.max-cover-height);
+    private property <length> cover-width:
+        root.cover-height * root.cover-aspect-ratio;
+
+    card-padding: CardPadding.none;
+    card-radius: CardRadius.lg;
+    variant: CardVariant.raised;
+
+    // Card width follows the cover, so wide covers make wide cards and
+    // clamped portrait covers make narrow ones.
+    width: root.cover-width;
+    // Natural height: the cover box plus the label panel. The Shelf
+    // bottom-aligns whole cards, so there is no internal gap.
+    height: root.cover-height + 58px;
     clip: true;
 
-    Image {
+    if root.cover-image.width == 0: Skeleton {
+        y: 0;
+        width: root.cover-width;
+        height: root.cover-height;
+        radius: 0px;
+    }
+    if root.cover-image.width > 0: Image {
+        y: 0;
         source: root.cover-image;
-        width: parent.width;
-        height: parent.width / root.cover-aspect-ratio;
+        width: root.cover-width;
+        height: root.cover-height;
         image-fit: cover;
     }
 
     Rectangle {
-        y: parent.width / root.cover-aspect-ratio;
+        y: parent.height - 58px;
         width: parent.width;
         height: 58px;
-        background: #d91f2430;
+        background: Tokens.color-card;
 
         VerticalLayout {
-            padding-left: 12px;
-            padding-right: 12px;
-            padding-top: 8px;
-            padding-bottom: 8px;
-            spacing: 2px;
+            padding-left: Tokens.spacing-md;
+            padding-right: Tokens.spacing-md;
+            padding-top: Tokens.spacing-sm;
+            padding-bottom: Tokens.spacing-sm;
+            spacing: Tokens.spacing-xs;
 
-            Text {
+            Typography {
                 text: root.title;
-                color: #e5e9f0;
-                font-size: 16px;
+                variant: TextVariant.body-lg;
                 overflow: elide;
             }
 
-            Text {
+            Typography {
                 text: root.platform;
-                color: #aeb7c8;
-                font-size: 12px;
+                variant: TextVariant.label;
+                tone: TextTone.muted;
             }
         }
     }

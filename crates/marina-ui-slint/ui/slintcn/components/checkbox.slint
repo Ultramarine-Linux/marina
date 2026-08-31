@@ -1,0 +1,124 @@
+import { Tokens } from "../theme/tokens.slint";
+import { FocusRing } from "focus-ring.slint";
+
+// Checkbox with optional trailing label. Space toggles; 2 px focus ring
+// matches the rest of slintcn's keyboard accessibility contract.
+export component Checkbox {
+    // Two-way toggle state.
+    in-out property <bool> checked: false;
+    // Text shown to the right of the box; clicking it also toggles.
+    in property <string> label;
+    // When true, the checkbox dims and stops responding.
+    in property <bool> disabled: false;
+    // Fired with the new `checked` value when the user toggles.
+    callback toggled(bool);
+    // True while focus arrived from a pointer press — suppresses the ring so it
+    // is keyboard-only (focus-visible emulation).
+    property <bool> pointer-focus: false;
+
+    HorizontalLayout {
+        spacing: 8px;
+        alignment: start;
+
+        // 20 px wrapper so the 16 px box aligns vertically with the label
+        // baseline without forcing the whole row to be 16 px tall.
+        Rectangle {
+            width:  16px;
+            height: 20px;
+            background: transparent;
+
+            box := Rectangle {
+                y: 2px;
+                width: 16px;
+                height: 16px;
+                background: root.checked
+                    ? Tokens.color-primary
+                    : Tokens.color-surface-1;
+                border-color: root.checked
+                    ? Tokens.color-primary
+                    : Tokens.color-border-hairline-strong;
+                border-width: 1px;
+                border-radius: 4px;  // shadcn checkbox rounded-[4px]
+
+                if root.checked: Path {
+                    width: 16px;
+                    height: 16px;
+                    // Pin the viewBox to 16 units so the commands keep their
+                    // built-in inset; without it Slint auto-fits the path's
+                    // bounding box and the check fills edge-to-edge (no margin).
+                    viewbox-x: 0;
+                    viewbox-y: 0;
+                    viewbox-width: 16;
+                    viewbox-height: 16;
+                    stroke: Tokens.color-primary-foreground;
+                    stroke-width: 2px;
+                    fill: transparent;
+                    commands: "M 4 8 L 7 12 L 13 4";
+                }
+
+                if focus-scope.has-focus && !root.pointer-focus : FocusRing {
+                    host-width:  parent.width;
+                    host-height: parent.height;
+                    offset:      2px;
+                    ring-width:  2px;
+                    radius:      6px;
+                    ring-color:  Tokens.color-ring-muted;
+                }
+
+                animate background, border-color {
+                    duration: Tokens.motion-fast;
+                    easing: Tokens.motion-easing-standard;
+                }
+            }
+        }
+
+        if root.label != "": Text {
+            text: root.label;
+            color: root.disabled
+                ? Tokens.color-muted-foreground
+                : Tokens.color-foreground;
+            font-size: Tokens.typography-body-size;
+            vertical-alignment: center;
+        }
+    }
+
+    opacity: root.disabled ? 0.5 : 1.0;
+
+    TouchArea {
+        mouse-cursor: root.disabled ? default : pointer;
+        pointer-event(ev) => {
+            if (!root.disabled
+                    && ev.button == PointerEventButton.left
+                    && ev.kind   == PointerEventKind.down) {
+                root.pointer-focus = true;
+            }
+        }
+        clicked => {
+            if (!root.disabled) {
+                root.checked = !root.checked;
+                root.toggled(root.checked);
+                focus-scope.focus();
+            }
+        }
+    }
+
+    forward-focus: focus-scope;
+    focus-scope := FocusScope {
+        // Zero-size so the scope cannot intercept the first pointer press
+        // (default FocusScope fills its parent and swallows that click).
+        width: 0px;
+        height: 0px;
+        enabled: !root.disabled;
+        key-pressed(event) => {
+            root.pointer-focus = false;
+            if (event.text == " " || event.text == "\n") {
+                if (!root.disabled) {
+                    root.checked = !root.checked;
+                    root.toggled(root.checked);
+                }
+                return accept;
+            }
+            return reject;
+        }
+    }
+}

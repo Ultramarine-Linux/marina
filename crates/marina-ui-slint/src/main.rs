@@ -2,6 +2,8 @@ use std::{env, error::Error};
 
 use marina_store_surrealdb::SurrealLibrary;
 use slint::{ModelRc, VecModel};
+use tracing::{info, instrument};
+use tracing_subscriber::EnvFilter;
 
 slint::include_modules!();
 
@@ -10,24 +12,44 @@ mod ui;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    tracing_subscriber::fmt()
+        .with_env_filter(EnvFilter::from_default_env())
+        .init();
+
     dotenvy::dotenv().ok();
 
     let storage_uri = env::var("MARINA_STORAGE_URI").unwrap_or_else(|_| "mem://".to_owned());
-    let library = if storage_uri.starts_with("ws://") || storage_uri.starts_with("wss://") {
-        let username = env::var("MARINA_STORAGE_USERNAME").unwrap_or_else(|_| "root".to_owned());
-        let password = env::var("MARINA_STORAGE_PASSWORD").unwrap_or_else(|_| "root".to_owned());
-        SurrealLibrary::connect_with_root(storage_uri.as_str(), username, password).await?
-    } else {
-        SurrealLibrary::connect(storage_uri.as_str()).await?
-    };
 
-    println!("Loading games...");
-    let games = ui::shelf::load_games(&library).await?;
+    info!(uri = %storage_uri, "connecting to library store");
+    let library = connect_library(&storage_uri).await?;
+
+    let romm_url = env::var("ROMM_URL").ok();
+    if romm_url.is_none() {
+        tracing::warn!("ROMM_URL not set — relative cover paths will not resolve");
+    }
+
+    info!("loading games and covers");
+    let http = reqwest::Client::new();
+    let games = ui::shelf::load_games(&library, &http, romm_url.as_deref()).await?;
+    info!(count = games.len(), "library loaded");
+
     let shelf_height = ui::shelf::height_for_games(&games);
+
     let window = MainWindow::new()?;
     window.set_games(ModelRc::from(std::rc::Rc::new(VecModel::from(games))));
     window.set_shelf_height(shelf_height);
     window.run()?;
 
     Ok(())
+}
+
+#[instrument(skip_all, fields(uri))]
+async fn connect_library(storage_uri: &str) -> Result<SurrealLibrary, Box<dyn Error>> {
+    if storage_uri.starts_with("ws://") || storage_uri.starts_with("wss://") {
+        let username = env::var("MARINA_STORAGE_USERNAME").unwrap_or_else(|_| "root".to_owned());
+        let password = env::var("MARINA_STORAGE_PASSWORD").unwrap_or_else(|_| "root".to_owned());
+        Ok(SurrealLibrary::connect_with_root(storage_uri, username, password).await?)
+    } else {
+        Ok(SurrealLibrary::connect(storage_uri).await?)
+    }
 }

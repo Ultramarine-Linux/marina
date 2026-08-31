@@ -1,4 +1,6 @@
-import { ScrollView } from "std-widgets.slint";
+import { Tokens } from "slintcn/theme/tokens.slint";
+import { Text as Typography } from "slintcn/components/text.slint";
+import { TextVariant } from "slintcn/components/text.slint";
 import { GameCard, GameCardData } from "card.slint";
 
 export component Shelf inherits Rectangle {
@@ -6,31 +8,74 @@ export component Shelf inherits Rectangle {
     in property <[GameCardData]> games;
     in property <length> content-height;
 
+    // The layout's intrinsic width — exact even with per-card widths varying
+    // by cover aspect ratio.
+    private property <length> content-width: row.preferred-width;
+
     background: transparent;
 
     VerticalLayout {
-        Text {
+        spacing: Tokens.spacing-sm;
+
+        Typography {
             text: root.title;
-            color: #e5e9f0;
-            font-size: 28px;
-            height: 42px;
+            variant: TextVariant.title;
+            height: 32px;
         }
 
-        ScrollView {
+        // Horizontal flickable shelf — ScrollArea is vertical-only.
+        Rectangle {
             height: root.content-height;
+            clip: true;
 
-            HorizontalLayout {
-                padding-left: 32px;
-                padding-right: 32px;
-                padding-top: 16px;
-                padding-bottom: 4px;
-                spacing: 20px;
-                alignment: start;
+            flick := Flickable {
+                width: parent.width;
+                height: parent.height;
+                viewport-height: parent.height;
+                viewport-width: root.content-width;
 
-                for game in root.games: GameCard {
-                    title: game.title;
-                    platform: game.platform;
-                    cover-aspect-ratio: game.cover_ratio;
+                row := HorizontalLayout {
+                    padding-left: Tokens.spacing-xs;
+                    padding-right: Tokens.spacing-2xl;
+                    padding-top: Tokens.spacing-sm;
+                    padding-bottom: Tokens.spacing-sm;
+                    spacing: Tokens.spacing-lg;
+                    alignment: start;
+
+                    // Each slot stretches to the row height and tracks its
+                    // card's width; the card keeps its natural size and is
+                    // anchored to the bottom, so labels stay parallel with no
+                    // gap inside any card.
+                    for game in root.games: Rectangle {
+                        width: card.width;
+                        background: transparent;
+
+                        card := GameCard {
+                            y: parent.height - self.height;
+                            title: game.title;
+                            platform: game.platform;
+                            cover-image: game.cover;
+                            cover-aspect-ratio: game.cover_ratio;
+                        }
+                    }
+                }
+            }
+
+            // Horizontal scrollbar — only shown when content overflows.
+            if root.content-width > flick.width: Rectangle {
+                x: 4px;
+                y: parent.height - 8px;
+                width: parent.width - 8px;
+                height: 6px;
+                background: transparent;
+
+                Rectangle {
+                    y: 0;
+                    height: parent.height;
+                    width: max(24px, flick.width * flick.width / root.content-width);
+                    x: -flick.viewport-x * flick.width / root.content-width;
+                    background: Tokens.color-border-hairline-strong;
+                    border-radius: 3px;
                 }
             }
         }

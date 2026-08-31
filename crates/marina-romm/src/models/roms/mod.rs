@@ -82,7 +82,7 @@ impl From<Rom> for marina_core::LibraryItem {
             tags: rom.tags.clone(),
             languages: rom.languages.clone(),
             regions: rom.regions.clone(),
-            cover: rom.cover_path().map(str::to_owned),
+            cover: rom.cover_path(),
             created_at: rom.created_at,
             released_at: release_date,
             updated_at: rom.updated_at,
@@ -101,12 +101,27 @@ impl From<Rom> for marina_core::LibraryItem {
     }
 }
 impl RomResponse {
-    pub fn cover_path(&self) -> Option<&str> {
-        self.assets
+    pub fn cover_path(&self) -> Option<String> {
+        use url::Url;
+
+        let raw = self
+            .assets
             .path_cover_small
             .as_deref()
             .or(self.assets.path_cover_large.as_deref())
-            .or(self.assets.url_cover.as_deref())
+            .or(self.assets.url_cover.as_deref())?;
+
+        // Join against a dummy base so the url crate can parse both absolute
+        // URLs and relative paths (e.g. `/assets/romm/...?ts=...`) uniformly.
+        let base = Url::parse("https://placeholder.invalid/").unwrap();
+        let mut parsed = base.join(raw).ok()?;
+        parsed.set_query(None);
+
+        if raw.starts_with("http://") || raw.starts_with("https://") {
+            Some(parsed.to_string())
+        } else {
+            Some(parsed.path().to_owned())
+        }
     }
 }
 /// Full response of a ROM entry in RomM

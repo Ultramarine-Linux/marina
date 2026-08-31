@@ -1,3 +1,4 @@
+import { Tokens } from "slintcn/theme/tokens.slint";
 import { GameCardData } from "card.slint";
 import { Shelf } from "shelf.slint";
 
@@ -6,24 +7,18 @@ export component MainWindow inherits Window {
     in property <length> shelf-height;
 
     width: 1280px;
-    full-screen: false;
     height: 720px;
     title: "Marina";
-    background: #1f2430;
+    background: Tokens.color-background;
 
     VerticalLayout {
-        accessible-role: AccessibleRole.image;
-        padding: 24px;
+        padding: Tokens.spacing-2xl;
+        spacing: Tokens.spacing-2xl;
 
         Shelf {
-            title: @tr("Library");
+            title: "Library";
             games: root.games;
             content-height: root.shelf-height;
         }
-        Image {
-            // placeholder image...
-            source: @image-url("adoo.jpg");
-        }
-        
     }
 }
