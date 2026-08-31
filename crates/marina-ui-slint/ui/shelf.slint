@@ -1,0 +1,38 @@
+import { ScrollView } from "std-widgets.slint";
+import { GameCard, GameCardData } from "card.slint";
+
+export component Shelf inherits Rectangle {
+    in property <string> title;
+    in property <[GameCardData]> games;
+    in property <length> content-height;
+
+    background: transparent;
+
+    VerticalLayout {
+        Text {
+            text: root.title;
+            color: #e5e9f0;
+            font-size: 28px;
+            height: 42px;
+        }
+
+        ScrollView {
+            height: root.content-height;
+
+            HorizontalLayout {
+                padding-left: 32px;
+                padding-right: 32px;
+                padding-top: 16px;
+                padding-bottom: 4px;
+                spacing: 20px;
+                alignment: start;
+
+                for game in root.games: GameCard {
+                    title: game.title;
+                    platform: game.platform;
+                    cover-aspect-ratio: game.cover_ratio;
+                }
+            }
+        }
+    }
+}

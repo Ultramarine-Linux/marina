@@ -4,5 +4,14 @@ version.workspace = true
 edition.workspace = true
 license.workspace = true
 
+[build-dependencies]
+slint-build = "1.12.1"
+
 [dependencies]
 slint = "1.12.1"
+
+dotenvy.workspace = true
+marina-core.workspace = true
+marina-library.workspace = true
+marina-store-surrealdb.workspace = true
+tokio.workspace = true

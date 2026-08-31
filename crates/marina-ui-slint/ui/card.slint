@@ -1,0 +1,53 @@
+export struct GameCardData {
+    title: string,
+    platform: string,
+    cover_ratio: float,
+}
+
+export component GameCard inherits Rectangle {
+    in property <string> title;
+    in property <string> platform;
+    in property <image> cover-image;
+    in property <float> cover-aspect-ratio: 1.0;
+
+    width: 180px;
+    height: self.width / root.cover-aspect-ratio + 58px;
+    background: #2b3242;
+    border-radius: 8px;
+    clip: true;
+
+    Image {
+        source: root.cover-image;
+        width: parent.width;
+        height: parent.width / root.cover-aspect-ratio;
+        image-fit: cover;
+    }
+
+    Rectangle {
+        y: parent.width / root.cover-aspect-ratio;
+        width: parent.width;
+        height: 58px;
+        background: #d91f2430;
+
+        VerticalLayout {
+            padding-left: 12px;
+            padding-right: 12px;
+            padding-top: 8px;
+            padding-bottom: 8px;
+            spacing: 2px;
+
+            Text {
+                text: root.title;
+                color: #e5e9f0;
+                font-size: 16px;
+                overflow: elide;
+            }
+
+            Text {
+                text: root.platform;
+                color: #aeb7c8;
+                font-size: 12px;
+            }
+        }
+    }
+}
