@@ -1,0 +1,71 @@
+import { Tokens } from "slintcn/theme/tokens.slint";
+import { Text as Typography } from "slintcn/components/text.slint";
+import { TextVariant, TextTone } from "slintcn/components/text.slint";
+
+export struct PlatformCardData {
+    slug: string,
+    name: string,
+    icon: string,
+    game-count: string,
+}
+
+export component PlatformCard inherits Rectangle {
+    in property <PlatformCardData> platform;
+    callback clicked;
+
+    min-height: 158px;
+    background: Tokens.color-surface-1;
+    border-radius: Tokens.radius-lg;
+    border-width: 1px;
+    border-color: card-touch.has-hover
+        ? Tokens.color-border-hairline-strong
+        : Tokens.color-border-hairline;
+
+    VerticalLayout {
+        padding: Tokens.spacing-lg;
+        spacing: Tokens.spacing-sm;
+        alignment: center;
+
+        Rectangle {
+            width: 72px;
+            height: 72px;
+            background: Tokens.color-surface-2;
+            border-radius: Tokens.radius-lg;
+
+            Text {
+                x: (parent.width - self.width) / 2;
+                y: (parent.height - self.height) / 2;
+                width: parent.width;
+                height: parent.height;
+                text: root.platform.icon;
+                font-size: 38px;
+                horizontal-alignment: center;
+                vertical-alignment: center;
+            }
+        }
+
+        Typography {
+            text: root.platform.name;
+            variant: TextVariant.body-lg;
+            overflow: elide;
+            horizontal-alignment: center;
+        }
+
+        Typography {
+            text: root.platform.game-count;
+            variant: TextVariant.caption;
+            tone: TextTone.muted;
+            horizontal-alignment: center;
+        }
+    }
+
+    card-touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+
+    animate border-color, background {
+        duration: Tokens.motion-fast;
+        easing: Tokens.motion-easing-standard;
+    }
+}

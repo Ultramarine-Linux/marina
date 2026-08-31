@@ -4,12 +4,17 @@
 // see: https://zed.dev/docs/debugger
 [
   {
-    "label": "Debug marina-ui-slint",
+    "label": "Debug marina-ui-slint mcp",
     "build": {
       "command": "cargo",
-      "args": ["build", "--package", "marina-ui-slint"]
+      "args": ["build", "--package", "marina-ui-slint", "--features", "debug-mcp"]
     },
     "program": "$ZED_WORKTREE_ROOT/target/debug/marina-ui-slint",
+    "env": {
+      "RUST_LOG": "debug",
+      "SLINT_MCP_PORT": "9315",
+      "SLINT_EMIT_DEBUG_INFO": "1"
+    },
     "sourceLanguages": ["rust"],
     "request": "launch",
     "adapter": "CodeLLDB"

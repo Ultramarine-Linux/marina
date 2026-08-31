@@ -1,0 +1,143 @@
+import { Tokens } from "slintcn/theme/tokens.slint";
+import { Button, ButtonVariant, ButtonSize } from "slintcn/components/button.slint";
+import { Input } from "slintcn/components/input.slint";
+import { Text as Typography } from "slintcn/components/text.slint";
+import { TextVariant, TextTone } from "slintcn/components/text.slint";
+import { PlatformCard, PlatformCardData } from "platform-card.slint";
+import { GameCardData } from "card.slint";
+import { PlatformGameList } from "platform-game-list.slint";
+import { PreviewDetailsData } from "preview-details.slint";
+
+export component LibraryPage inherits Rectangle {
+    in property <[PlatformCardData]> platforms;
+    in property <[GameCardData]> games;
+    in property <PreviewDetailsData> details;
+    in-out property <int> page: 0;
+    in-out property <string> search-query;
+    in-out property <string> selected-platform;
+    in-out property <string> selected-platform-name;
+
+    in-out property <bool> loading: false;
+    in-out property <bool> details-loading: false;
+
+    callback platform-query(string);
+    callback game-selected(string, int);
+
+    background: transparent;
+
+    if root.page == 0: VerticalLayout {
+        spacing: Tokens.spacing-lg;
+
+        HorizontalLayout {
+            height: 38px;
+            spacing: Tokens.spacing-sm;
+
+            Typography {
+                text: "Platforms";
+                variant: TextVariant.headline;
+                vertical-alignment: center;
+            }
+
+            Rectangle {
+                width: 36px;
+                height: 24px;
+                y: (parent.height - self.height) / 2;
+                background: Tokens.color-surface-2;
+                border-radius: Tokens.radius-sm;
+
+                Typography {
+                    text: root.platforms.length;
+                    variant: TextVariant.caption;
+                    tone: TextTone.muted;
+                    width: parent.width;
+                    height: parent.height;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+            }
+
+            Rectangle { horizontal-stretch: 1; }
+
+            Input {
+                width: 260px;
+                text <=> root.search-query;
+                placeholder: "Search platforms...";
+            }
+        }
+
+        Rectangle {
+            height: 1px;
+            background: Tokens.color-border-hairline;
+        }
+
+        Flickable {
+            viewport-width: grid.preferred-width;
+            viewport-height: grid.preferred-height;
+
+            grid := GridLayout {
+                width: max(parent.width, 1px);
+
+                spacing: Tokens.spacing-md;
+                padding-bottom: Tokens.spacing-lg;
+
+                for platform[i] in root.platforms: PlatformCard {
+                    col: Math.mod(i, 5);
+                    row: i / 5;
+                    width: (parent.width - 4 * Tokens.spacing-md) / 5;
+                    platform: platform;
+                    clicked => {
+                        root.selected-platform = platform.slug;
+                        root.selected-platform-name = platform.name;
+
+                        root.page = 1;
+                        root.loading = true;
+                        root.details-loading = true;
+                        root.platform-query(platform.slug);
+                    }
+                }
+            }
+        }
+    }
+
+    if root.page == 1: VerticalLayout {
+        spacing: Tokens.spacing-lg;
+
+        HorizontalLayout {
+            height: 38px;
+            spacing: Tokens.spacing-md;
+
+            Button {
+                width: 36px;
+                height: 36px;
+                variant: ButtonVariant.ghost;
+                size: ButtonSize.icon;
+                text: "←";
+                clicked => {
+                    root.page = 0;
+
+                }
+            }
+
+            Typography {
+                text: root.selected-platform-name;
+                variant: TextVariant.headline;
+                vertical-alignment: center;
+            }
+        }
+
+        Rectangle {
+            height: 1px;
+            background: Tokens.color-border-hairline;
+        }
+
+        PlatformGameList {
+            games: root.games;
+            details: root.details;
+            details-loading <=> root.details-loading;
+            selected(id, index) => { root.game-selected(id, index); }
+            vertical-stretch: 1;
+        }
+
+
+    }
+}

@@ -67,6 +67,13 @@ struct LoaderState {
 }
 
 impl CoverLoader {
+    /// Clears residency after replacing the game model with another page.
+    pub fn reset(&mut self) {
+        let mut state = self.state.lock().expect("cover loader state poisoned");
+        state.loading.clear();
+        state.resident.clear();
+    }
+
     pub fn update(&mut self, scroll_x: f32, viewport_width: f32) {
         self.last_viewport = Some((scroll_x, viewport_width));
         // Slint exposes Flickable::viewport-x as the content translation, so
@@ -76,7 +83,11 @@ impl CoverLoader {
         let Some(window) = self.window.upgrade() else {
             return;
         };
-        let games = window.get_games();
+        let games = if window.get_active_tab() == 1 {
+            window.get_platform_games()
+        } else {
+            window.get_games()
+        };
         let sources = self
             .sources
             .lock()
@@ -174,7 +185,11 @@ impl CoverLoader {
                         warn!("cover decode failed, keeping placeholder");
                         return;
                     };
-                    let games = window.get_games();
+                    let games = if window.get_active_tab() == 1 {
+                        window.get_platform_games()
+                    } else {
+                        window.get_games()
+                    };
                     if let Some(mut row) = games.row_data(index) {
                         row.cover = image;
                         row.cover_ratio = ratio;
@@ -243,6 +258,7 @@ pub async fn load_games_metadata(
         .map(|item| {
             let source = source_for(item.cover.as_deref(), base_url);
             let card = crate::shelf::GameMetadata {
+                id: item.id.to_string(),
                 title: item.title,
                 platform: item.platform_name.unwrap_or_else(|| "Unknown".into()),
             };

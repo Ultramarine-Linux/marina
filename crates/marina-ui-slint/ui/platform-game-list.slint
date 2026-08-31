@@ -1,0 +1,164 @@
+import { ListView } from "std-widgets.slint";
+import { Tokens } from "slintcn/theme/tokens.slint";
+import { Skeleton } from "slintcn/components/skeleton.slint";
+import { Text as Typography } from "slintcn/components/text.slint";
+import { TextVariant, TextTone } from "slintcn/components/text.slint";
+import { GameCardData } from "card.slint";
+import { PreviewDetailsData } from "preview-details.slint";
+
+export component PlatformGameList inherits Rectangle {
+    in property <[GameCardData]> games;
+    in property <PreviewDetailsData> details;
+    in-out property <int> selected-index: 0;
+    in-out property <bool> details-loading: false;
+    callback selected(string, int);
+
+    private property <int> safe-index:
+        min(max(root.selected-index, 0), max(root.games.length - 1, 0));
+
+    background: transparent;
+
+    HorizontalLayout {
+        spacing: Tokens.spacing-lg;
+
+        Rectangle {
+            width: 34%;
+            min-width: 260px;
+            background: Tokens.color-surface-1;
+            border-radius: Tokens.radius-md;
+            clip: true;
+
+            list := ListView {
+                width: parent.width;
+                height: parent.height;
+                for game[i] in root.games: Rectangle {
+                    width: parent.width;
+                    height: 42px;
+                    background: i == root.safe-index
+                        ? Tokens.color-surface-3
+                        : (item-touch.has-hover ? Tokens.color-surface-2 : transparent);
+                    border-radius: Tokens.radius-sm;
+
+                    Typography {
+                        x: Tokens.spacing-md;
+                        width: parent.width - 2 * Tokens.spacing-md;
+                        height: parent.height;
+                        text: game.title;
+                        variant: TextVariant.body-lg;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+
+                    item-touch := TouchArea {
+                        mouse-cursor: pointer;
+                        clicked => {
+                            root.selected-index = i;
+                            root.details-loading = true;
+                            root.selected(game.id, i);
+                        }
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            horizontal-stretch: 1;
+            background: Tokens.color-surface-1;
+            border-radius: Tokens.radius-md;
+
+            if root.games.length == 0: VerticalLayout {
+                alignment: center;
+
+                Typography {
+                    text: "No games found";
+                    variant: TextVariant.body-lg;
+                    tone: TextTone.muted;
+                    horizontal-alignment: center;
+                }
+            }
+
+            if root.games.length > 0: VerticalLayout {
+                padding: Tokens.spacing-xl;
+                spacing: Tokens.spacing-lg;
+
+                HorizontalLayout {
+                    height: 34px;
+
+                    Typography {
+                        text: root.details-loading || root.details.title == ""
+                            ? root.games[root.safe-index].title
+                            : root.details.title;
+                        variant: TextVariant.title;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+
+                    Rectangle { horizontal-stretch: 1; }
+
+                    Typography {
+                        text: root.games[root.safe-index].platform;
+                        variant: TextVariant.caption;
+                        tone: TextTone.muted;
+                        vertical-alignment: center;
+                    }
+                }
+
+                Rectangle {
+                    height: 260px;
+                    background: Tokens.color-surface-2;
+                    border-radius: Tokens.radius-md;
+                    clip: true;
+
+                    if root.games[root.safe-index].cover.width == 0: Skeleton {
+                        width: parent.width;
+                        height: parent.height;
+                        radius: Tokens.radius-md;
+                    }
+                    if root.games[root.safe-index].cover.width > 0: Image {
+                        width: parent.width;
+                        height: parent.height;
+                        source: root.games[root.safe-index].cover;
+                        image-fit: cover;
+                    }
+                }
+
+                Typography {
+                    text: root.details-loading
+                        ? "Loading details..."
+                        : (root.details.summary != ""
+                            ? root.details.summary
+                            : "No description available for this game yet.");
+                    variant: TextVariant.body-lg;
+                    tone: TextTone.muted;
+                    wrap: word-wrap;
+                }
+
+                VerticalLayout {
+                    spacing: Tokens.spacing-xs;
+
+                    if root.details.released-at != "": Typography {
+                        text: "Released: " + root.details.released-at;
+                        variant: TextVariant.body-sm;
+                    }
+                    if root.details.languages != "": Typography {
+                        text: "Languages: " + root.details.languages;
+                        variant: TextVariant.body-sm;
+                        tone: TextTone.muted;
+                    }
+                    if root.details.regions != "": Typography {
+                        text: "Regions: " + root.details.regions;
+                        variant: TextVariant.body-sm;
+                        tone: TextTone.muted;
+                    }
+                    if root.details.tags != "": Typography {
+                        text: "Tags: " + root.details.tags;
+                        variant: TextVariant.body-sm;
+                        tone: TextTone.muted;
+                    }
+                }
+
+                Rectangle { vertical-stretch: 1; }
+            }
+        }
+    }
+}

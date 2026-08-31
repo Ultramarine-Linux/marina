@@ -5,12 +5,24 @@ import { NavigationItem } from "slintcn/components/navigation-menu.slint";
 import { AppShell } from "app-shell.slint";
 import { GameCardData } from "card.slint";
 import { Shelf, ShelfSkeleton } from "shelf.slint";
+import { LibraryPage } from "library.slint";
+import { PlatformCardData } from "platform-card.slint";
+import { PreviewDetailsData } from "preview-details.slint";
 
 export component MainWindow inherits Window {
     in property <[GameCardData]> games;
+    in property <[PlatformCardData]> platforms;
+    in property <[GameCardData]> platform-games;
+    in-out property <PreviewDetailsData> game-details;
+    in-out property <bool> game-details-loading: false;
+    in-out property <bool> library-loading: false;
+
     in property <length> shelf-height;
     in property <bool> loading: true;
     callback viewport-changed(length, length);
+    callback cover-context-changed(int);
+    callback platform-query(string);
+    callback game-selected(string, int);
 
     in-out property <int> active-tab: 0;
     in-out property <string> search-query;
@@ -23,6 +35,11 @@ export component MainWindow inherits Window {
     width: 1280px;
     height: 720px;
     title: "Marina";
+
+
+    changed active-tab => {
+        root.cover-context-changed(root.active-tab);
+    }
 
     AppShell {
         navigation-items: root.navigation-items;
@@ -41,13 +58,23 @@ export component MainWindow inherits Window {
             viewport-changed(x, width) => { root.viewport-changed(x, width); }
         }
 
-        if root.active-tab != 0: Rectangle {
+        if root.active-tab == 1: LibraryPage {
+            platforms: root.platforms;
+            games: root.platform-games;
+            details: root.game-details;
+            details-loading <=> root.game-details-loading;
+            loading <=> root.library-loading;
+            platform-query(slug) => { root.platform-query(slug); }
+            game-selected(id, index) => { root.game-selected(id, index); }
+        }
+
+        if root.active-tab == 2: Rectangle {
             background: transparent;
 
             Typography {
                 x: (parent.width - self.width) / 2;
                 y: (parent.height - self.height) / 2;
-                text: root.active-tab == 1 ? "Library is coming soon" : "Collections are coming soon";
+                text: "Collections are coming soon";
                 variant: TextVariant.body-lg;
                 tone: TextTone.muted;
             }

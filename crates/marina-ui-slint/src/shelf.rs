@@ -1,6 +1,6 @@
 //! Shelf view-model and layout sizing.
 
-use marina_library::LibraryError;
+use marina_library::{LibraryError, LibraryRead, SearchQuery};
 use marina_store_surrealdb::SurrealLibrary;
 
 use crate::covers::{self, CoverSource};
@@ -14,6 +14,7 @@ const SCROLLBAR_PADDING: f32 = 8.0;
 /// The Slint image is created only after crossing onto the UI thread.
 #[derive(Clone, Debug)]
 pub struct GameMetadata {
+    pub id: String,
     pub title: String,
     pub platform: String,
 }
@@ -23,6 +24,34 @@ pub async fn load_games(
     romm_base_url: Option<&str>,
 ) -> Result<(Vec<GameMetadata>, Vec<CoverSource>), LibraryError> {
     covers::load_games_metadata(library, romm_base_url).await
+}
+
+/// Loads one alphabetized page of games for a platform.
+///
+/// Pagination is deliberately applied in the backend query so the UI never
+/// needs to hold the complete platform library in memory.
+pub async fn load_platform_games(
+    library: &SurrealLibrary,
+    romm_base_url: Option<&str>,
+    platform_slug: &str,
+) -> Result<(Vec<GameMetadata>, Vec<CoverSource>), LibraryError> {
+    let mut items = library
+        .search_cards(SearchQuery::new().platform(platform_slug).limit(usize::MAX))
+        .await?;
+    items.sort_by(|left, right| left.title.to_lowercase().cmp(&right.title.to_lowercase()));
+
+    Ok(items
+        .into_iter()
+        .map(|item| {
+            let source = covers::source_for(item.cover.as_deref(), romm_base_url);
+            let metadata = GameMetadata {
+                id: item.id.to_string(),
+                title: item.title,
+                platform: item.platform_name.unwrap_or_else(|| "Unknown".into()),
+            };
+            (metadata, source)
+        })
+        .unzip())
 }
 
 pub fn shelf_height() -> f32 {
