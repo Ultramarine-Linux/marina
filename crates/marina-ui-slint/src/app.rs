@@ -11,7 +11,6 @@ use crate::{config::Config, storage};
 pub(crate) struct AppState {
     pub(crate) config: Config,
     pub(crate) library: SurrealLibrary,
-    pub(crate) http: reqwest::Client,
 }
 
 /// A shareable handle to the application's runtime state.
@@ -28,10 +27,6 @@ impl AppState {
         );
         let library = storage::connect(&config).await?;
 
-        Ok(Arc::new(Self {
-            config,
-            library,
-            http: reqwest::Client::new(),
-        }))
+        Ok(Arc::new(Self { config, library }))
     }
 }

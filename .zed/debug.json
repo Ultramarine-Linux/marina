@@ -1,0 +1,17 @@
+// Project-local debug tasks
+//
+// For more documentation on how to configure debug tasks,
+// see: https://zed.dev/docs/debugger
+[
+  {
+    "label": "Debug marina-ui-slint",
+    "build": {
+      "command": "cargo",
+      "args": ["build", "--package", "marina-ui-slint"]
+    },
+    "program": "$ZED_WORKTREE_ROOT/target/debug/marina-ui-slint",
+    "sourceLanguages": ["rust"],
+    "request": "launch",
+    "adapter": "CodeLLDB"
+  }
+]

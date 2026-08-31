@@ -11,7 +11,7 @@ use marina_library::{LibraryError, LibraryRead};
 use slint::{ComponentHandle, Image, Model, SharedPixelBuffer};
 use tracing::{debug, warn};
 
-use crate::{GameCardData, MainWindow, cache};
+use crate::{MainWindow, cache};
 
 const COVER_HEIGHT: f32 = 200.0;
 const CARD_SPACING: f32 = 16.0;
@@ -37,21 +37,27 @@ pub fn spawn_loader(
     window: &MainWindow,
     http: reqwest::Client,
     sources: Vec<CoverSource>,
-) -> Rc<std::cell::RefCell<CoverLoader>> {
+) -> (
+    Rc<std::cell::RefCell<CoverLoader>>,
+    Arc<Mutex<Vec<CoverSource>>>,
+) {
+    let sources = Arc::new(Mutex::new(sources));
     let loader = Rc::new(std::cell::RefCell::new(CoverLoader {
         window: window.as_weak(),
         http,
-        sources,
+        sources: sources.clone(),
         state: Arc::new(Mutex::new(LoaderState::default())),
+        last_viewport: None,
     }));
-    loader
+    (loader, sources)
 }
 
 pub struct CoverLoader {
     window: slint::Weak<MainWindow>,
     http: reqwest::Client,
-    sources: Vec<CoverSource>,
+    sources: Arc<Mutex<Vec<CoverSource>>>,
     state: Arc<Mutex<LoaderState>>,
+    last_viewport: Option<(f32, f32)>,
 }
 
 #[derive(Default)]
@@ -62,6 +68,7 @@ struct LoaderState {
 
 impl CoverLoader {
     pub fn update(&mut self, scroll_x: f32, viewport_width: f32) {
+        self.last_viewport = Some((scroll_x, viewport_width));
         // Slint exposes Flickable::viewport-x as the content translation, so
         // scrolling right produces negative values. Convert to a positive
         // distance through the content before calculating card positions.
@@ -70,6 +77,11 @@ impl CoverLoader {
             return;
         };
         let games = window.get_games();
+        let sources = self
+            .sources
+            .lock()
+            .expect("cover source state poisoned")
+            .clone();
 
         // Cards have variable widths, so derive their actual positions from
         // the current ratios instead of assuming a fixed slot size.
@@ -93,7 +105,7 @@ impl CoverLoader {
 
         let first = first_visible.unwrap_or(0).saturating_sub(PREFETCH_CARDS);
         let last = last_visible
-            .map(|index| (index + PREFETCH_CARDS + 1).min(self.sources.len()))
+            .map(|index| (index + PREFETCH_CARDS + 1).min(sources.len()))
             .unwrap_or(0);
         let wanted: HashSet<_> = (first..last).collect();
         debug!(
@@ -130,7 +142,7 @@ impl CoverLoader {
                 continue;
             }
             debug!(index, "queueing cover row");
-            let Some(source) = self.sources.get(index).cloned() else {
+            let Some(source) = sources.get(index).cloned() else {
                 self.state
                     .lock()
                     .expect("cover loader state poisoned")
@@ -224,20 +236,15 @@ fn resolve_url(cover: Option<&str>, base_url: Option<&str>) -> Option<String> {
 pub async fn load_games_metadata(
     library: &marina_store_surrealdb::SurrealLibrary,
     base_url: Option<&str>,
-) -> Result<(Vec<GameCardData>, Vec<CoverSource>), LibraryError> {
+) -> Result<(Vec<crate::shelf::GameMetadata>, Vec<CoverSource>), LibraryError> {
     let items = library.list_cards(100).await?;
     Ok(items
         .into_iter()
         .map(|item| {
             let source = source_for(item.cover.as_deref(), base_url);
-            let card = GameCardData {
-                title: item.title.into(),
-                platform: item
-                    .platform_name
-                    .unwrap_or_else(|| "Unknown".into())
-                    .into(),
-                cover: Image::default(),
-                cover_ratio: 1.0,
+            let card = crate::shelf::GameMetadata {
+                title: item.title,
+                platform: item.platform_name.unwrap_or_else(|| "Unknown".into()),
             };
             (card, source)
         })

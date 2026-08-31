@@ -1,7 +1,9 @@
 import { Tokens } from "slintcn/theme/tokens.slint";
 import { Button, ButtonVariant, ButtonSize } from "slintcn/components/button.slint";
-import { Input } from "slintcn/components/input.slint";
+import { Avatar } from "slintcn/components/avatar.slint";
 import { NavigationMenu, NavigationItem } from "slintcn/components/navigation-menu.slint";
+import { Text as Typography } from "slintcn/components/text.slint";
+import { TextVariant, TextTone } from "slintcn/components/text.slint";
 
 // Shared application chrome. Screens are supplied as children and are kept
 // separate from shell navigation state.
@@ -17,25 +19,47 @@ export component AppShell inherits Rectangle {
         padding: Tokens.spacing-2xl;
         spacing: Tokens.spacing-2xl;
 
-        // Equal-width regions keep the nav centered regardless of side controls.
-        HorizontalLayout {
+        // Explicit thirds keep the nav centered regardless of preferred sizes
+        // in the profile and settings regions.
+        Rectangle {
             height: 36px;
-            spacing: 0px;
 
             Rectangle {
-                horizontal-stretch: 1;
+                x: 0px;
+                width: parent.width / 3;
+                height: parent.height;
 
-                Input {
-                    x: 0px;
-                    y: (parent.height - self.height) / 2;
-                    width: 260px;
-                    placeholder: "Search games...";
-                    text <=> root.search-query;
+                HorizontalLayout {
+                    spacing: Tokens.spacing-sm;
+                    alignment: start;
+
+                    Avatar {
+                        fallback: "C";
+                        size: 36px;
+                    }
+
+                    VerticalLayout {
+                        alignment: center;
+
+                        Typography {
+                            text: "Cappy";
+                            variant: TextVariant.body;
+                            tone: TextTone.default;
+                        }
+
+                        Typography {
+                            text: "Profile";
+                            variant: TextVariant.caption;
+                            tone: TextTone.muted;
+                        }
+                    }
                 }
             }
 
             Rectangle {
-                horizontal-stretch: 1;
+                x: parent.width / 3;
+                width: parent.width / 3;
+                height: parent.height;
 
                 NavigationMenu {
                     width: self.preferred-width;
@@ -51,7 +75,9 @@ export component AppShell inherits Rectangle {
             }
 
             Rectangle {
-                horizontal-stretch: 1;
+                x: parent.width * 2 / 3;
+                width: parent.width / 3;
+                height: parent.height;
 
                 Button {
                     x: parent.width - 36px;

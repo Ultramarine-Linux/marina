@@ -4,11 +4,12 @@ import { TextVariant, TextTone } from "slintcn/components/text.slint";
 import { NavigationItem } from "slintcn/components/navigation-menu.slint";
 import { AppShell } from "app-shell.slint";
 import { GameCardData } from "card.slint";
-import { Shelf } from "shelf.slint";
+import { Shelf, ShelfSkeleton } from "shelf.slint";
 
 export component MainWindow inherits Window {
     in property <[GameCardData]> games;
     in property <length> shelf-height;
+    in property <bool> loading: true;
     callback viewport-changed(length, length);
 
     in-out property <int> active-tab: 0;
@@ -29,7 +30,11 @@ export component MainWindow inherits Window {
         search-query <=> root.search-query;
         navigate(index) => { root.active-tab = index; }
 
-        if root.active-tab == 0: shelf := Shelf {
+        if root.active-tab == 0 && root.loading: ShelfSkeleton {
+            content-height: root.shelf-height;
+        }
+
+        if root.active-tab == 0 && !root.loading: shelf := Shelf {
             title: "Library";
             games: root.games;
             content-height: root.shelf-height;

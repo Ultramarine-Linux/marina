@@ -1,7 +1,43 @@
 import { Tokens } from "slintcn/theme/tokens.slint";
+import { Skeleton } from "slintcn/components/skeleton.slint";
 import { Text as Typography } from "slintcn/components/text.slint";
 import { TextVariant } from "slintcn/components/text.slint";
 import { GameCard, GameCardData } from "card.slint";
+
+export component ShelfSkeleton inherits Rectangle {
+    in property <length> content-height;
+
+    background: transparent;
+
+    VerticalLayout {
+        spacing: Tokens.spacing-sm;
+
+        Typography {
+            text: "Library";
+            variant: TextVariant.title;
+            height: 32px;
+        }
+
+        Rectangle {
+            height: root.content-height;
+            clip: true;
+
+            HorizontalLayout {
+                padding-left: Tokens.spacing-xs;
+                padding-right: Tokens.spacing-2xl;
+                padding-top: Tokens.spacing-sm;
+                padding-bottom: Tokens.spacing-sm;
+                spacing: Tokens.spacing-lg;
+
+                for _ in 6: Skeleton {
+                    width: 200px;
+                    height: 258px;
+                    radius: Tokens.radius-lg;
+                }
+            }
+        }
+    }
+}
 
 export component Shelf inherits Rectangle {
     in property <string> title;
@@ -9,11 +45,11 @@ export component Shelf inherits Rectangle {
     in property <length> content-height;
     callback viewport-changed(length, length);
 
+    background: transparent;
+
     // The layout's intrinsic width — exact even with per-card widths varying
     // by cover aspect ratio.
     private property <length> content-width: row.preferred-width;
-
-    background: transparent;
 
     VerticalLayout {
         spacing: Tokens.spacing-sm;
@@ -24,7 +60,6 @@ export component Shelf inherits Rectangle {
             height: 32px;
         }
 
-        // Horizontal flickable shelf — ScrollArea is vertical-only.
         Rectangle {
             height: root.content-height;
             clip: true;
@@ -32,10 +67,10 @@ export component Shelf inherits Rectangle {
             flick := Flickable {
                 width: parent.width;
                 height: parent.height;
-                changed viewport-x => { root.viewport-changed(self.viewport-x, self.width); }
-                init => { root.viewport-changed(self.viewport-x, self.width); }
                 viewport-height: parent.height;
                 viewport-width: root.content-width;
+                changed viewport-x => { root.viewport-changed(self.viewport-x, self.width); }
+                init => { root.viewport-changed(self.viewport-x, self.width); }
 
                 row := HorizontalLayout {
                     padding-left: Tokens.spacing-xs;
@@ -45,10 +80,6 @@ export component Shelf inherits Rectangle {
                     spacing: Tokens.spacing-lg;
                     alignment: start;
 
-                    // Each slot stretches to the row height and tracks its
-                    // card's width; the card keeps its natural size and is
-                    // anchored to the bottom, so labels stay parallel with no
-                    // gap inside any card.
                     for game in root.games: Rectangle {
                         width: card.width;
                         background: transparent;
@@ -64,7 +95,6 @@ export component Shelf inherits Rectangle {
                 }
             }
 
-            // Horizontal scrollbar — only shown when content overflows.
             if root.content-width > flick.width: Rectangle {
                 x: 4px;
                 y: parent.height - 8px;

@@ -1,0 +1,37 @@
+import { Tokens } from "../theme/tokens.slint";
+
+// Circular avatar. Provide `source` for an image; when absent, the `fallback`
+// initials show on a muted circle. `size` sets the diameter.
+export component Avatar inherits Rectangle {
+    // Image to display; when empty, `fallback` initials render instead.
+    in property <image> source;
+    // 1–2 letter initials shown when `source` is empty.
+    in property <string> fallback;
+    // Pixel diameter of the circular avatar.
+    in property <length> size: 40px;
+
+    width:  root.size;
+    height: root.size;
+    border-radius: root.size / 2;
+    background: Tokens.color-muted;
+    clip: true;
+
+    // Fallback initials (shown when there's no image).
+    Text {
+        x: (parent.width  - self.preferred-width)  / 2;
+        y: (parent.height - self.preferred-height) / 2;
+        text: root.fallback;
+        color: Tokens.color-muted-foreground;
+        font-size: root.size / 2.5;
+        font-weight: Tokens.typography-weight-medium;
+        visible: root.source.width == 0;
+    }
+
+    Image {
+        width:  parent.width;
+        height: parent.height;
+        source: root.source;
+        image-fit: cover;
+        visible: root.source.width > 0;
+    }
+}
