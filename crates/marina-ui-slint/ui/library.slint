@@ -5,7 +5,7 @@ import { Input } from "slintcn/components/input.slint";
 import { Skeleton } from "slintcn/components/skeleton.slint";
 import { Text as Typography } from "slintcn/components/text.slint";
 import { TextVariant, TextTone } from "slintcn/components/text.slint";
-import { PlatformCard, PlatformCardData } from "platform-card.slint";
+import { PlatformCardData } from "platform-card.slint";
 import { GameCardData } from "card.slint";
 import { PlatformGameList } from "platform-game-list.slint";
 import { PreviewDetailsData } from "preview-details.slint";
@@ -84,18 +84,61 @@ export component LibraryPage inherits Rectangle {
         }
 
         if !root.initial-loading: ListView {
+            x: 0px;
+            width: min(parent.width, 760px);
             vertical-stretch: 1;
-            for platform[i] in root.platforms: PlatformCard {
+            for platform[i] in root.platforms: Rectangle {
                 width: parent.width;
-                platform: platform;
-                clicked => {
-                    root.selected-platform = platform.slug;
-                    root.selected-platform-name = platform.name;
+                height: 52px;
+                background: platform-touch.has-hover
+                    ? Tokens.color-surface-2
+                    : transparent;
+                border-radius: Tokens.radius-sm;
 
-                    root.page = 1;
-                    root.loading = true;
-                    root.details-loading = true;
-                    root.platform-query(platform.slug);
+                Text {
+                    x: Tokens.spacing-sm;
+                    y: 8px;
+                    width: 36px;
+                    height: 36px;
+                    text: platform.icon;
+                    font-size: 22px;
+                    horizontal-alignment: center;
+                    vertical-alignment: center;
+                }
+
+                Typography {
+                    x: 56px;
+                    y: 0px;
+                    width: parent.width - 152px;
+                    height: parent.height;
+                    text: platform.name;
+                    variant: TextVariant.body-lg;
+                    vertical-alignment: center;
+                    overflow: elide;
+                }
+
+                Typography {
+                    x: parent.width - 88px;
+                    y: 0px;
+                    width: 72px;
+                    height: parent.height;
+                    text: platform.game-count;
+                    variant: TextVariant.caption;
+                    tone: TextTone.muted;
+                    horizontal-alignment: right;
+                    vertical-alignment: center;
+                }
+
+                platform-touch := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.selected-platform = platform.slug;
+                        root.selected-platform-name = platform.name;
+                        root.page = 1;
+                        root.loading = true;
+                        root.details-loading = true;
+                        root.platform-query(platform.slug);
+                    }
                 }
             }
         }
