@@ -3,6 +3,7 @@ import { Tokens } from "../slintcn/theme/tokens.slint";
 import { Skeleton } from "../slintcn/components/skeleton.slint";
 import { Text as Typography } from "../slintcn/components/text.slint";
 import { TextVariant, TextTone } from "../slintcn/components/text.slint";
+import { Button } from "../slintcn/components/button.slint";
 import { GameCardData } from "card.slint";
 import { PreviewDetailsData } from "preview-details.slint";
 
@@ -11,7 +12,9 @@ export component PlatformGameList inherits Rectangle {
     in property <PreviewDetailsData> details;
     in-out property <int> selected-index: 0;
     in-out property <bool> details-loading: false;
+    in property <string> action-label: "Open";
     callback selected(string, int);
+    callback action-requested(string, int);
 
     private property <int> safe-index:
         min(max(root.selected-index, 0), max(root.games.length - 1, 0));
@@ -93,14 +96,12 @@ export component PlatformGameList inherits Rectangle {
                         overflow: elide;
                     }
 
-                    Rectangle { horizontal-stretch: 1; }
-
-                    Typography {
-                        text: root.games[root.safe-index].platform;
-                        variant: TextVariant.caption;
-                        tone: TextTone.muted;
-                        vertical-alignment: center;
+                    Button {
+                        text: root.action-label;
+                        clicked => { root.action-requested(root.games[root.safe-index].id, root.safe-index); }
                     }
+
+                    Rectangle { horizontal-stretch: 1; }
                 }
 
                 Rectangle {

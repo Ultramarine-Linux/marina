@@ -34,7 +34,7 @@ pub struct RomFile {
     #[serde(flatten)]
     pub hashes: RomHashes,
     #[serde(default)]
-    pub archive_members: Vec<ArchiveMember>,
-    pub category: String,
+    pub archive_members: Option<Vec<ArchiveMember>>,
+    pub category: Option<String>,
     pub track_meta: Option<TrackMetadata>,
 }

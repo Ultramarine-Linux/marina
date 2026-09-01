@@ -10,3 +10,4 @@ marina-library.workspace = true
 marina-romm.workspace = true
 thiserror.workspace = true
 tokio.workspace = true
+tracing.workspace = true

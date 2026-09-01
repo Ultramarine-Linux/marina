@@ -219,6 +219,9 @@ pub struct RomQuery {
     pub playable: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub missing: Option<bool>,
+    /// Include concrete RomM file records in each ROM response.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub with_files: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub limit: Option<i64>,
     #[serde(skip_serializing_if = "Option::is_none")]

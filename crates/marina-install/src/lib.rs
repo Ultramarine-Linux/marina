@@ -4,6 +4,7 @@ use marina_core::LibraryItem;
 use marina_library::{query::SearchQuery, read::LibraryRead, write::LibraryWrite};
 use marina_romm::{Client, Error as RommError, Rom, RomFile};
 use thiserror::Error;
+use tracing::debug;
 
 #[derive(Debug, Error)]
 pub enum InstallError {
@@ -47,6 +48,10 @@ where
         .join("roms")
         .join(&platform)
         .join(&game);
+    // The scanner may run before the library exists at all. Installation is
+    // the operation that materializes the layout, so create the game folder
+    // before asking the RomM client to open its temporary output file.
+    tokio::fs::create_dir_all(&game_dir).await?;
     let mut installed_files = Vec::with_capacity(request.files.len());
     for file in &request.files {
         if file.file_size_bytes < 0 {
@@ -101,9 +106,13 @@ where
         existing
             .provider_ids
             .insert("romm_id".into(), rom_id.to_string());
-        Ok(library.update(existing).await?)
+        let saved = library.update(existing).await?;
+        debug!(title = %saved.title, local_path = ?saved.local_path, "installed game reconciled into library");
+        Ok(saved)
     } else {
-        Ok(library.add(item).await?)
+        let saved = library.add(item).await?;
+        debug!(title = %saved.title, local_path = ?saved.local_path, "installed game added to library");
+        Ok(saved)
     }
 }
 

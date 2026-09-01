@@ -225,6 +225,30 @@ async fn main() -> Result<(), slint::PlatformError> {
         });
     });
 
+    let home_state = library_state.clone();
+    let home_window = window.as_weak();
+    window.on_home_entered(move || {
+        let Some(state) = home_state.lock().ok().and_then(|state| state.clone()) else {
+            return;
+        };
+        let window = home_window.clone();
+        tokio::spawn(async move {
+            if let Ok((metadata, _)) =
+                shelf::load_games(&state.library, state.config.romm_url.as_deref()).await
+            {
+                let _ = window.upgrade_in_event_loop(move |window| {
+                    if let Some(model) = window
+                        .get_games()
+                        .as_any()
+                        .downcast_ref::<VecModel<GameCardData>>()
+                    {
+                        model.set_vec(game_cards(metadata));
+                    }
+                });
+            }
+        });
+    });
+
     let state_store = library_state.clone();
     tokio::spawn(async move {
         let state = match app::AppState::initialize().await {
@@ -236,22 +260,30 @@ async fn main() -> Result<(), slint::PlatformError> {
         };
 
         if let Some(root) = state.config.library_root.as_ref() {
-            match scan(root) {
-                Ok(items) => {
-                    info!(count = items.len(), "local game scan completed");
-                    for item in items {
-                        if let Some(slug) = item.platform_slug.clone() {
-                            let _ = state
-                                .library
-                                .add_platform(marina_core::Platform::new(&slug, &slug))
-                                .await;
-                        }
-                        if let Err(error) = state.library.add(item).await {
-                            error!(%error, "failed to store scanned local game");
+            match tokio::fs::try_exists(root).await {
+                Ok(false) => {
+                    info!(path = %root.display(), "local library root does not exist yet; skipping scan");
+                }
+                Ok(true) => match scan(root) {
+                    Ok(items) => {
+                        info!(count = items.len(), "local game scan completed");
+                        for item in items {
+                            if let Some(slug) = item.platform_slug.clone() {
+                                let _ = state
+                                    .library
+                                    .add_platform(marina_core::Platform::new(&slug, &slug))
+                                    .await;
+                            }
+                            if let Err(error) = state.library.add(item).await {
+                                error!(%error, "failed to store scanned local game");
+                            }
                         }
                     }
+                    Err(error) => error!(%error, "local game scan failed"),
+                },
+                Err(error) => {
+                    error!(%error, path = %root.display(), "could not inspect local library root")
                 }
-                Err(error) => error!(%error, "local game scan failed"),
             }
         }
 
@@ -286,6 +318,7 @@ async fn main() -> Result<(), slint::PlatformError> {
                                         platform_ids: vec![platform.id],
                                         limit: Some(100),
                                         offset: Some(offset),
+                                        with_files: Some(true),
                                         ..Default::default()
                                     };
                                     let page = match client.list_roms(&query).await {
@@ -496,8 +529,9 @@ async fn main() -> Result<(), slint::PlatformError> {
                     let platform = item.platform_slug.clone().unwrap_or_default();
                     let refreshed =
                         shelf::load_platform_games(&state.library, None, &platform).await;
-                    if let Ok((metadata, _)) = refreshed {
-                        let _ = window.upgrade_in_event_loop(move |window| {
+                    match refreshed {
+                        Ok((metadata, _)) => {
+                            let _ = window.upgrade_in_event_loop(move |window| {
                             let cards = game_cards(metadata);
                             if let Some(model) = window
                                 .get_platform_games()
@@ -511,7 +545,15 @@ async fn main() -> Result<(), slint::PlatformError> {
                             window.set_store_details_loading(false);
                             window.set_store_install_status(SharedString::from("Installed"));
                             window.set_store_install_progress(1.0);
-                        });
+                            });
+                        }
+                        Err(error) => {
+                            error!(%error, platform = %platform, "installed game saved but library refresh failed");
+                            let _ = window.upgrade_in_event_loop(move |window| {
+                                window.set_store_install_status(SharedString::from("Installed; library refresh failed"));
+                                window.set_store_install_progress(1.0);
+                            });
+                        }
                     }
                 }
                 Err(error) => {
@@ -713,7 +755,6 @@ async fn main() -> Result<(), slint::PlatformError> {
             .cloned();
         if let Some(rom) = cached_rom {
             populate_store_details(&detail_window, rom);
-            return;
         }
         let Some(state) = detail_state
             .lock()
@@ -722,15 +763,21 @@ async fn main() -> Result<(), slint::PlatformError> {
         else {
             return;
         };
+        let Some(base_url) = state.config.romm_url.clone() else {
+            return;
+        };
+        let token = state.config.romm_token.clone();
+        let detail_roms = detail_store.clone();
         let detail_window = detail_window.clone();
         tokio::spawn(async move {
-            let Ok(Some(json)) = state.library.remote_json("romm", &id.to_string()) else {
-                return;
-            };
-            let Ok(rom) = serde_json::from_str::<marina_romm::Rom>(&json) else {
-                return;
-            };
-            populate_store_details(&detail_window, rom);
+            let client = romm_auth::client(base_url, token.as_deref());
+            match client.get_rom(id).await {
+                Ok(rom) => {
+                    *detail_roms.lock().expect("remote Store state poisoned") = vec![rom.clone()];
+                    populate_store_details(&detail_window, rom);
+                }
+                Err(error) => error!(%error, rom_id = id, "RomM game detail hydration failed"),
+            }
         });
     });
 
@@ -739,14 +786,16 @@ async fn main() -> Result<(), slint::PlatformError> {
 
 fn populate_store_details(window: &slint::Weak<MainWindow>, rom: marina_romm::Rom) {
     let item: marina_core::LibraryItem = rom.clone().into();
+    let rom_prefix = rom.files.full_path.trim_end_matches('/').to_owned();
     let artifacts = rom
         .files
         .files
         .iter()
         .map(|file| {
             SharedString::from(format!(
-                "{} ({} bytes)",
-                file.file_name, file.file_size_bytes
+                "{}  ({} bytes)",
+                display_artifact_path(file, &rom_prefix),
+                file.file_size_bytes
             ))
         })
         .collect::<Vec<_>>();
@@ -770,6 +819,23 @@ fn populate_store_details(window: &slint::Weak<MainWindow>, rom: marina_romm::Ro
         );
         window.set_store_details_loading(false);
     });
+}
+
+fn display_artifact_path(file: &marina_romm::RomFile, rom_prefix: &str) -> String {
+    let source = if file.full_path.is_empty() {
+        &file.file_path
+    } else {
+        &file.full_path
+    };
+    let stripped = source
+        .strip_prefix(rom_prefix)
+        .unwrap_or(source)
+        .trim_start_matches('/');
+    if stripped.is_empty() {
+        file.file_name.clone()
+    } else {
+        stripped.to_owned()
+    }
 }
 
 struct PlatformCardMetadata {

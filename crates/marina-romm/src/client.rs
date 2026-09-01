@@ -59,6 +59,12 @@ impl Client {
         self.get("/api/heartbeat").await
     }
 
+    /// Hydrate one ROM, including its concrete file entries.
+    pub async fn get_rom(&self, rom_id: i32) -> Result<Rom, Error> {
+        self.get(&format!("/api/roms/{rom_id}?with_files=true"))
+            .await
+    }
+
     pub async fn list_roms(&self, query: &RomQuery) -> Result<RomPage, Error> {
         let mut url = format!("{}/api/roms", self.base_url);
         let encoded = serde_urlencoded::to_string(query)?;

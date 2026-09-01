@@ -8,7 +8,7 @@ import { Shelf, ShelfSkeleton } from "../components/shelf.slint";
 import { LibraryPage } from "library.slint";
 import { PlatformCardData } from "../components/platform-card.slint";
 import { PreviewDetailsData } from "../components/preview-details.slint";
-import { GamePage } from "game-page.slint";
+import { GameDetailsView } from "../components/game-details-view.slint";
 import { StorePage } from "store.slint";
 
 export component MainWindow inherits Window {
@@ -52,6 +52,8 @@ export component MainWindow inherits Window {
     callback store-artifact-selected(int);
     callback store-install-requested(string, [bool]);
     callback store-entered;
+    callback home-entered;
+    callback library-entered;
 
     in-out property <int> active-tab: 0;
     private property <int> content-tab: 0;
@@ -71,6 +73,8 @@ export component MainWindow inherits Window {
     changed active-tab => {
         root.switching-tabs = true;
         root.cover-context-changed(root.active-tab);
+        if (root.active-tab == 0) { root.home-entered(); }
+        if (root.active-tab == 1) { root.library-entered(); }
         if (root.active-tab == 2) { root.store-entered(); }
     }
 
@@ -105,11 +109,12 @@ export component MainWindow inherits Window {
             }
         }
 
-        if !root.switching-tabs && root.game-page-visible: GamePage {
+        if !root.switching-tabs && root.game-page-visible: GameDetailsView {
             game: root.selected-game;
             details: root.game-details;
             loading: root.game-details-loading;
             back => { root.game-page-visible = false; }
+            action-requested => { root.game-page-visible = false; root.game-opened(root.selected-game.id); }
         }
 
         if !root.switching-tabs && !root.game-page-visible && root.content-tab == 0 && root.loading: ShelfSkeleton {
