@@ -17,6 +17,13 @@ into that kind of vibe testing that shit
 
 to get started, get build dependencies for slint (`fontconfig-devel`), and then spin up a surrealdb database for the fixtures, or use your existing RomM library if you have one
 
+### prerequisites
+
+- fontconfig-devel
+- clang-devel
+- lld
+- 
+
 ```env
 ROMM_TOKEN=my_romm_token
 # cappy's personal RomM server, so you can fetch assets from the fixtures below

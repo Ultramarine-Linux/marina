@@ -1,6 +1,6 @@
 //! Shelf view-model and layout sizing.
 
-use marina_library::{LibraryError, LibraryRead, SearchQuery};
+use marina_library::{error::LibraryError, query::SearchQuery, read::LibraryRead};
 use marina_store_surrealdb::SurrealLibrary;
 
 use crate::covers::{self, CoverSource};

@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex};
 
-use marina_library::{LibraryItemId, LibraryRead, PlatformRead};
+use marina_core::LibraryItemId;
+use marina_library::read::{LibraryRead, PlatformRead};
 use serde::Serialize;
 use slint::{Image, Model, ModelRc, SharedString, VecModel};
 use tracing::{error, info};
@@ -430,7 +431,7 @@ fn empty_preview_details() -> PreviewDetailsData {
     }
 }
 
-fn preview_details(item: marina_library::LibraryItem) -> PreviewDetailsData {
+fn preview_details(item: marina_core::LibraryItem) -> PreviewDetailsData {
     PreviewDetailsData {
         title: SharedString::from(item.title),
         summary: SharedString::from(item.summary.unwrap_or_default()),

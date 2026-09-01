@@ -3,7 +3,7 @@ use std::{env, error::Error};
 use futures_util::StreamExt;
 
 use marina_core::{LibraryItem, Platform as MarinaPlatform};
-use marina_library::{LibraryRead, LibraryWrite, SearchQuery};
+use marina_library::{read::LibraryRead, write::LibraryWrite};
 use marina_romm::{Auth, Client, PlatformQuery, RomQueryBuilder};
 use marina_store_surrealdb::SurrealLibrary;
 

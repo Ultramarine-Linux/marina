@@ -1,4 +1,5 @@
-use marina_library::{LibraryError, Platform, PlatformRead, PlatformWrite};
+use marina_core::Platform;
+use marina_library::{error::LibraryError, read::PlatformRead, write::PlatformWrite};
 use serde::{Deserialize, Serialize};
 use surrealdb::types::SurrealValue;
 

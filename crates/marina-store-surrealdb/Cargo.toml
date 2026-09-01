@@ -7,6 +7,13 @@ license.workspace = true
 [dependencies]
 chrono.workspace = true
 surrealdb = { version = "3.2.4", features = ["kv-mem", "kv-surrealkv", "kv-rocksdb"] }
+# Activate rust-rocksdb's LTO feature for its transitive sys crate.
+surrealdb-librocksdb-sys = {
+    package = "surrealdb-librocksdb-sys",
+    version = "0.18.3",
+    default-features = false,
+    features = ["lto"],
+}
 surrealkit = "0.7"
 marina-core.workspace = true
 marina-library.workspace = true

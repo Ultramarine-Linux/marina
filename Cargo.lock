@@ -4542,6 +4542,7 @@ dependencies = [
  "marina-library",
  "serde",
  "surrealdb",
+ "surrealdb-librocksdb-sys",
  "surrealkit",
  "thiserror 2.0.20",
  "tokio",

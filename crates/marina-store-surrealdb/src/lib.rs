@@ -15,7 +15,12 @@ pub use connection::{SurrealLibrary, SurrealLibraryError};
 
 #[cfg(test)]
 mod tests {
-    use marina_library::{LibraryItem, LibraryRead, LibraryWrite, PlatformRead, SearchQuery};
+    use marina_core::{LibraryItem, Platform};
+    use marina_library::{
+        query::SearchQuery,
+        read::{LibraryRead, PlatformRead},
+        write::LibraryWrite,
+    };
 
     use super::SurrealLibrary;
 
@@ -57,7 +62,7 @@ mod tests {
     async fn platforms_are_stored_and_read_separately() {
         let library = SurrealLibrary::connect("mem://").await.unwrap();
         library
-            .add_platforms([marina_library::Platform::new("snes", "Super Nintendo")])
+            .add_platforms([Platform::new("snes", "Super Nintendo")])
             .await
             .unwrap();
 
@@ -69,7 +74,7 @@ mod tests {
     async fn list_cards_falls_back_to_platform_slug_for_blank_name() {
         let library = SurrealLibrary::connect("mem://").await.unwrap();
         library
-            .add_platforms([marina_library::Platform::new("gba", "")])
+            .add_platforms([Platform::new("gba", "")])
             .await
             .unwrap();
 
@@ -85,7 +90,7 @@ mod tests {
     async fn list_cards_resolves_platform_name() {
         let library = SurrealLibrary::connect("mem://").await.unwrap();
         library
-            .add_platforms([marina_library::Platform::new("snes", "Super Nintendo")])
+            .add_platforms([Platform::new("snes", "Super Nintendo")])
             .await
             .unwrap();
 
@@ -99,11 +104,7 @@ mod tests {
         assert_eq!(cards[0].platform_name.as_deref(), Some("Super Nintendo"));
 
         let search_results = library
-            .search_cards(
-                marina_library::SearchQuery::new()
-                    .text("mario")
-                    .platform("snes"),
-            )
+            .search_cards(SearchQuery::new().text("mario").platform("snes"))
             .await
             .unwrap();
         assert_eq!(search_results, cards);

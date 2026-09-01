@@ -7,7 +7,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use marina_library::{LibraryError, LibraryRead};
+use marina_library::{error::LibraryError, read::LibraryRead};
 use slint::{ComponentHandle, Image, Model, SharedPixelBuffer};
 use tracing::{debug, warn};
 

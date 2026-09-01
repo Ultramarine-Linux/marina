@@ -1,9 +1,9 @@
 [profile.release]
 opt-level = "z"          # Optimization level (0-3, s, z)
-lto = true             # Link-Time Optimization
+lto = "fat"            # Link-Time Optimization, including surrealdb-librocksdb-sys
 codegen-units = 1      # Better optimization, slower compile
 panic = "abort"        # Smaller binary, no unwinding
-strip = true           # Strip debug symbols
+strip = true            # Strip debug symbols
 
 [workspace]
 
