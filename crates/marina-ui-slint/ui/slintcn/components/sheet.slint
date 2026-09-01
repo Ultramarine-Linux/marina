@@ -77,6 +77,11 @@ export component Sheet inherits Rectangle {
 
     forward-focus: focus-scope;
     focus-scope := FocusScope {
+        // Keep this keyboard-only scope out of pointer hit testing. A default
+        // FocusScope fills the Sheet and consumes the first press to focus
+        // itself before nested controls can receive their click.
+        width: 0px;
+        height: 0px;
         enabled: root.open;
         key-pressed(event) => {
             if (event.text == "\u{1b}") {
