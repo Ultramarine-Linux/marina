@@ -4,7 +4,7 @@
 // see: https://zed.dev/docs/debugger
 [
   {
-    "label": "Debug marina-ui-slint",
+    "label": "marina-ui-slint",
     "build": {
       "command": "cargo",
       "args": ["build", "--package", "marina-ui-slint", "--features", "debug-mcp,live-preview"]
@@ -14,7 +14,8 @@
       "RUST_LOG": "debug",
       "SLINT_MCP_PORT": "9315",
       "SLINT_EMIT_DEBUG_INFO": "1",
-      "SLINT_LIVE_PREVIEW": "1"
+      "SLINT_LIVE_PREVIEW": "1",
+      "SLINT_BACKEND": "winit-femtovg-wgpu"
     },
     "sourceLanguages": ["rust"],
     "request": "launch",

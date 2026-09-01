@@ -24,7 +24,7 @@ ROMM_URL=https://romm.cappuchino.xyz
 # for hacking on database, you may use a hosted surrealdb instance
 MARINA_STORAGE_URI=ws://localhost:8000
 # for prod you will be using local surrealkv
-#MARINA_STORAGE_URI=surrealkv://.data/
+#MARINA_STORAGE_URI=rocksdb://.data/
 
 # surrealdb credentials for testing database, not needed for prod
 MARINA_STORAGE_USERNAME=root

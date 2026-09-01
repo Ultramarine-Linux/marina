@@ -1,8 +1,8 @@
 //! SurrealDB-backed storage for Marina's library interfaces.
 //!
 //! The backend accepts SurrealDB endpoint URIs, for example `mem://` for an
-//! ephemeral test database or `surrealkv://./marina.db` for a local persistent
-//! database.
+//! ephemeral test database, `surrealkv://./marina.db` for a local persistent
+//! SurrealKV database, or `rocksdb://./marina.db` for a RocksDB-backed store.
 
 surrealkit::embed_schema!();
 
