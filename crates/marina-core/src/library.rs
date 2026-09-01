@@ -67,6 +67,8 @@ pub struct LibraryItem {
     pub kind: ItemKind,
     /// RomM's filesystem slug, used as Marina's platform/directory ID.
     pub platform_slug: Option<String>,
+    /// Local launch path, when this item is installed on the device.
+    pub local_path: Option<String>,
     // insert more stuff here like uh covers n shit idk
     pub provider_ids: HashMap<String, String>,
 
@@ -94,6 +96,7 @@ impl LibraryItem {
             title: title.into(),
             kind: ItemKind::Game,
             platform_slug: None,
+            local_path: None,
             provider_ids: HashMap::new(),
             summary: None,
             alternative_names: Vec::new(),
@@ -112,6 +115,8 @@ impl LibraryItem {
 
 #[derive(Clone, Debug, Eq, PartialEq, Default)]
 pub struct LibraryItemFile {
+    /// Provider-specific artifact identity, such as a RomM file ID.
+    pub provider_id: Option<String>,
     pub name: String,
     pub path: String,
     pub size_bytes: Option<u64>,

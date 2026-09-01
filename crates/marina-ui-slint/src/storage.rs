@@ -1,25 +1,18 @@
-//! Library storage connection.
+//! Local library storage connection.
 
-use marina_store_surrealdb::{SurrealLibrary, SurrealLibraryError};
+use marina_store_sqlite::SqliteLibrary;
 use tracing::instrument;
 
 use crate::config::Config;
 
-/// Connects to the configured SurrealDB endpoint, authenticating as root for
-/// remote (`ws://`/`wss://`) endpoints.
-// by default we should only be using the SurrealKV backend,
-// but we may want to connect to a remote endpoint instead for
-// debugging
+/// Opens the configured local SQLite library.
 #[instrument(skip_all, fields(uri = %config.storage_uri))]
-pub async fn connect(config: &Config) -> Result<SurrealLibrary, SurrealLibraryError> {
-    if config.storage_uri.starts_with("ws://") || config.storage_uri.starts_with("wss://") {
-        SurrealLibrary::connect_with_root(
-            config.storage_uri.as_str(),
-            config.storage_username.clone(),
-            config.storage_password.clone(),
-        )
-        .await
-    } else {
-        SurrealLibrary::connect(config.storage_uri.as_str()).await
-    }
+pub async fn connect(
+    config: &Config,
+) -> Result<SqliteLibrary, Box<dyn std::error::Error + Send + Sync>> {
+    let path = config
+        .storage_uri
+        .strip_prefix("sqlite://")
+        .unwrap_or(config.storage_uri.as_str());
+    Ok(SqliteLibrary::open(path)?)
 }

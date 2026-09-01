@@ -1,7 +1,7 @@
 //! Shelf view-model and layout sizing.
 
 use marina_library::{error::LibraryError, query::SearchQuery, read::LibraryRead};
-use marina_store_surrealdb::SurrealLibrary;
+use marina_store_sqlite::SqliteLibrary;
 
 use crate::covers::{self, CoverSource};
 
@@ -20,7 +20,7 @@ pub struct GameMetadata {
 }
 
 pub async fn load_games(
-    library: &SurrealLibrary,
+    library: &SqliteLibrary,
     romm_base_url: Option<&str>,
 ) -> Result<(Vec<GameMetadata>, Vec<CoverSource>), LibraryError> {
     covers::load_games_metadata(library, romm_base_url).await
@@ -31,7 +31,7 @@ pub async fn load_games(
 /// Pagination is deliberately applied in the backend query so the UI never
 /// needs to hold the complete platform library in memory.
 pub async fn load_platform_games(
-    library: &SurrealLibrary,
+    library: &SqliteLibrary,
     romm_base_url: Option<&str>,
     platform_slug: &str,
 ) -> Result<(Vec<GameMetadata>, Vec<CoverSource>), LibraryError> {

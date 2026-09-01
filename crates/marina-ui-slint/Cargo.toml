@@ -26,7 +26,10 @@ marina-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 marina-library.workspace = true
-marina-store-surrealdb.workspace = true
+marina-romm.workspace = true
+marina-install.workspace = true
+marina-scanner.workspace = true
+marina-store-sqlite.workspace = true
 reqwest.workspace = true
 tokio = { workspace = true, features = ["fs"] }
 tracing.workspace = true

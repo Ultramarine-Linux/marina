@@ -1,6 +1,6 @@
 [profile.release]
 opt-level = "z"          # Optimization level (0-3, s, z)
-lto = "fat"            # Link-Time Optimization, including surrealdb-librocksdb-sys
+lto = "fat"
 codegen-units = 1      # Better optimization, slower compile
 panic = "abort"        # Smaller binary, no unwinding
 strip = true            # Strip debug symbols
@@ -11,7 +11,9 @@ resolver = "3"
 members = [
     "crates/marina-core", "crates/marina-library",
     "crates/marina-romm",
-    "crates/marina-store-surrealdb",
+    "crates/marina-install",
+    "crates/marina-scanner",
+    "crates/marina-store-sqlite",
     "crates/marina-test",
     "crates/marina-ui-slint",
 ]
@@ -32,8 +34,10 @@ reqwest = { version = "0.13", default-features = false, features = ["json", "que
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 serde_urlencoded = "0.7"
+rusqlite = "0.32"
 thiserror = "2"
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }
+urlencoding = "2"
 tracing = "0.1"
 url = "2"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
@@ -42,5 +46,7 @@ uuid = { version = "1", features = ["v4", "v5"] }
 # marina
 marina-core = { path = "crates/marina-core" }
 marina-romm = { path = "crates/marina-romm" }
+marina-install = { path = "crates/marina-install" }
+marina-scanner = { path = "crates/marina-scanner" }
 marina-library = { path = "crates/marina-library" }
-marina-store-surrealdb = { path = "crates/marina-store-surrealdb" }
+marina-store-sqlite = { path = "crates/marina-store-sqlite" }

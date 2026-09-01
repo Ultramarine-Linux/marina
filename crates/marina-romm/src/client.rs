@@ -4,6 +4,9 @@ use base64::{Engine as _, engine::general_purpose::STANDARD};
 use futures_util::{Stream, StreamExt, stream};
 use reqwest::header::{AUTHORIZATION, HeaderMap, HeaderValue};
 use serde::de::DeserializeOwned;
+use std::path::Path;
+use tokio::io::AsyncWriteExt;
+use tracing::{debug, info};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Auth {
@@ -121,6 +124,52 @@ impl Client {
         self.get_url(url).await
     }
 
+    /// Streams one ROM file to disk without buffering it in memory.
+    pub async fn download_file(
+        &self,
+        rom_id: i32,
+        file_name: &str,
+        file_id: Option<i32>,
+        destination: impl AsRef<Path>,
+    ) -> Result<(), Error> {
+        info!(rom_id, file_name, ?file_id, "starting RomM file download");
+        let mut url = format!(
+            "{}/api/roms/{}/content/{}",
+            self.base_url,
+            rom_id,
+            urlencoding::encode(file_name)
+        );
+        if let Some(file_id) = file_id {
+            url.push_str(&format!("?file_ids={file_id}"));
+        }
+        let response = self
+            .http
+            .get(url)
+            .headers(self.auth_headers()?)
+            .send()
+            .await?;
+        let status = response.status();
+        debug!(rom_id, file_name, %status, "RomM file response received");
+        if !status.is_success() {
+            return Err(Error::Http {
+                status: status.as_u16(),
+                body: response.text().await?,
+            });
+        }
+        let destination = destination.as_ref();
+        if let Some(parent) = destination.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+        let mut output = tokio::fs::File::create(destination).await?;
+        let mut response = response;
+        while let Some(chunk) = response.chunk().await? {
+            output.write_all(&chunk).await?;
+        }
+        output.flush().await?;
+        info!(rom_id, file_name, "RomM file download completed");
+        Ok(())
+    }
+
     async fn get<T>(&self, path: &str) -> Result<T, Error>
     where
         T: DeserializeOwned,
@@ -133,13 +182,16 @@ impl Client {
     where
         T: DeserializeOwned,
     {
+        let endpoint = url.strip_prefix(&self.base_url).unwrap_or(&url).to_owned();
+        debug!(endpoint = %endpoint, authenticated = self.auth.is_some(), "RomM request");
         let response = self
             .http
-            .get(url)
+            .get(&url)
             .headers(self.auth_headers()?)
             .send()
             .await?;
 
+        debug!(endpoint = %endpoint, status = %response.status(), "RomM response");
         self.decode_response(response).await
     }
 

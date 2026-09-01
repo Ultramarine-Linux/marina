@@ -15,7 +15,7 @@ into that kind of vibe testing that shit
 
 ## getting started
 
-to get started, get build dependencies for slint (`fontconfig-devel`), and then spin up a surrealdb database for the fixtures, or use your existing RomM library if you have one
+to get started, get build dependencies for slint (`fontconfig-devel`), then configure a local SQLite database and/or use your existing RomM library for fixtures
 
 ### prerequisites
 
@@ -28,14 +28,12 @@ to get started, get build dependencies for slint (`fontconfig-devel`), and then 
 ROMM_TOKEN=my_romm_token
 # cappy's personal RomM server, so you can fetch assets from the fixtures below
 ROMM_URL=https://romm.cappuchino.xyz
-# for hacking on database, you may use a hosted surrealdb instance
-MARINA_STORAGE_URI=ws://localhost:8000
-# for prod you will be using local surrealkv
-#MARINA_STORAGE_URI=rocksdb://.data/
-
-# surrealdb credentials for testing database, not needed for prod
-MARINA_STORAGE_USERNAME=root
-MARINA_STORAGE_PASSWORD=root
+# Root directory containing locally installed games. The local library is
+# intentionally based on installed content; RomM remains the online Store and
+# save-sync source.
+MARINA_LIBRARY_ROOT=/path/to/marina/library
+# SQLite database path; the default is sqlite://marina.db
+MARINA_STORAGE_URI=sqlite://marina.db
 
 #
 #ROMM_LIMIT=1

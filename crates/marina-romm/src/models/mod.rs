@@ -3,7 +3,7 @@ pub mod platforms;
 pub mod roms;
 
 pub use platforms::{Platform, PlatformQuery, PlatformQueryBuilder};
-pub use roms::{Rom, RomPage, RomQuery, RomQueryBuilder};
+pub use roms::{Rom, RomFile, RomPage, RomQuery, RomQueryBuilder};
 
 use serde::{Deserialize, Serialize};
 

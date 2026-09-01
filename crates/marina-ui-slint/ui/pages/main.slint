@@ -9,11 +9,26 @@ import { LibraryPage } from "library.slint";
 import { PlatformCardData } from "../components/platform-card.slint";
 import { PreviewDetailsData } from "../components/preview-details.slint";
 import { GamePage } from "game-page.slint";
+import { StorePage } from "store.slint";
 
 export component MainWindow inherits Window {
     in property <[GameCardData]> games;
     in property <[PlatformCardData]> platforms;
     in property <[GameCardData]> platform-games;
+    in property <[PlatformCardData]> store-platforms;
+    in property <[GameCardData]> store-games;
+    in property <PreviewDetailsData> store-details;
+    in property <[string]> store-artifacts;
+    in-out property <[bool]> store-selected-artifacts;
+    in-out property <int> store-page: 0;
+
+    in-out property <int> store-selected-game-index: 0;
+    in-out property <int> store-selected-artifact-index: 0;
+    in-out property <bool> store-loading: false;
+    in-out property <bool> store-details-loading: false;
+    in-out property <string> store-install-status;
+    in-out property <float> store-install-progress: 0;
+    in-out property <string> store-sync-status;
     in-out property <string> profile-name: "User";
     in-out property <string> profile-username: "user";
     in-out property <string> profile-initials: "U";
@@ -31,6 +46,12 @@ export component MainWindow inherits Window {
     callback platform-query(string);
     callback game-selected(string, int);
     callback game-opened(string);
+    callback store-search(string);
+    callback store-platform-query(string);
+    callback store-game-selected(string, int);
+    callback store-artifact-selected(int);
+    callback store-install-requested(string, [bool]);
+    callback store-entered;
 
     in-out property <int> active-tab: 0;
     private property <int> content-tab: 0;
@@ -39,7 +60,7 @@ export component MainWindow inherits Window {
     property <[NavigationItem]> navigation-items: [
         { label: "Home" },
         { label: "Library" },
-        { label: "Collections" },
+        { label: "Store" },
     ];
 
     width: 1280px;
@@ -50,6 +71,7 @@ export component MainWindow inherits Window {
     changed active-tab => {
         root.switching-tabs = true;
         root.cover-context-changed(root.active-tab);
+        if (root.active-tab == 2) { root.store-entered(); }
     }
 
     Timer {
@@ -113,16 +135,27 @@ export component MainWindow inherits Window {
             game-selected(id, index) => { root.game-selected(id, index); }
         }
 
-        if !root.switching-tabs && !root.game-page-visible && root.content-tab == 2: Rectangle {
-            background: transparent;
+        if !root.switching-tabs && !root.game-page-visible && root.content-tab == 2: StorePage {
+            platforms: root.store-platforms;
+            games: root.store-games;
+            details: root.store-details;
+            artifacts: root.store-artifacts;
+            selected-artifacts <=> root.store-selected-artifacts;
+            page <=> root.store-page;
 
-            Typography {
-                x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2;
-                text: "Collections are coming soon";
-                variant: TextVariant.body-lg;
-                tone: TextTone.muted;
-            }
+            selected-game-index <=> root.store-selected-game-index;
+            selected-artifact-index <=> root.store-selected-artifact-index;
+            search-query <=> root.search-query;
+            loading <=> root.store-loading;
+            details-loading <=> root.store-details-loading;
+            install-status <=> root.store-install-status;
+            install-progress <=> root.store-install-progress;
+            sync-status <=> root.store-sync-status;
+            platform-query(slug) => { root.store-platform-query(slug); }
+            game-selected(id, index) => { root.store-game-selected(id, index); }
+            artifact-selected(index) => { root.store-artifact-selected(index); }
+            install-requested(id, selected) => { root.store-install-requested(id, selected); }
+            search-requested(query) => { root.store-search(query); }
         }
     }
 }

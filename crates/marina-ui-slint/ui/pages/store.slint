@@ -1,0 +1,211 @@
+import { ListView } from "std-widgets.slint";
+import { Tokens } from "../slintcn/theme/tokens.slint";
+import { Button, ButtonVariant, ButtonSize } from "../slintcn/components/button.slint";
+import { Input } from "../slintcn/components/input.slint";
+import { Skeleton } from "../slintcn/components/skeleton.slint";
+import { Text as Typography } from "../slintcn/components/text.slint";
+import { TextVariant, TextTone } from "../slintcn/components/text.slint";
+import { ScrollArea } from "../slintcn/components/scroll-area.slint";
+import { Sheet, SheetSide } from "../slintcn/components/sheet.slint";
+import { PlatformCardData } from "../components/platform-card.slint";
+import { GameCardData } from "../components/card.slint";
+import { PlatformGameList } from "../components/platform-game-list.slint";
+import { PreviewDetailsData } from "../components/preview-details.slint";
+
+export component StorePage inherits Rectangle {
+    in property <[PlatformCardData]> platforms;
+    in property <[GameCardData]> games;
+    in property <PreviewDetailsData> details;
+    in property <[string]> artifacts;
+    in-out property <[bool]> selected-artifacts;
+    in-out property <int> page: 0;
+    in-out property <int> selected-game-index: 0;
+    in-out property <int> selected-artifact-index: 0;
+    in-out property <string> search-query;
+    in-out property <string> selected-platform;
+    in-out property <string> selected-platform-name;
+    in-out property <bool> loading: false;
+    in-out property <bool> details-loading: false;
+    in-out property <string> install-status;
+    in-out property <float> install-progress: 0;
+    in-out property <string> sync-status;
+    in-out property <bool> artifact-sheet-open: false;
+
+    callback platform-query(string);
+    callback game-selected(string, int);
+    callback artifact-selected(int);
+    callback install-requested(string, [bool]);
+    callback search-requested(string);
+
+    background: transparent;
+
+    if root.page == 0: VerticalLayout {
+        spacing: Tokens.spacing-lg;
+        HorizontalLayout {
+            height: 38px;
+            spacing: Tokens.spacing-sm;
+            Typography { text: "Store"; variant: TextVariant.headline; vertical-alignment: center; }
+            Rectangle { horizontal-stretch: 1; }
+            Input { width: 260px; text <=> root.search-query; placeholder: "Search platforms..."; }
+        }
+        Rectangle { height: 1px; background: Tokens.color-border-hairline; }
+        if root.loading: HorizontalLayout {
+            spacing: Tokens.spacing-md;
+            vertical-stretch: 1;
+            for _ in 5: Skeleton { width: (parent.width - 4 * Tokens.spacing-md) / 5; height: 158px; radius: Tokens.radius-lg; }
+        }
+        if !root.loading: ListView {
+            for platform[i] in root.platforms: Rectangle {
+                width: parent.width;
+                height: 52px;
+                background: touch.has-hover ? Tokens.color-surface-2 : transparent;
+                border-radius: Tokens.radius-sm;
+                Typography { x: Tokens.spacing-md; width: parent.width - 140px; height: parent.height; text: platform.name; variant: TextVariant.body-lg; vertical-alignment: center; overflow: elide; }
+                Typography { x: parent.width - 112px; width: 96px; height: parent.height; text: platform.game-count; variant: TextVariant.caption; tone: TextTone.muted; horizontal-alignment: right; vertical-alignment: center; }
+                touch := TouchArea {
+                    mouse-cursor: pointer;
+                    clicked => {
+                        root.selected-platform = platform.slug;
+                        root.selected-platform-name = platform.name;
+                        root.page = 1;
+                        root.loading = true;
+                        root.platform-query(platform.slug);
+                    }
+                }
+            }
+        }
+    }
+
+    if root.page == 1: VerticalLayout {
+        spacing: Tokens.spacing-lg;
+        HorizontalLayout {
+            height: 38px;
+            spacing: Tokens.spacing-md;
+            Button { width: 36px; height: 36px; variant: ButtonVariant.ghost; size: ButtonSize.icon; text: "←"; clicked => { root.page = 0; } }
+            Typography { text: root.selected-platform-name; variant: TextVariant.headline; vertical-alignment: center; }
+        }
+        Rectangle { height: 1px; background: Tokens.color-border-hairline; }
+        if root.loading: Skeleton { vertical-stretch: 1; radius: Tokens.radius-md; }
+        if !root.loading: PlatformGameList {
+            games: root.games;
+            details: root.details;
+            selected-index <=> root.selected-game-index;
+            details-loading <=> root.details-loading;
+            selected(id, index) => { root.game-selected(id, index); root.page = 2; }
+            vertical-stretch: 1;
+        }
+
+    }
+
+    if root.page == 2: VerticalLayout {
+        spacing: Tokens.spacing-lg;
+        HorizontalLayout {
+            height: 38px;
+            spacing: Tokens.spacing-md;
+            Button { width: 36px; height: 36px; variant: ButtonVariant.ghost; size: ButtonSize.icon; text: "←"; clicked => { root.page = 1; } }
+            if root.games.length > 0: Typography { text: root.games[root.selected-game-index].title; variant: TextVariant.headline; vertical-alignment: center; overflow: elide; }
+        }
+        Rectangle { height: 1px; background: Tokens.color-border-hairline; }
+        if root.games.length > 0: ScrollArea {
+            width: parent.width;
+            vertical-stretch: 1;
+            content-height: max(parent.height, 520px + root.artifacts.length * 52px);
+            VerticalLayout {
+                spacing: Tokens.spacing-lg;
+                HorizontalLayout {
+                    height: 300px;
+                    spacing: Tokens.spacing-lg;
+                    Rectangle {
+                        width: 220px;
+                        background: Tokens.color-surface-1;
+                        border-radius: Tokens.radius-md;
+                        Image { width: parent.width; height: parent.height; source: root.games[root.selected-game-index].cover; image-fit: contain; }
+                    }
+                    VerticalLayout {
+                        horizontal-stretch: 1;
+                        spacing: Tokens.spacing-md;
+                        Typography { text: root.games[root.selected-game-index].title; variant: TextVariant.headline; wrap: word-wrap; }
+                        Typography { text: root.games[root.selected-game-index].platform; variant: TextVariant.body-lg; tone: TextTone.muted; }
+                        Button {
+                            text: "Download";
+                            clicked => { root.artifact-sheet-open = true; }
+                        }
+                        Rectangle { vertical-stretch: 1; }
+                    }
+                }
+                Typography { text: root.details-loading ? "Loading details..." : "Description"; variant: TextVariant.title; }
+                Typography { width: parent.width; text: root.details-loading ? "Loading details..." : root.details.summary; variant: TextVariant.body-lg; tone: TextTone.muted; wrap: word-wrap; }
+            }
+        }
+        if root.games.length == 0: Typography { text: "Select a game to view its details."; tone: TextTone.muted; }
+    }
+
+    if root.sync-status != "": Rectangle {
+        x: parent.width - self.width - 20px;
+        y: 20px;
+        width: 360px;
+        height: 48px;
+        background: Tokens.color-surface-1;
+        border-radius: Tokens.radius-md;
+        border-width: 1px;
+        border-color: Tokens.color-border-hairline;
+        Typography { x: 14px; y: 12px; text: root.sync-status; variant: TextVariant.body-sm; }
+    }
+
+    if root.install-status != "": Rectangle {
+        background: #00000088;
+        TouchArea { clicked => { root.install-status = ""; } }
+        Rectangle {
+            width: 420px;
+            height: 150px;
+            x: (parent.width - self.width) / 2;
+            y: (parent.height - self.height) / 2;
+            background: Tokens.color-surface-1;
+            border-radius: Tokens.radius-md;
+            VerticalLayout {
+                padding: Tokens.spacing-lg;
+                spacing: Tokens.spacing-md;
+                Typography { text: "Install"; variant: TextVariant.headline; }
+                Typography { text: root.install-status; variant: TextVariant.body-sm; wrap: word-wrap; }
+                Rectangle {
+                    height: 5px;
+                    background: Tokens.color-accent;
+                    width: (parent.width - 2 * Tokens.spacing-lg) * root.install-progress;
+                    border-radius: 3px;
+                }
+            }
+        }
+    }
+
+    if root.games.length > 0: Sheet {
+        open <=> root.artifact-sheet-open;
+        side: SheetSide.right;
+        panel-extent: 440px;
+        title: "Download artifacts";
+        description: root.games[root.selected-game-index].title;
+        dismiss-on-backdrop: root.install-status == "";
+        VerticalLayout {
+            padding: Tokens.spacing-lg;
+            spacing: Tokens.spacing-md;
+            Typography { text: "Available files"; variant: TextVariant.title; }
+            if root.artifacts.length == 0: Typography { text: "No downloadable artifacts available."; tone: TextTone.muted; }
+            for artifact[i] in root.artifacts: Rectangle {
+                height: 52px;
+                background: root.selected-artifacts[i] ? Tokens.color-surface-3 : Tokens.color-surface-1;
+                border-radius: Tokens.radius-sm;
+                Typography { x: Tokens.spacing-md; width: parent.width - 130px; height: parent.height; text: artifact; variant: TextVariant.body-sm; vertical-alignment: center; overflow: elide; }
+                Button { x: parent.width - 112px; width: 100px; height: 34px; y: 9px; text: root.selected-artifacts[i] ? "Selected" : "Select"; clicked => { root.selected-artifacts[i] = !root.selected-artifacts[i]; root.selected-artifact-index = i; root.artifact-selected(i); } }
+            }
+            Rectangle { vertical-stretch: 1; }
+            Button {
+                text: "Download selected";
+                clicked => {
+                    if (root.artifacts.length > 0) {
+                        root.install-requested(root.games[root.selected-game-index].id, root.selected-artifacts);
+                        root.artifact-sheet-open = false;
+                    }
+                }
+            }
+        }
+    }
+}

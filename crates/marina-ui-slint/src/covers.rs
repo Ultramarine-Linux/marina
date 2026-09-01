@@ -249,7 +249,7 @@ fn resolve_url(cover: Option<&str>, base_url: Option<&str>) -> Option<String> {
 }
 
 pub async fn load_games_metadata(
-    library: &marina_store_surrealdb::SurrealLibrary,
+    library: &marina_store_sqlite::SqliteLibrary,
     base_url: Option<&str>,
 ) -> Result<(Vec<crate::shelf::GameMetadata>, Vec<CoverSource>), LibraryError> {
     let items = library.list_cards(100).await?;

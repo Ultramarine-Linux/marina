@@ -1,15 +1,12 @@
 [package]
-name = "marina-test"
+name = "marina-install"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
 
 [dependencies]
-dotenvy.workspace = true
-futures-util.workspace = true
 marina-core.workspace = true
-marina-romm.workspace = true
 marina-library.workspace = true
-marina-store-sqlite.workspace = true
+marina-romm.workspace = true
+thiserror.workspace = true
 tokio.workspace = true
-uuid.workspace = true

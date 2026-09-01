@@ -80,6 +80,7 @@ impl From<Rom> for marina_core::LibraryItem {
             kind: marina_core::ItemKind::Game,
             // Marina uses RomM's filesystem slug as the stable platform/directory ID.
             platform_slug: Some(rom.platform.platform_fs_slug.clone()),
+            local_path: None,
             provider_ids,
             summary: rom.summary.clone(),
             alternative_names: rom.alternative_names.clone(),
@@ -95,6 +96,7 @@ impl From<Rom> for marina_core::LibraryItem {
                 .files
                 .iter()
                 .map(|file| marina_core::LibraryItemFile {
+                    provider_id: Some(format!("romm:file:{}", file.id)),
                     name: file.file_name.clone(),
                     path: file.full_path.clone(),
                     size_bytes: u64::try_from(file.file_size_bytes).ok(),

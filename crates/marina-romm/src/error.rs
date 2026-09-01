@@ -16,4 +16,7 @@ pub enum Error {
 
     #[error("invalid authorization header")]
     InvalidHeader,
+
+    #[error("failed to write downloaded RomM file: {0}")]
+    Io(#[from] std::io::Error),
 }
