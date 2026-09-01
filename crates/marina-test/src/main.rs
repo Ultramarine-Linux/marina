@@ -30,6 +30,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     println!("Connected to RomM {}", heartbeat.system.version);
 
     let romm_import: bool = env::var("ROMM_IMPORT").map_or(false, |v| v == "true");
+    let platforms = romm.list_platforms(&PlatformQuery::default()).await?;
+    for platform in &platforms {
+        println!("{:#?}", platform)
+    }
     if romm_import {
         let platforms = romm.list_platforms(&PlatformQuery::default()).await?;
 

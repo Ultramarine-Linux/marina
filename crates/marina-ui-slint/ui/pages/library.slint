@@ -84,8 +84,7 @@ export component LibraryPage inherits Rectangle {
         }
 
         if !root.initial-loading: ListView {
-            x: 0px;
-            width: min(parent.width, 760px);
+            width: parent.width;
             vertical-stretch: 1;
             for platform[i] in root.platforms: Rectangle {
                 width: parent.width;
@@ -95,16 +94,25 @@ export component LibraryPage inherits Rectangle {
                     : transparent;
                 border-radius: Tokens.radius-sm;
 
-                Text {
+
+                Image {
                     x: Tokens.spacing-sm;
                     y: 8px;
                     width: 36px;
                     height: 36px;
-                    text: platform.icon;
-                    font-size: 22px;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
+                    source: platform.icon;
+                    image-fit: contain;
                 }
+                // Text {
+                //     x: Tokens.spacing-sm;
+                //     y: 8px;
+                //     width: 36px;
+                //     height: 36px;
+                //     text: platform.icon;
+                //     font-size: 22px;
+                //     horizontal-alignment: center;
+                //     vertical-alignment: center;
+                // }
 
                 Typography {
                     x: 56px;

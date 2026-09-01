@@ -251,27 +251,40 @@ async fn main() -> Result<(), slint::PlatformError> {
                 Vec::new()
             }
         };
-        let platforms: Vec<PlatformCardData> = platform_metadata
-            .into_iter()
-            .map(|platform| {
-                let game_count = metadata
-                    .iter()
-                    .filter(|game| game.platform.eq_ignore_ascii_case(&platform.name))
-                    .count();
-                PlatformCardData {
-                    slug: SharedString::from(platform.slug.clone()),
-                    name: SharedString::from(platform.name.clone()),
-                    icon: SharedString::from(platform_icon(&platform.slug)),
-                    game_count: SharedString::from(format!(
-                        "{} {}",
-                        game_count,
-                        if game_count == 1 { "game" } else { "games" }
-                    )),
-                }
-            })
-            .collect();
+        let icon_root =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("ui/assets/platforms/systematic");
+        let mut platform_cards = Vec::with_capacity(platform_metadata.len());
+        for platform in platform_metadata {
+            let game_count = metadata
+                .iter()
+                .filter(|game| game.platform.eq_ignore_ascii_case(&platform.name))
+                .count();
+            let icon_path = platform_asset_path(&icon_root, &platform.slug);
+            platform_cards.push(PlatformCardMetadata {
+                slug: platform.slug,
+                name: platform.name,
+                game_count: format!(
+                    "{} {}",
+                    game_count,
+                    if game_count == 1 { "game" } else { "games" }
+                ),
+                icon_path,
+            });
+        }
 
         let _ = weak_window.upgrade_in_event_loop(move |window| {
+            let platforms: Vec<PlatformCardData> = platform_cards
+                .into_iter()
+                .map(|platform| PlatformCardData {
+                    slug: SharedString::from(platform.slug),
+                    name: SharedString::from(platform.name),
+                    icon: platform
+                        .icon_path
+                        .and_then(|path| Image::load_from_path(std::path::Path::new(&path)).ok())
+                        .unwrap_or_default(),
+                    game_count: SharedString::from(platform.game_count),
+                })
+                .collect();
             window.set_platforms(ModelRc::from(std::rc::Rc::new(VecModel::from(platforms))));
             let games = game_cards(metadata);
             window.set_games(ModelRc::from(std::rc::Rc::new(VecModel::from(games))));
@@ -281,6 +294,13 @@ async fn main() -> Result<(), slint::PlatformError> {
     });
 
     window.run()
+}
+
+struct PlatformCardMetadata {
+    slug: String,
+    name: String,
+    game_count: String,
+    icon_path: Option<String>,
 }
 
 #[derive(Serialize)]
@@ -425,15 +445,26 @@ fn preview_details(item: marina_library::LibraryItem) -> PreviewDetailsData {
     }
 }
 
-fn platform_icon(slug: &str) -> &'static str {
-    match slug.to_ascii_lowercase().as_str() {
-        "arcade" => "🕹️",
-        "dos" | "pc" | "windows" => "🖥️",
-        "gb" | "gbc" | "gba" | "game-boy" | "game-boy-advance" => "🎮",
-        "nes" | "snes" | "n64" | "switch" => "🎮",
-        "ps" | "ps2" | "ps3" | "ps4" | "ps5" | "psp" => "🎮",
-        "linux" => "🐧",
-        "browser" | "flash" => "🌐",
-        _ => "🎮",
+fn platform_asset_path(root: &std::path::Path, slug: &str) -> Option<String> {
+    let exact_name = match slug {
+        "ndsi" => "nintendo-dsi",
+        "win" => "pc-50x-family",
+        _ => slug,
+    };
+    let exact_path = root.join(format!("{exact_name}.svg"));
+    if exact_path.is_file() {
+        return Some(exact_path.to_string_lossy().into_owned());
     }
+
+    if let Some(prefix) = slug.split('-').next() {
+        let prefix_path = root.join(format!("{prefix}.svg"));
+        if prefix_path.is_file() {
+            return Some(prefix_path.to_string_lossy().into_owned());
+        }
+    }
+
+    let default_path = root.join("default.svg");
+    default_path
+        .is_file()
+        .then(|| default_path.to_string_lossy().into_owned())
 }

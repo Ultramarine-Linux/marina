@@ -5,7 +5,7 @@ import { TextVariant, TextTone } from "../slintcn/components/text.slint";
 export struct PlatformCardData {
     slug: string,
     name: string,
-    icon: string,
+    icon: image,
     game-count: string,
 }
 
@@ -32,15 +32,11 @@ export component PlatformCard inherits Rectangle {
             background: Tokens.color-surface-2;
             border-radius: Tokens.radius-lg;
 
-            Text {
-                x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2;
+            Image {
                 width: parent.width;
                 height: parent.height;
-                text: root.platform.icon;
-                font-size: 38px;
-                horizontal-alignment: center;
-                vertical-alignment: center;
+                source: root.platform.icon;
+                image-fit: contain;
             }
         }
 
