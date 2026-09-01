@@ -48,30 +48,57 @@ impl From<Rom> for marina_core::LibraryItem {
             .map(|datetime| datetime.fixed_offset());
 
         let mut assets = Vec::new();
-        if rom.assets.url_cover.is_some()
-            || rom.assets.path_cover_small.is_some()
-            || rom.assets.path_cover_large.is_some()
-        {
-            assets.push(marina_core::LibraryAsset {
-                url: rom.assets.url_cover.clone(),
-                path: rom
-                    .assets
-                    .path_cover_small
-                    .clone()
-                    .or_else(|| rom.assets.path_cover_large.clone()),
-            });
+        let mut add = |kind, source: Option<String>| {
+            if source
+                .as_deref()
+                .is_some_and(|source| !source.trim().is_empty())
+            {
+                assets.push(marina_core::LibraryAsset {
+                    kind,
+                    source,
+                    local_path: None,
+                });
+            }
+        };
+        add(
+            marina_core::LibraryAssetKind::CoverSmall,
+            rom.assets.path_cover_small.clone(),
+        );
+        add(
+            marina_core::LibraryAssetKind::CoverLarge,
+            rom.assets
+                .path_cover_large
+                .clone()
+                .or_else(|| rom.assets.url_cover.clone()),
+        );
+        add(
+            marina_core::LibraryAssetKind::Manual,
+            rom.assets
+                .path_manual
+                .clone()
+                .or_else(|| rom.assets.url_manual.clone()),
+        );
+        add(
+            marina_core::LibraryAssetKind::Video,
+            rom.assets.path_video.clone(),
+        );
+        for source in &rom.assets.merged_screenshots {
+            add(
+                marina_core::LibraryAssetKind::Screenshot,
+                Some(source.clone()),
+            );
         }
-        if rom.assets.path_manual.is_some() {
-            assets.push(marina_core::LibraryAsset {
-                url: None,
-                path: rom.assets.path_manual.clone(),
-            });
+        for screenshot in &rom.assets.user_screenshots {
+            add(
+                marina_core::LibraryAssetKind::UserScreenshot,
+                Some(screenshot.download_path.clone()),
+            );
         }
-        if rom.assets.path_video.is_some() {
-            assets.push(marina_core::LibraryAsset {
-                url: None,
-                path: rom.assets.path_video.clone(),
-            });
+        for screenshot in &rom.assets.all_user_screenshots {
+            add(
+                marina_core::LibraryAssetKind::UserScreenshot,
+                Some(screenshot.download_path.clone()),
+            );
         }
 
         marina_core::LibraryItem {

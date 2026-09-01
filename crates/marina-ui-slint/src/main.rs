@@ -2,6 +2,7 @@ use std::sync::{Arc, Mutex};
 
 use marina_core::LibraryItemId;
 use marina_library::{
+    query::SearchQuery,
     read::{LibraryRead, PlatformRead},
     write::{LibraryWrite, PlatformWrite},
 };
@@ -9,7 +10,7 @@ use marina_romm::{PlatformQuery, RomQuery};
 use marina_scanner::scan;
 use serde::Serialize;
 use slint::{Image, Model, ModelRc, SharedString, VecModel};
-use tracing::{error, info};
+use tracing::{debug, error, info};
 use tracing_subscriber::EnvFilter;
 
 slint::include_modules!();
@@ -82,17 +83,23 @@ async fn main() -> Result<(), slint::PlatformError> {
     let context_sources = source_store.clone();
     let context_home_sources = home_source_store.clone();
     window.on_cover_context_changed(move |active_tab| {
+        debug!(active_tab, "cover context changed");
         if active_tab == 1 {
+            debug!("cover context switched to platform sources");
             return;
         }
         let home_sources = context_home_sources
             .lock()
             .expect("home cover source state poisoned")
             .clone();
+        let source_count = home_sources.len();
         *context_sources.lock().expect("cover source state poisoned") = home_sources;
+        debug!(source_count, "cover context switched to home sources");
         let mut loader = loader_for_context.borrow_mut();
         loader.reset();
+        debug!("cover context reset complete; refreshing home residency");
         loader.update(0.0, 1_280.0);
+        debug!("cover context home residency refresh complete");
     });
 
     let weak_window = window.as_weak();
@@ -134,6 +141,31 @@ async fn main() -> Result<(), slint::PlatformError> {
         });
     });
 
+    let play_state = library_state.clone();
+    window.on_game_play_requested(move |id| {
+        let state = play_state
+            .lock()
+            .expect("library state lock poisoned")
+            .clone();
+        let Some(state) = state else {
+            tracing::warn!(game_id = %id, "play requested but library state is unavailable");
+            return;
+        };
+        let Ok(item_id) = LibraryItemId::parse(id.as_str()).ok_or(()) else {
+            tracing::warn!(game_id = %id, "play requested with invalid library item id");
+            return;
+        };
+        tokio::spawn(async move {
+            match state.library.get(&item_id).await {
+                Ok(Some(item)) => {
+                    tracing::info!(game_id = %id, local_path = ?item.local_path, "play requested; launcher stub");
+                }
+                Ok(None) => tracing::warn!(game_id = %id, "play requested for missing library item"),
+                Err(error) => tracing::error!(%error, game_id = %id, "failed to resolve game path for launcher stub"),
+            }
+        });
+    });
+
     let open_state = library_state.clone();
     let open_window = window.as_weak();
     window.on_game_opened(move |id| {
@@ -165,8 +197,29 @@ async fn main() -> Result<(), slint::PlatformError> {
         tokio::spawn(async move {
             match state.library.get(&item_id).await {
                 Ok(Some(item)) => {
+                    let detail_cover = item
+                        .assets
+                        .iter()
+                        .filter_map(|asset| {
+                            let priority = match asset.kind {
+                                marina_core::LibraryAssetKind::CoverLarge => 0,
+                                marina_core::LibraryAssetKind::CoverSmall => 1,
+                                _ => return None,
+                            };
+                            asset.local_path.clone().map(|path| (priority, path))
+                        })
+                        .min_by_key(|(priority, _)| *priority)
+                        .map(|(_, path)| path);
                     let details = preview_details(item);
                     let _ = detail_window.upgrade_in_event_loop(move |window| {
+                        if let Some(path) = detail_cover.and_then(|path| {
+                            slint::Image::load_from_path(std::path::Path::new(&path)).ok()
+                        }) {
+                            window.set_selected_game(GameCardData {
+                                cover: path,
+                                ..window.get_selected_game()
+                            });
+                        }
                         window.set_game_details(details);
                         window.set_game_details_loading(false);
                     });
@@ -227,15 +280,26 @@ async fn main() -> Result<(), slint::PlatformError> {
 
     let home_state = library_state.clone();
     let home_window = window.as_weak();
+    let home_sources = home_source_store.clone();
+    let home_loader_sources = source_store.clone();
+
     window.on_home_entered(move || {
         let Some(state) = home_state.lock().ok().and_then(|state| state.clone()) else {
             return;
         };
         let window = home_window.clone();
+        let home_sources = home_sources.clone();
+        let home_loader_sources = home_loader_sources.clone();
         tokio::spawn(async move {
-            if let Ok((metadata, _)) =
+            if let Ok((metadata, cover_sources)) =
                 shelf::load_games(&state.library, state.config.romm_url.as_deref()).await
             {
+                *home_sources
+                    .lock()
+                    .expect("home cover source state poisoned") = cover_sources.clone();
+                *home_loader_sources
+                    .lock()
+                    .expect("cover source state poisoned") = cover_sources;
                 let _ = window.upgrade_in_event_loop(move |window| {
                     if let Some(model) = window
                         .get_games()
@@ -243,6 +307,11 @@ async fn main() -> Result<(), slint::PlatformError> {
                         .downcast_ref::<VecModel<GameCardData>>()
                     {
                         model.set_vec(game_cards(metadata));
+                        if window.get_active_tab() == 0 {
+                            // Replacing the model clears its images. Reset the loader so
+                            // rows already marked resident are requested for the new model.
+                            window.invoke_cover_context_changed(0);
+                        }
                     }
                 });
             }
@@ -268,13 +337,36 @@ async fn main() -> Result<(), slint::PlatformError> {
                     Ok(items) => {
                         info!(count = items.len(), "local game scan completed");
                         for item in items {
-                            if let Some(slug) = item.platform_slug.clone() {
+                            let platform_slug = item.platform_slug.clone();
+                            if let Some(slug) = platform_slug.as_deref() {
                                 let _ = state
                                     .library
-                                    .add_platform(marina_core::Platform::new(&slug, &slug))
+                                    .add_platform(marina_core::Platform::new(slug, slug))
                                     .await;
                             }
-                            if let Err(error) = state.library.add(item).await {
+                            let existing = state
+                                .library
+                                .search(
+                                    SearchQuery::new()
+                                        .platform(platform_slug.as_deref().unwrap_or_default())
+                                        .limit(usize::MAX),
+                                )
+                                .await
+                                .ok()
+                                .and_then(|items| {
+                                    items
+                                        .into_iter()
+                                        .find(|candidate| candidate.local_path == item.local_path)
+                                });
+                            let result = if let Some(mut existing) = existing {
+                                // Scanner data describes filesystem presence only. Preserve
+                                // provider metadata/assets from an enriched installed record.
+                                existing.files = item.files;
+                                state.library.update(existing).await
+                            } else {
+                                state.library.add(item).await
+                            };
+                            if let Err(error) = result {
                                 error!(%error, "failed to store scanned local game");
                             }
                         }

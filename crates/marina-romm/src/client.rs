@@ -55,6 +55,21 @@ impl Client {
         Some(format!("{}/{path}", self.base_url))
     }
 
+    /// Resolves RomM resource paths using RomM's asset namespace.
+    /// Relative resource paths are served below `/assets/romm/resources`.
+    pub fn resource_url(&self, path: &str) -> String {
+        if path.starts_with("http://") || path.starts_with("https://") {
+            return path.to_owned();
+        }
+        let path = path.trim_start_matches('/');
+        let path = if path.starts_with("assets/romm/resources/") {
+            path.to_owned()
+        } else {
+            format!("assets/romm/resources/{path}")
+        };
+        format!("{}/{path}", self.base_url)
+    }
+
     pub async fn heartbeat(&self) -> Result<Heartbeat, Error> {
         self.get("/api/heartbeat").await
     }
@@ -148,6 +163,15 @@ impl Client {
         if let Some(file_id) = file_id {
             url.push_str(&format!("?file_ids={file_id}"));
         }
+        let endpoint = url.strip_prefix(&self.base_url).unwrap_or(&url).to_owned();
+        debug!(
+            rom_id,
+            file_name,
+            ?file_id,
+            endpoint,
+            authenticated = self.auth.is_some(),
+            "starting RomM file request"
+        );
         let response = self
             .http
             .get(url)
@@ -155,7 +179,15 @@ impl Client {
             .send()
             .await?;
         let status = response.status();
-        debug!(rom_id, file_name, %status, "RomM file response received");
+        debug!(
+            rom_id,
+            file_name,
+            ?file_id,
+            endpoint,
+            %status,
+            authenticated = self.auth.is_some(),
+            "RomM file response received"
+        );
         if !status.is_success() {
             return Err(Error::Http {
                 status: status.as_u16(),
@@ -173,6 +205,45 @@ impl Client {
         }
         output.flush().await?;
         info!(rom_id, file_name, "RomM file download completed");
+        Ok(())
+    }
+
+    /// Streams an authenticated RomM asset URL to disk.
+    pub async fn download_url(
+        &self,
+        url: &str,
+        destination: impl AsRef<Path>,
+    ) -> Result<(), Error> {
+        let endpoint = url.strip_prefix(&self.base_url).unwrap_or(url);
+        debug!(
+            endpoint,
+            authenticated = self.auth.is_some(),
+            "starting RomM resource download"
+        );
+        let response = self
+            .http
+            .get(url)
+            .headers(self.auth_headers()?)
+            .send()
+            .await?;
+        let status = response.status();
+        debug!(endpoint, %status, authenticated = self.auth.is_some(), "RomM resource response received");
+        if !status.is_success() {
+            return Err(Error::Http {
+                status: status.as_u16(),
+                body: response.text().await?,
+            });
+        }
+        let destination = destination.as_ref();
+        if let Some(parent) = destination.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+        let mut output = tokio::fs::File::create(destination).await?;
+        let mut response = response;
+        while let Some(chunk) = response.chunk().await? {
+            output.write_all(&chunk).await?;
+        }
+        output.flush().await?;
         Ok(())
     }
 

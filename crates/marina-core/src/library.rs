@@ -58,6 +58,8 @@ pub struct LibraryCard {
     pub platform_name: Option<String>,
     pub regions: Vec<String>,
     pub cover: Option<String>,
+    pub cover_small_local_path: Option<String>,
+    pub cover_large_local_path: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Default)]
@@ -122,10 +124,25 @@ pub struct LibraryItemFile {
     pub size_bytes: Option<u64>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, Default)]
+use serde::{Deserialize, Serialize};
+
+#[derive(Clone, Debug, Eq, PartialEq, Default, Deserialize, Serialize)]
 pub struct LibraryAsset {
-    pub url: Option<String>,
-    pub path: Option<String>,
+    pub kind: LibraryAssetKind,
+    pub source: Option<String>,
+    pub local_path: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, Default, Deserialize, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LibraryAssetKind {
+    #[default]
+    CoverSmall,
+    CoverLarge,
+    Manual,
+    Video,
+    Screenshot,
+    UserScreenshot,
 }
 
 #[cfg(test)]

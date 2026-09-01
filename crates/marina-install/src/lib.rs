@@ -65,8 +65,13 @@ where
             .map(|metadata| metadata.len());
         if existing_size != Some(expected) {
             let temporary = destination.with_extension(format!("part-{}", std::process::id()));
+            let rom_id = if file.rom_id == 0 {
+                request.rom.id
+            } else {
+                file.rom_id
+            };
             client
-                .download_file(file.rom_id, &file.file_name, Some(file.id), &temporary)
+                .download_file(rom_id, &file.file_name, Some(file.id), &temporary)
                 .await?;
             let actual = tokio::fs::metadata(&temporary).await?.len();
             if actual != expected {
@@ -87,12 +92,57 @@ where
     let mut item: LibraryItem = request.rom.into();
     item.local_path = Some(game_dir.to_string_lossy().into_owned());
     item.files = installed_files;
+    let asset_dir = request
+        .library_root
+        .join("media")
+        .join(&platform)
+        .join(&game);
+    for (index, asset) in item.assets.iter_mut().enumerate() {
+        let Some(source) = asset
+            .source
+            .clone()
+            .filter(|source| !source.trim().is_empty())
+        else {
+            continue;
+        };
+        let source_url = client.resource_url(&source);
+        let suffix = match asset.kind {
+            marina_core::LibraryAssetKind::CoverSmall => "cover-small",
+            marina_core::LibraryAssetKind::CoverLarge => "cover-large",
+            marina_core::LibraryAssetKind::Manual => "manual",
+            marina_core::LibraryAssetKind::Video => "video",
+            marina_core::LibraryAssetKind::Screenshot => "screenshot",
+            marina_core::LibraryAssetKind::UserScreenshot => "user-screenshot",
+        };
+        let extension = asset_extension(&source);
+        let destination = asset_dir.join(format!("{suffix}-{index}.{extension}"));
+        client.download_url(&source_url, &destination).await?;
+        asset.local_path = Some(destination.to_string_lossy().into_owned());
+    }
     let existing = library
         .search(SearchQuery::new().platform(platform).limit(usize::MAX))
         .await?
         .into_iter()
         .find(|candidate| candidate.local_path.as_deref() == item.local_path.as_deref());
     if let Some(mut existing) = existing {
+        // Reconciliation must also refresh provider metadata. The in-memory
+        // Store has the hydrated RomM record, while an older scanner entry
+        // may contain only title/path data. Keep the stable local identity,
+        // but persist the newly hydrated metadata before saving.
+        existing.title = item.title;
+        existing.kind = item.kind;
+        existing.platform_slug = item.platform_slug;
+        existing.summary = item.summary;
+        existing.alternative_names = item.alternative_names;
+        existing.tags = item.tags;
+        existing.languages = item.languages;
+        existing.regions = item.regions;
+        existing.cover = item.cover;
+        existing.created_at = item.created_at;
+        existing.released_at = item.released_at;
+        existing.updated_at = item.updated_at;
+        existing.assets = item.assets;
+        existing.provider_ids.extend(item.provider_ids);
         let mut files = existing.files;
         for file in item.files {
             let duplicate = files.iter().any(|current| {
@@ -132,12 +182,28 @@ fn safe_component(value: &str) -> String {
     }
 }
 
+fn asset_extension(source: &str) -> &str {
+    let path = source.split(['?', '#']).next().unwrap_or(source);
+    std::path::Path::new(path)
+        .extension()
+        .and_then(|value| value.to_str())
+        .filter(|extension| !extension.is_empty())
+        .unwrap_or("bin")
+}
+
 #[cfg(test)]
 mod tests {
-    use super::safe_component;
+    use super::{asset_extension, safe_component};
 
     #[test]
     fn sanitizes_only_path_breaking_characters() {
         assert_eq!(safe_component("A:B?C"), "A:B_C");
+    }
+
+    #[test]
+    fn extracts_asset_extension_before_query_and_fragment() {
+        assert_eq!(asset_extension("cover/big.png?ts=2026-08-15"), "png");
+        assert_eq!(asset_extension("cover/big.webp#gallery"), "webp");
+        assert_eq!(asset_extension("cover/no-extension?ts=1"), "bin");
     }
 }

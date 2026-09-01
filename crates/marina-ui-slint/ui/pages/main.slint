@@ -46,6 +46,7 @@ export component MainWindow inherits Window {
     callback platform-query(string);
     callback game-selected(string, int);
     callback game-opened(string);
+    callback game-play-requested(string);
     callback store-search(string);
     callback store-platform-query(string);
     callback store-game-selected(string, int);
@@ -114,7 +115,7 @@ export component MainWindow inherits Window {
             details: root.game-details;
             loading: root.game-details-loading;
             back => { root.game-page-visible = false; }
-            action-requested => { root.game-page-visible = false; root.game-opened(root.selected-game.id); }
+            action-requested => { root.game-play-requested(root.selected-game.id); }
         }
 
         if !root.switching-tabs && !root.game-page-visible && root.content-tab == 0 && root.loading: ShelfSkeleton {

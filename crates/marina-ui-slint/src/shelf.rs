@@ -43,7 +43,13 @@ pub async fn load_platform_games(
     Ok(items
         .into_iter()
         .map(|item| {
-            let source = covers::source_for(item.cover.as_deref(), romm_base_url);
+            let source = covers::source_for(
+                item.cover.as_deref(),
+                item.cover_small_local_path
+                    .as_deref()
+                    .or(item.cover_large_local_path.as_deref()),
+                romm_base_url,
+            );
             let metadata = GameMetadata {
                 id: item.id.to_string(),
                 title: item.title,

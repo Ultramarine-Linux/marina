@@ -1,6 +1,7 @@
 use chrono::{DateTime, FixedOffset};
 use marina_core::{
-    ItemKind, LibraryAsset, LibraryCard, LibraryItem, LibraryItemFile, LibraryItemId, Platform,
+    ItemKind, LibraryAsset, LibraryAssetKind, LibraryCard, LibraryItem, LibraryItemFile,
+    LibraryItemId, Platform,
 };
 use marina_library::{
     error::LibraryError,
@@ -55,8 +56,9 @@ struct LibraryItemFileDto {
 }
 #[derive(Debug, Serialize, Deserialize)]
 struct LibraryAssetDto {
-    url: Option<String>,
-    path: Option<String>,
+    kind: LibraryAssetKind,
+    source: Option<String>,
+    local_path: Option<String>,
 }
 impl From<&LibraryItem> for Stored {
     fn from(x: &LibraryItem) -> Self {
@@ -94,8 +96,9 @@ impl From<&LibraryItem> for Stored {
                 .assets
                 .iter()
                 .map(|v| LibraryAssetDto {
-                    url: v.url.clone(),
-                    path: v.path.clone(),
+                    kind: v.kind.clone(),
+                    source: v.source.clone(),
+                    local_path: v.local_path.clone(),
                 })
                 .collect(),
         }
@@ -138,8 +141,9 @@ impl TryFrom<Stored> for LibraryItem {
                 .assets
                 .into_iter()
                 .map(|v| LibraryAsset {
-                    url: v.url,
-                    path: v.path,
+                    kind: v.kind,
+                    source: v.source,
+                    local_path: v.local_path,
                 })
                 .collect(),
         })
@@ -352,6 +356,16 @@ impl LibraryRead for SqliteLibrary {
                     platform_name: x.platform_slug,
                     regions: x.regions,
                     cover: x.cover,
+                    cover_small_local_path: x
+                        .assets
+                        .iter()
+                        .find(|asset| matches!(asset.kind, LibraryAssetKind::CoverSmall))
+                        .and_then(|asset| asset.local_path.clone()),
+                    cover_large_local_path: x
+                        .assets
+                        .iter()
+                        .find(|asset| matches!(asset.kind, LibraryAssetKind::CoverLarge))
+                        .and_then(|asset| asset.local_path.clone()),
                 })
             })
             .collect()
