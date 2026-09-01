@@ -10,5 +10,11 @@ fn main() {
         }
     }
 
-    slint_build::compile("ui/main.slint").unwrap();
+    if std::env::var_os("CARGO_FEATURE_LIVE_PREVIEW").is_some() {
+        unsafe {
+            std::env::set_var("SLINT_LIVE_PREVIEW", "1");
+        }
+    }
+
+    slint_build::compile("ui/pages/main.slint").unwrap();
 }

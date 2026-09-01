@@ -1,6 +1,7 @@
 use std::sync::{Arc, Mutex};
 
 use marina_library::{LibraryItemId, LibraryRead, PlatformRead};
+use serde::Serialize;
 use slint::{Image, Model, ModelRc, SharedString, VecModel};
 use tracing::{error, info};
 use tracing_subscriber::EnvFilter;
@@ -20,6 +21,15 @@ async fn main() -> Result<(), slint::PlatformError> {
         .with_env_filter(EnvFilter::from_default_env())
         .init();
     dotenvy::dotenv().ok();
+
+    let args: Vec<String> = std::env::args().collect();
+    if args.get(1).map(String::as_str) == Some("--export-ui-fixture") {
+        let path = args.get(2).map(String::as_str).unwrap_or("ui-fixture.json");
+        if let Err(error) = export_ui_fixture(path).await {
+            eprintln!("failed to export UI fixture: {error}");
+        }
+        return Ok(());
+    }
 
     let (username, display_name, initials) = profile_identity();
     let window = MainWindow::new()?;
@@ -271,6 +281,59 @@ async fn main() -> Result<(), slint::PlatformError> {
     });
 
     window.run()
+}
+
+#[derive(Serialize)]
+struct UiFixture {
+    platforms: Vec<UiFixturePlatform>,
+    games: Vec<UiFixtureGame>,
+}
+
+#[derive(Serialize)]
+struct UiFixturePlatform {
+    slug: String,
+    name: String,
+}
+
+#[derive(Serialize)]
+struct UiFixtureGame {
+    id: String,
+    title: String,
+    platform: String,
+    cover: Option<String>,
+    regions: Vec<String>,
+}
+
+async fn export_ui_fixture(path: &str) -> Result<(), Box<dyn std::error::Error + Send + Sync>> {
+    let state = app::AppState::initialize().await?;
+    let platforms = state
+        .library
+        .platforms()
+        .await?
+        .into_iter()
+        .map(|platform| UiFixturePlatform {
+            slug: platform.slug,
+            name: platform.name,
+        })
+        .collect();
+    let games = state
+        .library
+        .list_cards(u32::MAX)
+        .await?
+        .into_iter()
+        .map(|game| UiFixtureGame {
+            id: game.id.to_string(),
+            title: game.title,
+            platform: game.platform_name.unwrap_or_else(|| "Unknown".into()),
+            cover: game.cover,
+            regions: game.regions,
+        })
+        .collect();
+    let fixture = UiFixture { platforms, games };
+    let json = serde_json::to_string_pretty(&fixture)?;
+    std::fs::write(path, json)?;
+    println!("wrote UI fixture to {path}");
+    Ok(())
 }
 
 fn profile_identity() -> (String, String, String) {

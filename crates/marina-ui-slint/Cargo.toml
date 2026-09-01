@@ -7,16 +7,24 @@ license.workspace = true
 [features]
 default = []
 debug-mcp = ["slint/mcp"]
+live-preview = ["slint/live-preview"]
 
 [build-dependencies]
 slint-build = "1.17.1"
 
 [dependencies]
-slint = "1.17.1"
+slint = { version = "1.17.1", features = [
+    "log",
+    "serde",
+    "raw-window-handle-06",
+    "image-default-formats",
+] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "bmp"] }
 
 dotenvy.workspace = true
 marina-core.workspace = true
+serde.workspace = true
+serde_json.workspace = true
 marina-library.workspace = true
 marina-store-surrealdb.workspace = true
 reqwest.workspace = true
