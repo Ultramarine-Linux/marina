@@ -1,0 +1,75 @@
+import { Tokens } from "../slintcn/theme/tokens.slint";
+import { Button, ButtonVariant, ButtonSize } from "../slintcn/components/button.slint";
+import { Skeleton } from "../slintcn/components/skeleton.slint";
+import { ScrollArea } from "../slintcn/components/scroll-area.slint";
+import { Text as Typography } from "../slintcn/components/text.slint";
+import { TextVariant, TextTone } from "../slintcn/components/text.slint";
+import { GameCardData } from "card.slint";
+import { PreviewDetailsData } from "preview-details.slint";
+
+export component GameDetailsView inherits Rectangle {
+    in property <GameCardData> game;
+    in property <PreviewDetailsData> details;
+    in property <bool> loading: false;
+    in property <string> action-label: "▶  Play";
+    callback back;
+    callback action-requested;
+
+    background: transparent;
+
+    VerticalLayout {
+        spacing: Tokens.spacing-lg;
+        HorizontalLayout {
+            height: 40px;
+            spacing: Tokens.spacing-md;
+            Button { width: 40px; height: 36px; variant: ButtonVariant.ghost; size: ButtonSize.icon; text: "←"; clicked => { root.back(); } }
+            Typography { text: root.details.title != "" ? root.details.title : root.game.title; variant: TextVariant.headline; vertical-alignment: center; overflow: elide; }
+        }
+        Rectangle { height: 1px; background: Tokens.color-border-hairline; }
+
+        ScrollArea {
+            width: parent.width;
+            vertical-stretch: 1;
+            content-height: max(parent.height, 520px);
+            VerticalLayout {
+                spacing: Tokens.spacing-lg;
+                HorizontalLayout {
+                    height: 300px;
+                    spacing: Tokens.spacing-lg;
+                    Rectangle {
+                        width: 220px;
+                        background: Tokens.color-surface-1;
+                        border-radius: Tokens.radius-md;
+                        clip: true;
+                        if root.game.cover.width == 0: Skeleton { width: parent.width; height: parent.height; radius: Tokens.radius-md; }
+                        if root.game.cover.width > 0: Image { width: parent.width; height: parent.height; source: root.game.cover; image-fit: contain; }
+                    }
+                    VerticalLayout {
+                        width: parent.width - 220px - Tokens.spacing-lg;
+                        spacing: Tokens.spacing-md;
+                        Typography { width: parent.width; text: root.details.title != "" ? root.details.title : root.game.title; variant: TextVariant.headline; overflow: clip; }
+                        Typography { text: root.game.platform; variant: TextVariant.body-lg; tone: TextTone.muted; }
+                        Button { width: 150px; text: root.action-label; clicked => { root.action-requested(); } }
+                        Rectangle { vertical-stretch: 1; }
+                    }
+                }
+                Typography { text: root.loading ? "Loading details..." : "Description"; variant: TextVariant.title; }
+                Typography {
+                    width: parent.width;
+                    text: root.loading ? "Loading details..." : (root.details.summary != "" ? root.details.summary : "No description available for this game yet.");
+                    variant: TextVariant.body-lg;
+                    tone: TextTone.muted;
+                    wrap: word-wrap;
+                }
+                VerticalLayout {
+                    spacing: Tokens.spacing-sm;
+                    if root.details.released-at != "": Typography { text: "Released: " + root.details.released-at; variant: TextVariant.body-sm; }
+                    if root.details.languages != "": Typography { text: "Languages: " + root.details.languages; variant: TextVariant.body-sm; tone: TextTone.muted; }
+                    if root.details.regions != "": Typography { text: "Regions: " + root.details.regions; variant: TextVariant.body-sm; tone: TextTone.muted; }
+                    if root.details.tags != "": Typography { text: "Tags: " + root.details.tags; variant: TextVariant.body-sm; tone: TextTone.muted; }
+                }
+                Rectangle { vertical-stretch: 1; }
+            }
+        }
+    }
+}
