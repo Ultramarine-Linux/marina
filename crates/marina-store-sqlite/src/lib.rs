@@ -156,6 +156,16 @@ fn err<E: std::error::Error + Send + Sync + 'static>(e: E) -> LibraryError {
 }
 impl SqliteLibrary {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, rusqlite::Error> {
+        let path = path.as_ref();
+        if path != Path::new(":memory:") {
+            if let Some(parent) = path
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+            {
+                std::fs::create_dir_all(parent)
+                    .map_err(|_| rusqlite::Error::InvalidPath(path.to_owned()))?;
+            }
+        }
         let c = Connection::open(path)?;
         c.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; CREATE TABLE IF NOT EXISTS platforms(slug TEXT PRIMARY KEY,name TEXT NOT NULL); CREATE TABLE IF NOT EXISTS library_items(id TEXT PRIMARY KEY,title TEXT NOT NULL,platform_slug TEXT,local_path TEXT,json TEXT NOT NULL,last_updated INTEGER NOT NULL DEFAULT 0, UNIQUE(platform_slug,local_path)); CREATE TABLE IF NOT EXISTS library_item_files(library_item_id TEXT NOT NULL,provider_id TEXT,local_path TEXT NOT NULL,name TEXT NOT NULL,size_bytes INTEGER,PRIMARY KEY(library_item_id,local_path),UNIQUE(provider_id)); CREATE TABLE IF NOT EXISTS remote_rom_cache(provider TEXT NOT NULL,rom_id TEXT NOT NULL,title TEXT NOT NULL,platform_slug TEXT NOT NULL,json TEXT NOT NULL,PRIMARY KEY(provider,rom_id)); CREATE INDEX IF NOT EXISTS idx_remote_rom_title ON remote_rom_cache(provider,title); CREATE INDEX IF NOT EXISTS idx_remote_rom_platform ON remote_rom_cache(provider,platform_slug); CREATE INDEX IF NOT EXISTS idx_items_title ON library_items(title); CREATE INDEX IF NOT EXISTS idx_items_platform ON library_items(platform_slug); CREATE INDEX IF NOT EXISTS idx_items_path ON library_items(local_path); CREATE INDEX IF NOT EXISTS idx_item_files_provider ON library_item_files(provider_id);")?;
         let has_last_updated = c
@@ -456,6 +466,23 @@ impl PlatformWrite for SqliteLibrary {
 mod tests {
     use super::*;
     use marina_library::{read::LibraryRead, write::LibraryWrite};
+
+    #[test]
+    fn open_creates_missing_parent_directories() {
+        let root = std::env::temp_dir().join(format!(
+            "marina-sqlite-{}-{}",
+            std::process::id(),
+            Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        ));
+        let database_path = root.join("nested/data/library.sqlite");
+
+        let database = SqliteLibrary::open(&database_path).unwrap();
+
+        assert!(database_path.is_file());
+        drop(database);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
     #[tokio::test]
     async fn crud_search() {
         let db = SqliteLibrary::in_memory().unwrap();
