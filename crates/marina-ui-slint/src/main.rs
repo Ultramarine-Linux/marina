@@ -1,4 +1,7 @@
-use std::sync::{Arc, Mutex};
+use std::{
+    collections::BTreeMap,
+    sync::{Arc, Mutex},
+};
 
 use marina_core::LibraryItemId;
 use marina_library::{
@@ -879,18 +882,17 @@ async fn main() -> Result<(), slint::PlatformError> {
 fn populate_store_details(window: &slint::Weak<MainWindow>, rom: marina_romm::Rom) {
     let item: marina_core::LibraryItem = rom.clone().into();
     let rom_prefix = rom.files.full_path.trim_end_matches('/').to_owned();
-    let artifacts = rom
-        .files
-        .files
-        .iter()
-        .map(|file| {
-            SharedString::from(format!(
-                "{}  ({} bytes)",
-                display_artifact_path(file, &rom_prefix),
-                file.file_size_bytes
-            ))
-        })
-        .collect::<Vec<_>>();
+    let artifact_count = rom.files.files.len();
+    let mut artifact_tree = ArtifactTree::default();
+    for (file_index, file) in rom.files.files.iter().enumerate() {
+        artifact_tree.insert(
+            &display_artifact_path(file, &rom_prefix),
+            file_index,
+            file.file_size_bytes,
+        );
+    }
+    let mut artifacts = Vec::new();
+    artifact_tree.flatten(0, &mut artifacts);
     let details = PreviewDetailsData {
         title: SharedString::from(item.title),
         summary: SharedString::from(item.summary.unwrap_or_default()),
@@ -903,14 +905,60 @@ fn populate_store_details(window: &slint::Weak<MainWindow>, rom: marina_romm::Ro
         window.set_store_details(details);
         window.set_store_artifacts(ModelRc::from(std::rc::Rc::new(VecModel::from(artifacts))));
         window.set_store_selected_artifacts(
-            std::rc::Rc::new(VecModel::from(vec![
-                false;
-                window.get_store_artifacts().row_count()
-            ]))
-            .into(),
+            std::rc::Rc::new(VecModel::from(vec![false; artifact_count])).into(),
         );
         window.set_store_details_loading(false);
     });
+}
+
+#[derive(Default)]
+struct ArtifactTree {
+    directories: BTreeMap<String, Self>,
+    files: Vec<(String, usize, i64)>,
+}
+
+impl ArtifactTree {
+    fn insert(&mut self, path: &str, file_index: usize, file_size_bytes: i64) {
+        let parts = path
+            .split('/')
+            .filter(|part| !part.is_empty())
+            .collect::<Vec<_>>();
+        let Some((file_name, directories)) = parts.split_last() else {
+            return;
+        };
+
+        let mut node = self;
+        for directory in directories {
+            node = node.directories.entry((*directory).to_owned()).or_default();
+        }
+        node.files
+            .push(((*file_name).to_owned(), file_index, file_size_bytes));
+    }
+
+    fn flatten(&self, depth: i32, rows: &mut Vec<StoreArtifact>) {
+        for (directory, child) in &self.directories {
+            rows.push(StoreArtifact {
+                path: SharedString::from(directory),
+                size: SharedString::default(),
+                depth,
+                is_directory: true,
+                file_index: -1,
+            });
+            child.flatten(depth + 1, rows);
+        }
+
+        let mut files = self.files.clone();
+        files.sort_by(|left, right| left.0.cmp(&right.0));
+        for (file_name, file_index, file_size_bytes) in files {
+            rows.push(StoreArtifact {
+                path: SharedString::from(file_name),
+                size: SharedString::from(format!("{file_size_bytes} bytes")),
+                depth,
+                is_directory: false,
+                file_index: file_index as i32,
+            });
+        }
+    }
 }
 
 fn display_artifact_path(file: &marina_romm::RomFile, rom_prefix: &str) -> String {

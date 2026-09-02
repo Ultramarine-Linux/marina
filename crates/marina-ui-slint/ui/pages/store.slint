@@ -8,17 +8,26 @@ import { TextVariant, TextTone } from "../slintcn/components/text.slint";
 import { ScrollArea } from "../slintcn/components/scroll-area.slint";
 import { Sheet, SheetSide } from "../slintcn/components/sheet.slint";
 import { Checkbox } from "../slintcn/components/checkbox.slint";
+import { Card, CardPadding, CardRadius } from "../slintcn/components/card.slint";
 import { PlatformCardData } from "../components/platform-card.slint";
 import { GameCardData } from "../components/card.slint";
 import { PlatformGameList } from "../components/platform-game-list.slint";
 import { PreviewDetailsData } from "../components/preview-details.slint";
 import { GameDetailsView } from "../components/game-details-view.slint";
 
+export struct StoreArtifact {
+    path: string,
+    size: string,
+    depth: int,
+    is-directory: bool,
+    file-index: int,
+}
+
 export component StorePage inherits Rectangle {
     in property <[PlatformCardData]> platforms;
     in property <[GameCardData]> games;
     in property <PreviewDetailsData> details;
-    in property <[string]> artifacts;
+    in property <[StoreArtifact]> artifacts;
     in-out property <[bool]> selected-artifacts;
     in-out property <int> page: 0;
     in-out property <int> selected-game-index: 0;
@@ -153,18 +162,91 @@ export component StorePage inherits Rectangle {
         description: root.games[root.selected-game-index].title;
         dismiss-on-backdrop: root.install-status == "";
         VerticalLayout {
+            vertical-stretch: 1;
             padding: Tokens.spacing-lg;
             spacing: Tokens.spacing-md;
-            Typography { text: "Available files"; variant: TextVariant.title; }
-            if root.artifacts.length == 0: Typography { text: "No downloadable artifacts available."; tone: TextTone.muted; }
-            for artifact[i] in root.artifacts: Rectangle {
-                height: 52px;
-                background: root.selected-artifacts[i] ? Tokens.color-surface-3 : Tokens.color-surface-1;
-                border-radius: Tokens.radius-sm;
-                Typography { x: Tokens.spacing-md; width: parent.width - 130px; height: parent.height; text: artifact; variant: TextVariant.body-sm; font-family: "monospace"; vertical-alignment: center; overflow: elide; }
-                Checkbox { x: parent.width - 128px; y: 16px; checked: root.selected-artifacts[i]; toggled(value) => { root.selected-artifacts[i] = value; root.selected-artifact-index = i; root.artifact-selected(i); } }
+            Card {
+                vertical-stretch: 1;
+                background: Tokens.color-background;
+                card-padding: CardPadding.none;
+                card-radius: CardRadius.md;
+                clip: true;
+
+                if root.artifacts.length == 0: Typography {
+                    x: Tokens.spacing-md;
+                    y: Tokens.spacing-md;
+                    width: parent.width - 2 * Tokens.spacing-md;
+                    text: "No downloadable artifacts available.";
+                    tone: TextTone.muted;
+                    wrap: word-wrap;
+                }
+
+                if root.artifacts.length > 0: ListView {
+                    width: parent.width;
+                    height: parent.height;
+                    for artifact in root.artifacts: Rectangle {
+                        width: parent.width;
+                        height: artifact.is-directory ? 36px : 64px;
+
+                        if artifact.is-directory: Typography {
+                            x: Tokens.spacing-md + artifact.depth * Tokens.spacing-lg;
+                            width: parent.width - 2 * Tokens.spacing-md - artifact.depth * Tokens.spacing-lg;
+                            height: parent.height;
+                            text: "▾  " + artifact.path;
+                            variant: TextVariant.body-sm;
+                            tone: TextTone.muted;
+                            vertical-alignment: center;
+                            overflow: elide;
+                        }
+
+                        if !artifact.is-directory: Rectangle {
+                            width: parent.width;
+                            height: parent.height;
+                            background: root.selected-artifacts[artifact.file-index] ? Tokens.color-surface-3 : Tokens.color-surface-1;
+                            border-radius: Tokens.radius-sm;
+                            HorizontalLayout {
+                                padding-left: Tokens.spacing-md + artifact.depth * Tokens.spacing-lg;
+                                padding-right: Tokens.spacing-md;
+                                padding-top: Tokens.spacing-md;
+                                padding-bottom: Tokens.spacing-md;
+                                spacing: Tokens.spacing-md;
+                                Checkbox {
+                                    width: 16px;
+                                    height: 20px;
+                                    checked: root.selected-artifacts[artifact.file-index];
+                                    toggled(value) => {
+                                        root.selected-artifacts[artifact.file-index] = value;
+                                        root.selected-artifact-index = artifact.file-index;
+                                        root.artifact-selected(artifact.file-index);
+                                    }
+                                }
+
+                                VerticalLayout {
+                                    horizontal-stretch: 1;
+                                    spacing: Tokens.spacing-xs;
+                                    Typography {
+                                        height: 16px;
+                                        text: artifact.path;
+                                        variant: TextVariant.body-sm;
+                                        font-family: "monospace";
+                                        vertical-alignment: center;
+                                        overflow: elide;
+                                    }
+                                    Typography {
+                                        height: 12px;
+                                        text: artifact.size;
+                                        variant: TextVariant.caption;
+                                        tone: TextTone.muted;
+                                        font-family: "monospace";
+                                        vertical-alignment: center;
+                                        overflow: elide;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
             }
-            Rectangle { vertical-stretch: 1; }
             Button {
                 text: "Download selected";
                 clicked => {

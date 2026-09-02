@@ -9,7 +9,7 @@ import { LibraryPage } from "library.slint";
 import { PlatformCardData } from "../components/platform-card.slint";
 import { PreviewDetailsData } from "../components/preview-details.slint";
 import { GameDetailsView } from "../components/game-details-view.slint";
-import { StorePage } from "store.slint";
+import { StorePage, StoreArtifact } from "store.slint";
 
 export component MainWindow inherits Window {
     in property <[GameCardData]> games;
@@ -18,7 +18,7 @@ export component MainWindow inherits Window {
     in property <[PlatformCardData]> store-platforms;
     in property <[GameCardData]> store-games;
     in property <PreviewDetailsData> store-details;
-    in property <[string]> store-artifacts;
+    in property <[StoreArtifact]> store-artifacts;
     in-out property <[bool]> store-selected-artifacts;
     in-out property <int> store-page: 0;
 
