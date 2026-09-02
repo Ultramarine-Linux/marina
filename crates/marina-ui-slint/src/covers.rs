@@ -292,7 +292,7 @@ pub fn decode(bytes: &[u8]) -> Option<(Image, f32)> {
 }
 
 #[tracing::instrument(skip(http, source), fields(loader = "covers"))]
-async fn load_bytes(http: &reqwest::Client, source: &CoverSource) -> Option<Vec<u8>> {
+pub(crate) async fn load_bytes(http: &reqwest::Client, source: &CoverSource) -> Option<Vec<u8>> {
     if let Some(path) = &source.local_path {
         if let Ok(bytes) = tokio::fs::read(path).await {
             debug!(path = %path.display(), bytes = bytes.len(), "local cover hit");

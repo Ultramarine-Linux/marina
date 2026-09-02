@@ -30,6 +30,7 @@ export component StorePage inherits Rectangle {
     in property <[PlatformCardData]> platforms;
     in property <[GameCardData]> games;
     in property <PreviewDetailsData> details;
+    in property <image> preview-image;
     in property <[StoreArtifact]> artifacts;
     in-out property <[bool]> selected-artifacts;
     in-out property <int> page: 0;
@@ -38,6 +39,7 @@ export component StorePage inherits Rectangle {
     in-out property <string> search-query;
     in-out property <string> selected-platform;
     in-out property <string> selected-platform-name;
+    in-out property <length> game-list-scroll-y: 0px;
     in-out property <bool> loading: false;
     in-out property <bool> details-loading: false;
     in-out property <string> install-status;
@@ -81,6 +83,12 @@ export component StorePage inherits Rectangle {
                     padding-left: Tokens.spacing-2xl;
                     padding-right: Tokens.spacing-2xl;
                     spacing: Tokens.spacing-md;
+                    Image {
+                        width: 36px;
+                        height: 36px;
+                        source: platform.icon;
+                        image-fit: contain;
+                    }
                     Typography {
                         horizontal-stretch: 1;
                         text: platform.name;
@@ -111,6 +119,7 @@ export component StorePage inherits Rectangle {
                     clicked => {
                         root.selected-platform = platform.slug;
                         root.selected-platform-name = platform.name;
+                        root.game-list-scroll-y = 0px;
                         root.page = 1;
                         root.loading = true;
                         root.platform-query(platform.slug);
@@ -148,7 +157,9 @@ export component StorePage inherits Rectangle {
         if !root.loading: PlatformGameList {
             games: root.games;
             details: root.details;
+            preview-image: root.preview-image;
             selected-index <=> root.selected-game-index;
+            scroll-y <=> root.game-list-scroll-y;
             details-loading <=> root.details-loading;
             selected(id, index) => { root.game-selected(id, index); root.page = 2; }
             vertical-stretch: 1;

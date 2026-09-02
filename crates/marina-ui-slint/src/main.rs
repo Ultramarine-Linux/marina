@@ -686,20 +686,30 @@ async fn main() -> Result<(), slint::PlatformError> {
                     .await;
                 match result {
                     Ok(remote_platforms) => {
+                        let icon_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                            .join("ui/assets/platforms/systematic");
                         let cards = remote_platforms
                             .into_iter()
-                            .map(|platform| {
-                                (platform.fs_slug, platform.display_name, platform.rom_count)
+                            .map(|platform| PlatformCardMetadata {
+                                icon_path: platform_asset_path(&icon_root, &platform.fs_slug),
+                                slug: platform.fs_slug,
+                                name: platform.display_name,
+                                game_count: format!("{} games", platform.rom_count),
                             })
                             .collect::<Vec<_>>();
                         let _ = store_window.upgrade_in_event_loop(move |window| {
                             let cards = cards
                                 .into_iter()
-                                .map(|(slug, name, count)| PlatformCardData {
-                                    slug: SharedString::from(slug),
-                                    name: SharedString::from(name),
-                                    icon: Image::default(),
-                                    game_count: SharedString::from(format!("{} games", count)),
+                                .map(|platform| PlatformCardData {
+                                    slug: SharedString::from(platform.slug),
+                                    name: SharedString::from(platform.name),
+                                    icon: platform
+                                        .icon_path
+                                        .and_then(|path| {
+                                            Image::load_from_path(std::path::Path::new(&path)).ok()
+                                        })
+                                        .unwrap_or_default(),
+                                    game_count: SharedString::from(platform.game_count),
                                 })
                                 .collect::<Vec<_>>();
                             window.set_store_platforms(ModelRc::from(std::rc::Rc::new(
@@ -855,19 +865,31 @@ async fn main() -> Result<(), slint::PlatformError> {
                 .await
             {
                 Ok(platforms) => {
+                    let icon_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                        .join("ui/assets/platforms/systematic");
                     let cards = platforms
                         .into_iter()
-                        .map(|p| (p.fs_slug, p.display_name, p.rom_count))
+                        .map(|platform| PlatformCardMetadata {
+                            icon_path: platform_asset_path(&icon_root, &platform.fs_slug),
+                            slug: platform.fs_slug,
+                            name: platform.display_name,
+                            game_count: platform.rom_count.to_string(),
+                        })
                         .collect::<Vec<_>>();
                     let count = cards.len();
                     let _ = window.upgrade_in_event_loop(move |window| {
                         let cards = cards
                             .into_iter()
-                            .map(|(slug, name, count)| PlatformCardData {
-                                slug: SharedString::from(slug),
-                                name: SharedString::from(name),
-                                game_count: SharedString::from(count.to_string()),
-                                icon: Image::default(),
+                            .map(|platform| PlatformCardData {
+                                slug: SharedString::from(platform.slug),
+                                name: SharedString::from(platform.name),
+                                game_count: SharedString::from(platform.game_count),
+                                icon: platform
+                                    .icon_path
+                                    .and_then(|path| {
+                                        Image::load_from_path(std::path::Path::new(&path)).ok()
+                                    })
+                                    .unwrap_or_default(),
                             })
                             .collect::<Vec<_>>();
                         window.set_store_platforms(ModelRc::from(std::rc::Rc::new(
@@ -908,12 +930,25 @@ async fn main() -> Result<(), slint::PlatformError> {
             if let Ok(cached) =
                 state
                     .library
-                    .remote_catalog_page("romm", Some(&slug), None, usize::MAX, 0)
+                    .remote_json_page("romm", Some(&slug), None, usize::MAX, 0)
             {
+                let cached = cached
+                    .into_iter()
+                    .filter_map(|json| serde_json::from_str::<marina_romm::Rom>(&json).ok())
+                    .collect::<Vec<_>>();
                 if !cached.is_empty() {
+                    *remote_store.lock().expect("remote Store state poisoned") = cached.clone();
                     let cards = cached
                         .into_iter()
-                        .map(|row| (row.rom_id, row.title, row.platform_slug))
+                        .map(|rom| {
+                            (
+                                rom.id.to_string(),
+                                rom.name.unwrap_or_else(|| rom.files.fs_name.clone()),
+                                rom.platform
+                                    .platform_display_name
+                                    .unwrap_or(rom.platform.platform_fs_slug),
+                            )
+                        })
                         .collect::<Vec<_>>();
                     let _ = query_window.upgrade_in_event_loop(move |window| {
                         let cards = cards
@@ -926,10 +961,16 @@ async fn main() -> Result<(), slint::PlatformError> {
                                 cover_ratio: 1.0,
                             })
                             .collect::<Vec<_>>();
+                        let first_id = cards.first().map(|game| game.id.clone());
                         window.set_store_games(ModelRc::from(std::rc::Rc::new(VecModel::from(
                             cards,
                         ))));
                         window.set_store_loading(false);
+                        if let Some(first_id) = first_id {
+                            window.set_store_selected_game_index(0);
+                            window.set_store_details_loading(true);
+                            window.invoke_store_game_selected(first_id, 0);
+                        }
                     });
                     return;
                 }
@@ -1001,8 +1042,14 @@ async fn main() -> Result<(), slint::PlatformError> {
                         cover_ratio: 1.0,
                     })
                     .collect::<Vec<_>>();
+                let first_id = cards.first().map(|game| game.id.clone());
                 window.set_store_games(ModelRc::from(std::rc::Rc::new(VecModel::from(cards))));
                 window.set_store_loading(false);
+                if let Some(first_id) = first_id {
+                    window.set_store_selected_game_index(0);
+                    window.set_store_details_loading(true);
+                    window.invoke_store_game_selected(first_id, 0);
+                }
             });
         });
     });
@@ -1012,15 +1059,15 @@ async fn main() -> Result<(), slint::PlatformError> {
     let detail_window = window.as_weak();
     window.on_store_game_selected(move |id, _index| {
         let Ok(id) = id.parse::<i32>() else { return };
+        if let Some(window) = detail_window.upgrade() {
+            window.set_store_preview_image(Image::default());
+        }
         let cached_rom = detail_store
             .lock()
             .expect("remote Store state poisoned")
             .iter()
             .find(|rom| rom.id == id)
             .cloned();
-        if let Some(rom) = cached_rom {
-            populate_store_details(&detail_window, rom);
-        }
         let Some(state) = detail_state
             .lock()
             .expect("library state lock poisoned")
@@ -1031,15 +1078,18 @@ async fn main() -> Result<(), slint::PlatformError> {
         let Some(base_url) = state.config.romm_url.clone() else {
             return;
         };
+        if let Some(rom) = cached_rom {
+            populate_store_details(&detail_window, rom, &base_url);
+        }
         let token = state.config.romm_token.clone();
         let detail_roms = detail_store.clone();
         let detail_window = detail_window.clone();
         tokio::spawn(async move {
-            let client = romm_auth::client(base_url, token.as_deref());
+            let client = romm_auth::client(base_url.clone(), token.as_deref());
             match client.get_rom(id).await {
                 Ok(rom) => {
                     *detail_roms.lock().expect("remote Store state poisoned") = vec![rom.clone()];
-                    populate_store_details(&detail_window, rom);
+                    populate_store_details(&detail_window, rom, &base_url);
                 }
                 Err(error) => error!(%error, rom_id = id, "RomM game detail hydration failed"),
             }
@@ -1049,7 +1099,27 @@ async fn main() -> Result<(), slint::PlatformError> {
     window.run()
 }
 
-fn populate_store_details(window: &slint::Weak<MainWindow>, rom: marina_romm::Rom) {
+fn populate_store_details(window: &slint::Weak<MainWindow>, rom: marina_romm::Rom, base_url: &str) {
+    let rom_id = rom.id.to_string();
+    let cover_source = covers::source_for(rom.cover_path().as_deref(), None, Some(base_url));
+    let screenshot = rom
+        .assets
+        .merged_screenshots
+        .first()
+        .cloned()
+        .or_else(|| {
+            rom.assets
+                .user_screenshots
+                .first()
+                .map(|screenshot| screenshot.download_path.clone())
+        })
+        .or_else(|| {
+            rom.assets
+                .all_user_screenshots
+                .first()
+                .map(|screenshot| screenshot.download_path.clone())
+        });
+    let screenshot_source = covers::source_for(screenshot.as_deref(), None, Some(base_url));
     let item: marina_core::LibraryItem = rom.clone().into();
     let rom_prefix = rom.files.full_path.trim_end_matches('/').to_owned();
     let artifact_count = rom.files.files.len();
@@ -1071,13 +1141,71 @@ fn populate_store_details(window: &slint::Weak<MainWindow>, rom: marina_romm::Ro
         regions: SharedString::from(item.regions.join(", ")),
         tags: SharedString::from(item.tags.join(", ")),
     };
+    let selected_rom_id = rom_id.clone();
     let _ = window.upgrade_in_event_loop(move |window| {
+        let games = window.get_store_games();
+        let selected_index = window.get_store_selected_game_index().max(0) as usize;
+        if games
+            .row_data(selected_index)
+            .is_none_or(|game| game.id.as_str() != selected_rom_id)
+        {
+            return;
+        }
         window.set_store_details(details);
+        window.set_store_preview_image(Image::default());
         window.set_store_artifacts(ModelRc::from(std::rc::Rc::new(VecModel::from(artifacts))));
         window.set_store_selected_artifacts(
             std::rc::Rc::new(VecModel::from(vec![false; artifact_count])).into(),
         );
         window.set_store_details_loading(false);
+    });
+
+    let preview_window = window.clone();
+    let preview_rom_id = rom_id.clone();
+    tokio::spawn(async move {
+        let Some(bytes) = covers::load_bytes(&reqwest::Client::new(), &screenshot_source).await
+        else {
+            return;
+        };
+        let _ = preview_window.upgrade_in_event_loop(move |window| {
+            let games = window.get_store_games();
+            let selected_index = window.get_store_selected_game_index().max(0) as usize;
+            if games
+                .row_data(selected_index)
+                .is_none_or(|game| game.id.as_str() != preview_rom_id)
+            {
+                return;
+            }
+            let Some((image, _)) = covers::decode(&bytes) else {
+                return;
+            };
+            window.set_store_preview_image(image);
+        });
+    });
+
+    let cover_window = window.clone();
+    tokio::spawn(async move {
+        let Some(bytes) = covers::load_bytes(&reqwest::Client::new(), &cover_source).await else {
+            return;
+        };
+        let _ = cover_window.upgrade_in_event_loop(move |window| {
+            let Some((image, ratio)) = covers::decode(&bytes) else {
+                return;
+            };
+            let games = window.get_store_games();
+            let Some(index) = (0..games.row_count()).find(|&index| {
+                games
+                    .row_data(index)
+                    .is_some_and(|game| game.id.as_str() == rom_id)
+            }) else {
+                return;
+            };
+            if let Some(mut game) = games.row_data(index) {
+                game.cover = image;
+                game.cover_ratio = ratio;
+                games.set_row_data(index, game);
+            }
+        });
     });
 }
 

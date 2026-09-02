@@ -19,12 +19,15 @@ export component MainWindow inherits Window {
     in property <[PlatformCardData]> store-platforms;
     in property <[GameCardData]> store-games;
     in property <PreviewDetailsData> store-details;
+    in property <image> store-preview-image;
     in property <[StoreArtifact]> store-artifacts;
     in-out property <[bool]> store-selected-artifacts;
     in-out property <int> store-page: 0;
 
     in-out property <int> store-selected-game-index: 0;
     in-out property <int> store-selected-artifact-index: 0;
+    in-out property <length> store-game-list-scroll-y: 0px;
+    in-out property <length> library-game-list-scroll-y: 0px;
     in-out property <bool> store-loading: false;
     in-out property <bool> store-details-loading: false;
     in-out property <string> store-install-status;
@@ -113,6 +116,7 @@ export component MainWindow inherits Window {
             games: root.platform-games;
             details: root.game-details;
             details-loading <=> root.game-details-loading;
+            game-list-scroll-y <=> root.library-game-list-scroll-y;
             initial-loading: root.loading;
             loading <=> root.library-loading;
             platform-query(slug) => { root.platform-query(slug); }
@@ -123,12 +127,14 @@ export component MainWindow inherits Window {
             platforms: root.store-platforms;
             games: root.store-games;
             details: root.store-details;
+            preview-image: root.store-preview-image;
             artifacts: root.store-artifacts;
             selected-artifacts <=> root.store-selected-artifacts;
             page <=> root.store-page;
 
             selected-game-index <=> root.store-selected-game-index;
             selected-artifact-index <=> root.store-selected-artifact-index;
+            game-list-scroll-y <=> root.store-game-list-scroll-y;
             search-query <=> root.search-query;
             loading <=> root.store-loading;
             details-loading <=> root.store-details-loading;

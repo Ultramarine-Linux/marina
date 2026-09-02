@@ -10,7 +10,11 @@ import { PreviewDetailsData } from "preview-details.slint";
 export component PlatformGameList inherits Rectangle {
     in property <[GameCardData]> games;
     in property <PreviewDetailsData> details;
+    in property <image> preview-image;
     in-out property <int> selected-index: 0;
+    // Owned by the parent so navigation can destroy/recreate this view without
+    // losing the user's position in the platform.
+    in-out property <length> scroll-y: 0px;
     in-out property <bool> details-loading: false;
     in property <string> action-label: "Open";
     callback selected(string, int);
@@ -34,6 +38,7 @@ export component PlatformGameList inherits Rectangle {
             list := ListView {
                 width: parent.width;
                 height: parent.height;
+                viewport-y <=> root.scroll-y;
                 for game[i] in root.games: Rectangle {
                     width: parent.width;
                     height: 42px;
@@ -110,15 +115,17 @@ export component PlatformGameList inherits Rectangle {
                     border-radius: Tokens.radius-md;
                     clip: true;
 
-                    if root.games[root.safe-index].cover.width == 0: Skeleton {
+                    if root.preview-image.width == 0 && root.games[root.safe-index].cover.width == 0: Skeleton {
                         width: parent.width;
                         height: parent.height;
                         radius: Tokens.radius-md;
                     }
-                    if root.games[root.safe-index].cover.width > 0: Image {
+                    if root.preview-image.width > 0 || root.games[root.safe-index].cover.width > 0: Image {
                         width: parent.width;
                         height: parent.height;
-                        source: root.games[root.safe-index].cover;
+                        source: root.preview-image.width > 0
+                            ? root.preview-image
+                            : root.games[root.safe-index].cover;
                         image-fit: cover;
                     }
                 }

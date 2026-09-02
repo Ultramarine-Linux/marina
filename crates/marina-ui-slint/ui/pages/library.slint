@@ -20,6 +20,7 @@ export component LibraryPage inherits Rectangle {
     in-out property <string> search-query;
     in-out property <string> selected-platform;
     in-out property <string> selected-platform-name;
+    in-out property <length> game-list-scroll-y: 0px;
 
     in property <bool> initial-loading: false;
     in-out property <bool> loading: false;
@@ -148,6 +149,7 @@ export component LibraryPage inherits Rectangle {
                     clicked => {
                         root.selected-platform = platform.slug;
                         root.selected-platform-name = platform.name;
+                        root.game-list-scroll-y = 0px;
                         root.page = 1;
                         root.loading = true;
                         root.details-loading = true;
@@ -218,6 +220,7 @@ export component LibraryPage inherits Rectangle {
             games: root.games;
             details: root.details;
             details-loading <=> root.details-loading;
+            scroll-y <=> root.game-list-scroll-y;
             selected(id, index) => { root.game-selected(id, index); }
             vertical-stretch: 1;
         }
