@@ -27,6 +27,7 @@ license = "Apache-2.0"
 
 [workspace.dependencies]
 base64 = "0.23"
+bytesize = "2.7.0"
 chrono = { version = "0.4", default-features = false, features = ["serde", "clock"] }
 dotenvy = "0.15"
 futures-util = "0.3"

@@ -1250,13 +1250,19 @@ impl ArtifactTree {
         for (file_name, file_index, file_size_bytes) in files {
             rows.push(StoreArtifact {
                 path: SharedString::from(file_name),
-                size: SharedString::from(format!("{file_size_bytes} bytes")),
+                size: SharedString::from(format_file_size(file_size_bytes)),
                 depth,
                 is_directory: false,
                 file_index: file_index as i32,
             });
         }
     }
+}
+
+fn format_file_size(bytes: i64) -> String {
+    u64::try_from(bytes)
+        .map(|bytes| bytesize::ByteSize::b(bytes).display().iec().to_string())
+        .unwrap_or_else(|_| "Unknown size".to_owned())
 }
 
 fn display_artifact_path(file: &marina_romm::RomFile, rom_prefix: &str) -> String {
