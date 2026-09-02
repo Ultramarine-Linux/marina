@@ -1,18 +1,17 @@
-use chrono::{DateTime, FixedOffset};
+use chrono::{DateTime, FixedOffset, Utc};
 use marina_core::{
     ItemKind, LibraryAsset, LibraryAssetKind, LibraryCard, LibraryItem, LibraryItemFile,
     LibraryItemId, Platform,
 };
 use marina_library::{
     error::LibraryError,
-    query::SearchQuery,
+    query::{SearchQuery, SearchSort},
     read::{LibraryRead, PlatformRead},
     write::{LibraryWrite, PlatformWrite},
 };
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
-use std::path::Path;
-use std::sync::Mutex;
+use std::{path::Path, sync::Mutex};
 use tracing::debug;
 
 #[derive(Debug)]
@@ -158,7 +157,26 @@ fn err<E: std::error::Error + Send + Sync + 'static>(e: E) -> LibraryError {
 impl SqliteLibrary {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, rusqlite::Error> {
         let c = Connection::open(path)?;
-        c.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; CREATE TABLE IF NOT EXISTS platforms(slug TEXT PRIMARY KEY,name TEXT NOT NULL); CREATE TABLE IF NOT EXISTS library_items(id TEXT PRIMARY KEY,title TEXT NOT NULL,platform_slug TEXT,local_path TEXT,json TEXT NOT NULL, UNIQUE(platform_slug,local_path)); CREATE TABLE IF NOT EXISTS library_item_files(library_item_id TEXT NOT NULL,provider_id TEXT,local_path TEXT NOT NULL,name TEXT NOT NULL,size_bytes INTEGER,PRIMARY KEY(library_item_id,local_path),UNIQUE(provider_id)); CREATE TABLE IF NOT EXISTS remote_rom_cache(provider TEXT NOT NULL,rom_id TEXT NOT NULL,title TEXT NOT NULL,platform_slug TEXT NOT NULL,json TEXT NOT NULL,PRIMARY KEY(provider,rom_id)); CREATE INDEX IF NOT EXISTS idx_remote_rom_title ON remote_rom_cache(provider,title); CREATE INDEX IF NOT EXISTS idx_remote_rom_platform ON remote_rom_cache(provider,platform_slug); CREATE INDEX IF NOT EXISTS idx_items_title ON library_items(title); CREATE INDEX IF NOT EXISTS idx_items_platform ON library_items(platform_slug); CREATE INDEX IF NOT EXISTS idx_items_path ON library_items(local_path); CREATE INDEX IF NOT EXISTS idx_item_files_provider ON library_item_files(provider_id);")?;
+        c.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; CREATE TABLE IF NOT EXISTS platforms(slug TEXT PRIMARY KEY,name TEXT NOT NULL); CREATE TABLE IF NOT EXISTS library_items(id TEXT PRIMARY KEY,title TEXT NOT NULL,platform_slug TEXT,local_path TEXT,json TEXT NOT NULL,last_updated INTEGER NOT NULL DEFAULT 0, UNIQUE(platform_slug,local_path)); CREATE TABLE IF NOT EXISTS library_item_files(library_item_id TEXT NOT NULL,provider_id TEXT,local_path TEXT NOT NULL,name TEXT NOT NULL,size_bytes INTEGER,PRIMARY KEY(library_item_id,local_path),UNIQUE(provider_id)); CREATE TABLE IF NOT EXISTS remote_rom_cache(provider TEXT NOT NULL,rom_id TEXT NOT NULL,title TEXT NOT NULL,platform_slug TEXT NOT NULL,json TEXT NOT NULL,PRIMARY KEY(provider,rom_id)); CREATE INDEX IF NOT EXISTS idx_remote_rom_title ON remote_rom_cache(provider,title); CREATE INDEX IF NOT EXISTS idx_remote_rom_platform ON remote_rom_cache(provider,platform_slug); CREATE INDEX IF NOT EXISTS idx_items_title ON library_items(title); CREATE INDEX IF NOT EXISTS idx_items_platform ON library_items(platform_slug); CREATE INDEX IF NOT EXISTS idx_items_path ON library_items(local_path); CREATE INDEX IF NOT EXISTS idx_item_files_provider ON library_item_files(provider_id);")?;
+        let has_last_updated = c
+            .prepare("PRAGMA table_info(library_items)")?
+            .query_map([], |row| row.get::<_, String>(1))?
+            .collect::<Result<Vec<_>, _>>()?
+            .iter()
+            .any(|name| name == "last_updated");
+        if !has_last_updated {
+            c.execute(
+                "ALTER TABLE library_items ADD COLUMN last_updated INTEGER NOT NULL DEFAULT 0",
+                [],
+            )?;
+        }
+        c.execute(
+            "UPDATE library_items SET last_updated = CAST(strftime('%s', 'now') AS INTEGER) * 1000 WHERE last_updated = 0",
+            [],
+        )?;
+        c.execute_batch(
+            "CREATE INDEX IF NOT EXISTS idx_items_last_updated ON library_items(last_updated DESC);",
+        )?;
         Ok(Self {
             conn: Mutex::new(c),
         })
@@ -283,7 +301,8 @@ impl SqliteLibrary {
     fn save(&self, x: LibraryItem) -> Result<LibraryItem, LibraryError> {
         let j = serde_json::to_string(&Stored::from(&x)).map_err(err)?;
         let c = self.conn.lock().unwrap();
-        c.execute("INSERT OR REPLACE INTO library_items(id,title,platform_slug,local_path,json) VALUES(?,?,?,?,?)",params![x.id.to_string(),x.title,x.platform_slug,x.local_path,j]).map_err(err)?;
+        let last_updated = Utc::now().timestamp_millis();
+        c.execute("INSERT OR REPLACE INTO library_items(id,title,platform_slug,local_path,json,last_updated) VALUES(?,?,?,?,?,?)",params![x.id.to_string(),x.title,x.platform_slug,x.local_path,j,last_updated]).map_err(err)?;
         c.execute(
             "DELETE FROM library_item_files WHERE library_item_id=?",
             params![x.id.to_string()],
@@ -315,7 +334,14 @@ impl PlatformRead for SqliteLibrary {
 impl LibraryRead for SqliteLibrary {
     async fn search(&self, q: SearchQuery) -> Result<Vec<LibraryItem>, LibraryError> {
         let c = self.conn.lock().unwrap();
-        let mut s=c.prepare("SELECT json FROM library_items WHERE (?1 IS NULL OR lower(title) LIKE '%'||lower(?1)||'%' OR lower(json) LIKE '%'||lower(?1)||'%') AND (?2 IS NULL OR platform_slug=?2) ORDER BY title LIMIT ?3 OFFSET ?4").map_err(err)?;
+        let order_by = match q.sort {
+            SearchSort::Title => "title",
+            SearchSort::LastUpdated => "last_updated DESC, title",
+        };
+        let sql = format!(
+            "SELECT json FROM library_items WHERE (?1 IS NULL OR lower(title) LIKE '%'||lower(?1)||'%' OR lower(json) LIKE '%'||lower(?1)||'%') AND (?2 IS NULL OR platform_slug=?2) ORDER BY {order_by} LIMIT ?3 OFFSET ?4"
+        );
+        let mut s = c.prepare(&sql).map_err(err)?;
         let lim = q.limit.map(|x| x as i64).unwrap_or(-1);
         s.query_map(
             params![q.text, q.platform, lim, q.offset as i64],
@@ -325,6 +351,18 @@ impl LibraryRead for SqliteLibrary {
         .collect::<Result<_, _>>()
         .map_err(err)
     }
+    async fn count(&self, q: SearchQuery) -> Result<usize, LibraryError> {
+        let c = self.conn.lock().unwrap();
+        let count = c
+            .query_row(
+                "SELECT COUNT(*) FROM library_items WHERE (?1 IS NULL OR lower(title) LIKE '%'||lower(?1)||'%' OR lower(json) LIKE '%'||lower(?1)||'%') AND (?2 IS NULL OR platform_slug=?2)",
+                params![q.text, q.platform],
+                |row| row.get::<_, i64>(0),
+            )
+            .map_err(err)?;
+        Ok(count as usize)
+    }
+
     async fn get(&self, id: &LibraryItemId) -> Result<Option<LibraryItem>, LibraryError> {
         let c = self.conn.lock().unwrap();
         let mut s = c
@@ -424,6 +462,17 @@ mod tests {
         let mut x = LibraryItem::new_game("Zelda");
         x.platform_slug = Some("snes".into());
         db.add(x.clone()).await.unwrap();
+        let last_updated = db
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT last_updated FROM library_items WHERE id=?",
+                params![x.id.to_string()],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap();
+        assert!(last_updated > 0);
         assert_eq!(db.get(&x.id).await.unwrap().unwrap().title, "Zelda");
         assert_eq!(
             db.search(SearchQuery::new().text("zel"))
@@ -432,6 +481,31 @@ mod tests {
                 .len(),
             1
         );
+        assert_eq!(
+            db.count(SearchQuery::new().platform("snes")).await.unwrap(),
+            1
+        );
+        let mut y = LibraryItem::new_game("Metroid");
+        y.platform_slug = Some("nes".into());
+        db.add(y.clone()).await.unwrap();
+        {
+            let conn = db.conn.lock().unwrap();
+            conn.execute(
+                "UPDATE library_items SET last_updated=1 WHERE id=?",
+                params![x.id.to_string()],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE library_items SET last_updated=2 WHERE id=?",
+                params![y.id.to_string()],
+            )
+            .unwrap();
+        }
+        let recently_added = db
+            .search(SearchQuery::new().sort(SearchSort::LastUpdated))
+            .await
+            .unwrap();
+        assert_eq!(recently_added[0].title, "Metroid");
         db.remove(&x.id).await.unwrap();
         assert!(db.get(&x.id).await.unwrap().is_none());
     }

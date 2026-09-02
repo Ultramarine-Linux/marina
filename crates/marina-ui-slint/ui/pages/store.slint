@@ -14,6 +14,8 @@ import { GameCardData } from "../components/card.slint";
 import { PlatformGameList } from "../components/platform-game-list.slint";
 import { PreviewDetailsData } from "../components/preview-details.slint";
 import { GameDetailsView } from "../components/game-details-view.slint";
+import { LucideIcon } from "../slintcn/components/lucide-icon.slint";
+import { IconSet } from "@lucide/lucide.slint";
 
 export struct StoreArtifact {
     path: string,
@@ -39,7 +41,6 @@ export component StorePage inherits Rectangle {
     in-out property <bool> details-loading: false;
     in-out property <string> install-status;
     in-out property <float> install-progress: 0;
-    in-out property <string> sync-status;
     in-out property <bool> artifact-sheet-open: false;
 
     callback platform-query(string);
@@ -92,7 +93,20 @@ export component StorePage inherits Rectangle {
         HorizontalLayout {
             height: 38px;
             spacing: Tokens.spacing-md;
-            Button { width: 36px; height: 36px; variant: ButtonVariant.ghost; size: ButtonSize.icon; text: "←"; clicked => { root.page = 0; } }
+            Button {
+                width: 36px;
+                height: 36px;
+                variant: ButtonVariant.ghost;
+                size: ButtonSize.icon;
+                text: "";
+                LucideIcon {
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    icon: IconSet.ArrowLeft;
+                    size: 18px;
+                }
+                clicked => { root.page = 0; }
+            }
             Typography { text: root.selected-platform-name; variant: TextVariant.headline; vertical-alignment: center; }
         }
         Rectangle { height: 1px; background: Tokens.color-border-hairline; }
@@ -117,17 +131,6 @@ export component StorePage inherits Rectangle {
         action-requested => { root.artifact-sheet-open = true; }
     }
 
-    if root.sync-status != "": Rectangle {
-        x: parent.width - self.width - 20px;
-        y: 20px;
-        width: 360px;
-        height: 48px;
-        background: Tokens.color-surface-1;
-        border-radius: Tokens.radius-md;
-        border-width: 1px;
-        border-color: Tokens.color-border-hairline;
-        Typography { x: 14px; y: 12px; text: root.sync-status; variant: TextVariant.body-sm; }
-    }
 
     if root.install-status != "": Rectangle {
         background: #00000088;
@@ -188,11 +191,18 @@ export component StorePage inherits Rectangle {
                         width: parent.width;
                         height: artifact.is-directory ? 36px : 64px;
 
-                        if artifact.is-directory: Typography {
+                        if artifact.is-directory: LucideIcon {
                             x: Tokens.spacing-md + artifact.depth * Tokens.spacing-lg;
-                            width: parent.width - 2 * Tokens.spacing-md - artifact.depth * Tokens.spacing-lg;
+                            y: (parent.height - self.height) / 2;
+                            icon: IconSet.ChevronDown;
+                            tint: Tokens.color-muted-foreground;
+                            size: 14px;
+                        }
+                        if artifact.is-directory: Typography {
+                            x: Tokens.spacing-md + artifact.depth * Tokens.spacing-lg + 20px;
+                            width: parent.width - 2 * Tokens.spacing-md - artifact.depth * Tokens.spacing-lg - 20px;
                             height: parent.height;
-                            text: "▾  " + artifact.path;
+                            text: artifact.path;
                             variant: TextVariant.body-sm;
                             tone: TextTone.muted;
                             vertical-alignment: center;

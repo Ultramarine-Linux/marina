@@ -16,5 +16,14 @@ fn main() {
         }
     }
 
-    slint_build::compile("ui/pages/main.slint").unwrap();
+    let lucide_library = std::path::PathBuf::from(lucide_slint::lib());
+    let libraries = std::collections::HashMap::from([(
+        "lucide".to_owned(),
+        lucide_library
+            .parent()
+            .expect("lucide-slint library file must have a parent directory")
+            .to_path_buf(),
+    )]);
+    let configuration = slint_build::CompilerConfiguration::new().with_library_paths(libraries);
+    slint_build::compile_with_config("ui/pages/main.slint", configuration).unwrap();
 }

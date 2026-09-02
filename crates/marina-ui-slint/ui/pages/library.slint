@@ -9,6 +9,8 @@ import { PlatformCardData } from "../components/platform-card.slint";
 import { GameCardData } from "../components/card.slint";
 import { PlatformGameList } from "../components/platform-game-list.slint";
 import { PreviewDetailsData } from "../components/preview-details.slint";
+import { LucideIcon } from "../slintcn/components/lucide-icon.slint";
+import { IconSet } from "@lucide/lucide.slint";
 
 export component LibraryPage inherits Rectangle {
     in property <[PlatformCardData]> platforms;
@@ -164,7 +166,13 @@ export component LibraryPage inherits Rectangle {
                 height: 36px;
                 variant: ButtonVariant.ghost;
                 size: ButtonSize.icon;
-                text: "←";
+                text: "";
+                LucideIcon {
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    icon: IconSet.ArrowLeft;
+                    size: 18px;
+                }
                 clicked => {
                     root.page = 0;
 

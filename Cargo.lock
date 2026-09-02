@@ -3135,6 +3135,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 
 [[package]]
+name = "lucide-slint"
+version = "1.38.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2eaf632d0249e318fd0a12b4d02c91025fd89641bba58ac697ab324305016bfe"
+
+[[package]]
 name = "lyon_algorithms"
 version = "1.0.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3272,6 +3278,7 @@ version = "0.1.0"
 dependencies = [
  "dotenvy",
  "image",
+ "lucide-slint",
  "marina-core",
  "marina-install",
  "marina-library",

@@ -6,12 +6,14 @@ import { Text as Typography } from "../slintcn/components/text.slint";
 import { TextVariant, TextTone } from "../slintcn/components/text.slint";
 import { GameCardData } from "card.slint";
 import { PreviewDetailsData } from "preview-details.slint";
+import { LucideIcon } from "../slintcn/components/lucide-icon.slint";
+import { IconSet } from "@lucide/lucide.slint";
 
 export component GameDetailsView inherits Rectangle {
     in property <GameCardData> game;
     in property <PreviewDetailsData> details;
     in property <bool> loading: false;
-    in property <string> action-label: "▶  Play";
+    in property <string> action-label: "Play";
     callback back;
     callback action-requested;
 
@@ -22,7 +24,20 @@ export component GameDetailsView inherits Rectangle {
         HorizontalLayout {
             height: 40px;
             spacing: Tokens.spacing-md;
-            Button { width: 40px; height: 36px; variant: ButtonVariant.ghost; size: ButtonSize.icon; text: "←"; clicked => { root.back(); } }
+            Button {
+                width: 40px;
+                height: 36px;
+                variant: ButtonVariant.ghost;
+                size: ButtonSize.icon;
+                text: "";
+                LucideIcon {
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    icon: IconSet.ArrowLeft;
+                    size: 18px;
+                }
+                clicked => { root.back(); }
+            }
             Typography { text: root.details.title != "" ? root.details.title : root.game.title; variant: TextVariant.headline; vertical-alignment: center; overflow: elide; }
         }
         Rectangle { height: 1px; background: Tokens.color-border-hairline; }

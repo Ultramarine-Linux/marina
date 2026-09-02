@@ -5,6 +5,8 @@ import { Text as Typography } from "../slintcn/components/text.slint";
 import { TextVariant, TextTone } from "../slintcn/components/text.slint";
 import { GameCardData } from "../components/card.slint";
 import { PreviewDetailsData } from "../components/preview-details.slint";
+import { LucideIcon } from "../slintcn/components/lucide-icon.slint";
+import { IconSet } from "@lucide/lucide.slint";
 
 export component GamePage inherits Rectangle {
     in property <GameCardData> game;
@@ -28,7 +30,13 @@ export component GamePage inherits Rectangle {
                 height: 36px;
                 variant: ButtonVariant.ghost;
                 size: ButtonSize.icon;
-                text: "←";
+                text: "";
+                LucideIcon {
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    icon: IconSet.ArrowLeft;
+                    size: 18px;
+                }
                 clicked => { root.back(); }
             }
 
@@ -92,7 +100,13 @@ export component GamePage inherits Rectangle {
                         Button {
                             width: 120px;
                             variant: ButtonVariant.default;
-                            text: "▶  Play";
+                            text: "Play";
+                            LucideIcon {
+                                x: 14px;
+                                y: (parent.height - self.height) / 2;
+                                icon: IconSet.Play;
+                                size: 16px;
+                            }
                             clicked => { root.play(); }
                         }
                     }

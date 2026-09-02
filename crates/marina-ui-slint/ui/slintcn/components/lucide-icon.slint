@@ -1,0 +1,29 @@
+// Renderer for the `lucide-slint` IconSet. Unlike the legacy local path
+// constants, this supports all Lucide icons and their multi-path definitions.
+
+import { Tokens } from "../theme/tokens.slint";
+import { Icon as LucideIconData } from "@lucide/lucide.slint";
+
+export component LucideIcon inherits Rectangle {
+    in property <LucideIconData> icon;
+    in property <length> size: 16px;
+    in property <color> tint: Tokens.color-foreground;
+    in property <length> stroke-width: 2px;
+
+    preferred-width: size;
+    preferred-height: size;
+    background: transparent;
+
+    for path in root.icon.paths: Path {
+        width: root.width;
+        height: root.height;
+        viewbox-x: path.viewbox-x;
+        viewbox-y: path.viewbox-y;
+        viewbox-width: path.viewbox-width;
+        viewbox-height: path.viewbox-height;
+        fill: path.has_fill ? root.tint : transparent;
+        stroke: root.tint;
+        stroke-width: root.stroke-width;
+        commands: path.command;
+    }
+}

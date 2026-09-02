@@ -18,6 +18,9 @@ pub trait PlatformRead {
 pub trait LibraryRead: PlatformRead {
     async fn search(&self, query: SearchQuery) -> Result<Vec<LibraryItem>, LibraryError>;
 
+    /// Count entries matching a query without loading their records.
+    async fn count(&self, query: SearchQuery) -> Result<usize, LibraryError>;
+
     async fn get(&self, id: &LibraryItemId) -> Result<Option<LibraryItem>, LibraryError>;
 
     async fn list(&self, limit: u32) -> Result<Vec<LibraryItem>, LibraryError>;

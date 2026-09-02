@@ -1,6 +1,9 @@
 use std::{
+    cell::Cell,
     collections::BTreeMap,
+    rc::Rc,
     sync::{Arc, Mutex},
+    time::Duration,
 };
 
 use marina_core::LibraryItemId;
@@ -26,6 +29,62 @@ mod romm_auth;
 mod shelf;
 mod storage;
 
+const TOAST_DURATION: Duration = Duration::from_secs(4);
+const TOAST_DISMISS_ANIMATION: Duration = Duration::from_millis(250);
+
+fn configure_toasts(window: &MainWindow) {
+    let items = Rc::new(VecModel::from(Vec::<ToastItem>::new()));
+    let toast_queue = window.global::<ToastQueue>();
+    toast_queue.set_items(ModelRc::from(items.clone()));
+
+    let dismiss_items = items.clone();
+    toast_queue.on_dismiss(move |id| {
+        dismiss_toast(dismiss_items.clone(), id);
+    });
+
+    let next_id = Rc::new(Cell::new(0_i32));
+    toast_queue.on_show(move |text, variant| {
+        let id = next_id.get();
+        next_id.set(id.saturating_add(1));
+        items.push(ToastItem {
+            id,
+            text,
+            variant,
+            dismissed: false,
+        });
+
+        let auto_dismiss_items = items.clone();
+        slint::Timer::single_shot(TOAST_DURATION, move || {
+            dismiss_toast(auto_dismiss_items, id);
+        });
+    });
+}
+
+fn dismiss_toast(items: Rc<VecModel<ToastItem>>, id: i32) {
+    let Some(index) = (0..items.row_count())
+        .find(|&index| items.row_data(index).is_some_and(|item| item.id == id))
+    else {
+        return;
+    };
+    let Some(mut item) = items.row_data(index) else {
+        return;
+    };
+    if item.dismissed {
+        return;
+    }
+
+    item.dismissed = true;
+    items.set_row_data(index, item);
+
+    slint::Timer::single_shot(TOAST_DISMISS_ANIMATION, move || {
+        if let Some(index) = (0..items.row_count())
+            .find(|&index| items.row_data(index).is_some_and(|item| item.id == id))
+        {
+            items.remove(index);
+        }
+    });
+}
+
 #[tokio::main]
 async fn main() -> Result<(), slint::PlatformError> {
     tracing_subscriber::fmt()
@@ -44,6 +103,7 @@ async fn main() -> Result<(), slint::PlatformError> {
 
     let (username, display_name, initials) = profile_identity();
     let window = MainWindow::new()?;
+    configure_toasts(&window);
     window.set_profile_name(SharedString::from(display_name));
     window.set_profile_username(SharedString::from(username.clone()));
     window.set_profile_initials(SharedString::from(initials));
@@ -88,7 +148,10 @@ async fn main() -> Result<(), slint::PlatformError> {
     window.on_cover_context_changed(move |active_tab| {
         debug!(active_tab, "cover context changed");
         if active_tab == 1 {
-            debug!("cover context switched to platform sources");
+            let mut loader = loader_for_context.borrow_mut();
+            loader.reset();
+            loader.update(0.0, 1_280.0);
+            debug!("cover context reset complete; refreshing platform residency");
             return;
         }
         let home_sources = context_home_sources
@@ -100,9 +163,8 @@ async fn main() -> Result<(), slint::PlatformError> {
         debug!(source_count, "cover context switched to home sources");
         let mut loader = loader_for_context.borrow_mut();
         loader.reset();
-        debug!("cover context reset complete; refreshing home residency");
         loader.update(0.0, 1_280.0);
-        debug!("cover context home residency refresh complete");
+        debug!("cover context reset complete; refreshing home residency");
     });
 
     let weak_window = window.as_weak();
@@ -277,6 +339,11 @@ async fn main() -> Result<(), slint::PlatformError> {
                 let games = game_cards(metadata);
                 model.set_vec(games);
                 window.set_library_loading(false);
+                if window.get_active_tab() == 1 {
+                    // Replacing the platform model invalidates lazy-cover
+                    // residency; immediately request the visible cards.
+                    window.invoke_cover_context_changed(1);
+                }
             });
         });
     });
@@ -316,8 +383,105 @@ async fn main() -> Result<(), slint::PlatformError> {
                             window.invoke_cover_context_changed(0);
                         }
                     }
+                    window.set_loading(false);
+                });
+            } else {
+                let _ = window.upgrade_in_event_loop(|window| {
+                    window.set_loading(false);
                 });
             }
+        });
+    });
+
+    let library_refresh_state = library_state.clone();
+    let library_refresh_window = window.as_weak();
+    window.on_library_entered(move || {
+        let Some(state) = library_refresh_state
+            .lock()
+            .ok()
+            .and_then(|state| state.clone())
+        else {
+            return;
+        };
+        let window = library_refresh_window.clone();
+        tokio::spawn(async move {
+            let metadata =
+                match shelf::load_games(&state.library, state.config.romm_url.as_deref()).await {
+                    Ok((metadata, _)) => metadata,
+                    Err(error) => {
+                        error!(%error, "library game metadata refresh failed");
+                        return;
+                    }
+                };
+            let platforms = match state.library.platforms().await {
+                Ok(platforms) => platforms,
+                Err(error) => {
+                    error!(%error, "library platform refresh failed");
+                    return;
+                }
+            };
+            let mut platform_names = platforms
+                .into_iter()
+                .map(|platform| (platform.slug, platform.name))
+                .collect::<BTreeMap<_, _>>();
+            for game in metadata {
+                if game.platform.is_empty() {
+                    continue;
+                }
+                // A newly added game may precede an explicit platform record.
+                // Its stable platform slug is still sufficient to browse it.
+                platform_names
+                    .entry(game.platform.clone())
+                    .or_insert(game.platform);
+            }
+
+            let mut platform_counts = BTreeMap::<String, usize>::new();
+            for slug in platform_names.keys() {
+                let count = match state.library.count(SearchQuery::new().platform(slug)).await {
+                    Ok(count) => count,
+                    Err(error) => {
+                        error!(%error, platform = %slug, "library platform count refresh failed");
+                        return;
+                    }
+                };
+                platform_counts.insert(slug.clone(), count);
+            }
+
+            let icon_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("ui/assets/platforms/systematic");
+            let cards = platform_names
+                .into_iter()
+                .map(|(slug, name)| {
+                    let game_count = platform_counts.get(&slug).copied().unwrap_or_default();
+                    PlatformCardMetadata {
+                        icon_path: platform_asset_path(&icon_root, &slug),
+                        slug,
+                        name,
+                        game_count: format!(
+                            "{} {}",
+                            game_count,
+                            if game_count == 1 { "game" } else { "games" }
+                        ),
+                    }
+                })
+                .collect::<Vec<_>>();
+            let _ = window.upgrade_in_event_loop(move |window| {
+                let cards = cards
+                    .into_iter()
+                    .map(|platform| PlatformCardData {
+                        slug: SharedString::from(platform.slug),
+                        name: SharedString::from(platform.name),
+                        game_count: SharedString::from(platform.game_count),
+                        icon: platform
+                            .icon_path
+                            .and_then(|path| {
+                                Image::load_from_path(std::path::Path::new(&path)).ok()
+                            })
+                            .unwrap_or_default(),
+                    })
+                    .collect::<Vec<_>>();
+                window.set_platforms(ModelRc::from(std::rc::Rc::new(VecModel::from(cards))));
+            });
         });
     });
 
@@ -640,6 +804,10 @@ async fn main() -> Result<(), slint::PlatformError> {
                             window.set_store_details_loading(false);
                             window.set_store_install_status(SharedString::from("Installed"));
                             window.set_store_install_progress(1.0);
+                            // A newly installed game may introduce a platform,
+                            // so refresh the Library catalog without requiring
+                            // the user to leave and re-enter that tab.
+                            window.invoke_library_entered();
                             });
                         }
                         Err(error) => {
@@ -679,7 +847,6 @@ async fn main() -> Result<(), slint::PlatformError> {
         };
         let window = store_refresh_window.clone();
         let _ = window.upgrade_in_event_loop(|window| {
-            window.set_store_sync_status(SharedString::from("Refreshing RomM platforms…"));
             window.set_store_loading(true);
         });
         tokio::spawn(async move {
@@ -707,17 +874,20 @@ async fn main() -> Result<(), slint::PlatformError> {
                             VecModel::from(cards),
                         )));
                         window.set_store_loading(false);
-                        window.set_store_sync_status(SharedString::from(format!(
-                            "Loaded {count} RomM platforms"
-                        )));
+                        window.global::<ToastQueue>().invoke_show(
+                            SharedString::from(format!("Loaded {count} RomM platforms")),
+                            ToastVariant::Success,
+                        );
                     });
                 }
                 Err(error) => {
+                    error!(%error, "RomM platform refresh failed");
+                    let message = SharedString::from(format!("RomM refresh failed: {error}"));
                     let _ = window.upgrade_in_event_loop(move |window| {
                         window.set_store_loading(false);
-                        window.set_store_sync_status(SharedString::from(format!(
-                            "RomM refresh failed: {error}"
-                        )));
+                        window
+                            .global::<ToastQueue>()
+                            .invoke_show(message, ToastVariant::Error);
                     });
                 }
             }

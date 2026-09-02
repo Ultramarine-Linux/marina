@@ -22,6 +22,10 @@ impl LibraryRead for EmptyLibrary {
         Ok(Vec::new())
     }
 
+    async fn count(&self, _query: SearchQuery) -> Result<usize, LibraryError> {
+        Ok(0)
+    }
+
     async fn get(&self, _id: &LibraryItemId) -> Result<Option<LibraryItem>, LibraryError> {
         Ok(None)
     }

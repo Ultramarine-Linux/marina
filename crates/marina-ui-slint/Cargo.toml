@@ -10,6 +10,7 @@ debug-mcp = ["slint/mcp"]
 live-preview = ["slint/live-preview"]
 
 [build-dependencies]
+lucide-slint = "1.38.0"
 slint-build = "1.17.1"
 
 [dependencies]

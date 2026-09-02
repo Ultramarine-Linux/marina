@@ -7,7 +7,11 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use marina_library::{error::LibraryError, read::LibraryRead};
+use marina_library::{
+    error::LibraryError,
+    query::{SearchQuery, SearchSort},
+    read::LibraryRead,
+};
 use slint::{ComponentHandle, Image, Model, SharedPixelBuffer};
 use tracing::{debug, warn};
 
@@ -360,7 +364,9 @@ pub async fn load_games_metadata(
     library: &marina_store_sqlite::SqliteLibrary,
     base_url: Option<&str>,
 ) -> Result<(Vec<crate::shelf::GameMetadata>, Vec<CoverSource>), LibraryError> {
-    let items = library.list_cards(100).await?;
+    let items = library
+        .search_cards(SearchQuery::new().sort(SearchSort::LastUpdated).limit(100))
+        .await?;
     Ok(items
         .into_iter()
         .map(|item| {

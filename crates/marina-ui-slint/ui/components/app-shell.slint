@@ -4,6 +4,8 @@ import { Avatar } from "../slintcn/components/avatar.slint";
 import { NavigationMenu, NavigationItem } from "../slintcn/components/navigation-menu.slint";
 import { Text as Typography } from "../slintcn/components/text.slint";
 import { TextVariant, TextTone } from "../slintcn/components/text.slint";
+import { LucideIcon } from "../slintcn/components/lucide-icon.slint";
+import { IconSet } from "@lucide/lucide.slint";
 
 // Shared application chrome. Screens are supplied as children and are kept
 // separate from shell navigation state.
@@ -91,7 +93,13 @@ export component AppShell inherits Rectangle {
                     height: 36px;
                     variant: ButtonVariant.ghost;
                     size: ButtonSize.icon;
-                    text: "⚙";
+                    text: "";
+                    LucideIcon {
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                        icon: IconSet.Settings;
+                        size: 18px;
+                    }
                     // Settings screen will be wired here later.
                 }
             }
