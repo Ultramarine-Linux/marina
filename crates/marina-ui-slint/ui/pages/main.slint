@@ -41,6 +41,11 @@ export component MainWindow inherits Window {
     in-out property <PreviewDetailsData> game-details;
     in-out property <bool> game-details-loading: false;
     in-out property <bool> library-loading: false;
+    in-out property <int> home-selected-game-index: 0;
+    in-out property <int> library-selected-platform-index: 0;
+    in-out property <int> library-selected-game-index: 0;
+    in-out property <int> store-selected-platform-index: 0;
+    private property <int> content-focus-request: 0;
 
     in property <length> shelf-height;
     in-out property <bool> loading: true;
@@ -81,7 +86,7 @@ export component MainWindow inherits Window {
         if (root.active-tab == 2) { root.store-entered(); }
     }
 
-    AppShell {
+    shell := AppShell {
         navigation-items: root.navigation-items;
         profile-name: root.profile-name;
         profile-username: root.profile-username;
@@ -90,12 +95,14 @@ export component MainWindow inherits Window {
         active-tab <=> root.active-tab;
         search-query <=> root.search-query;
         navigate(index) => { root.active-tab = index; }
+        focus-content => { root.content-focus-request += 1; }
 
         if root.game-page-visible: GameDetailsView {
             game: root.selected-game;
             details: root.game-details;
             loading: root.game-details-loading;
-            back => { root.game-page-visible = false; }
+            focus-request: root.content-focus-request;
+            back => { root.game-page-visible = false; shell.focus(); }
             action-requested => { root.game-play-requested(root.selected-game.id); }
         }
 
@@ -107,8 +114,11 @@ export component MainWindow inherits Window {
             title: "Recently added";
             games: root.games;
             content-height: root.shelf-height;
+            selected-index <=> root.home-selected-game-index;
+            focus-request: root.content-focus-request;
             viewport-changed(x, width) => { root.viewport-changed(x, width); }
             game-opened(id) => { root.game-opened(id); }
+            focus-header => { shell.focus(); }
         }
 
         if !root.game-page-visible && root.active-tab == 1: LibraryPage {
@@ -116,11 +126,15 @@ export component MainWindow inherits Window {
             games: root.platform-games;
             details: root.game-details;
             details-loading <=> root.game-details-loading;
+            selected-platform-index <=> root.library-selected-platform-index;
+            selected-game-index <=> root.library-selected-game-index;
+            focus-request: root.content-focus-request;
             game-list-scroll-y <=> root.library-game-list-scroll-y;
             initial-loading: root.loading;
             loading <=> root.library-loading;
             platform-query(slug) => { root.platform-query(slug); }
             game-selected(id, index) => { root.game-selected(id, index); }
+            focus-header => { shell.focus(); }
         }
 
         if !root.game-page-visible && root.active-tab == 2: StorePage {
@@ -132,6 +146,8 @@ export component MainWindow inherits Window {
             selected-artifacts <=> root.store-selected-artifacts;
             page <=> root.store-page;
 
+            selected-platform-index <=> root.store-selected-platform-index;
+            focus-request: root.content-focus-request;
             selected-game-index <=> root.store-selected-game-index;
             selected-artifact-index <=> root.store-selected-artifact-index;
             game-list-scroll-y <=> root.store-game-list-scroll-y;
@@ -145,6 +161,7 @@ export component MainWindow inherits Window {
             artifact-selected(index) => { root.store-artifact-selected(index); }
             install-requested(id, selected) => { root.store-install-requested(id, selected); }
             search-requested(query) => { root.store-search(query); }
+            focus-header => { shell.focus(); }
         }
     }
 

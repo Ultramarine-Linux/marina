@@ -18,8 +18,10 @@ export component AppShell inherits Rectangle {
     in-out property <int> active-tab: 0;
     in-out property <string> search-query;
     callback navigate(int);
+    callback focus-content;
 
     background: Tokens.color-background;
+    forward-focus: navigation;
 
     VerticalLayout {
         // Only persistent shell chrome owns the outer padding. Routed pages
@@ -73,7 +75,7 @@ export component AppShell inherits Rectangle {
                     width: parent.width / 3;
                     height: parent.height;
 
-                    NavigationMenu {
+                    navigation := NavigationMenu {
                         width: self.preferred-width;
                         x: (parent.width - self.width) / 2;
                         y: (parent.height - self.height) / 2;
@@ -83,6 +85,7 @@ export component AppShell inherits Rectangle {
                             root.active-tab = index;
                             root.navigate(index);
                         }
+                        focus-content => { root.focus-content(); }
                     }
                 }
 

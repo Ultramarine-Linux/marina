@@ -13,6 +13,8 @@ export component NavigationMenu inherits Rectangle {
     in-out property <int> active: 0;
     // Fired when an item is clicked; `active` is updated first.
     callback navigate(int);
+    // Moves keyboard focus from the persistent navigation into the active page.
+    callback focus-content;
 
     background: transparent;
     preferred-width:  row.preferred-width;
@@ -33,6 +35,10 @@ export component NavigationMenu inherits Rectangle {
                     root.active = min(root.items.length - 1, root.active + 1);
                     root.navigate(root.active);
                 }
+                return accept;
+            }
+            if (event.text == Key.DownArrow) {
+                root.focus-content();
                 return accept;
             }
             if (event.text == "\n" || event.text == " ") {
@@ -61,6 +67,8 @@ export component NavigationMenu inherits Rectangle {
                 background: i == root.active
                     ? Tokens.color-surface-2
                     : (ta.has-hover ? Tokens.color-surface-1 : transparent);
+                border-width: nav-focus.has-focus && i == root.active ? Tokens.focus-ring-width : 0px;
+                border-color: Tokens.color-ring-muted;
 
                 HorizontalLayout {
                     padding-left: 14px;

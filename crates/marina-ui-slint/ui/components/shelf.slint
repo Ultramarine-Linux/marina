@@ -49,10 +49,45 @@ export component Shelf inherits Rectangle {
     in property <string> title;
     in property <[GameCardData]> games;
     in property <length> content-height;
+    in-out property <int> selected-index: 0;
+    in property <int> focus-request: 0;
     callback viewport-changed(length, length);
     callback game-opened(string);
+    callback focus-header;
 
     background: transparent;
+    forward-focus: shelf-focus;
+    changed focus-request => { shelf-focus.focus(); }
+
+    shelf-focus := FocusScope {
+        width: 0px;
+        height: 0px;
+        key-pressed(event) => {
+            if (event.text == Key.LeftArrow) {
+                if (root.games.length > 0) {
+                    root.selected-index = max(0, root.selected-index - 1);
+                    flick.viewport-x = min(0px, flick.viewport-x + 216px);
+                }
+                return accept;
+            }
+            if (event.text == Key.RightArrow) {
+                if (root.games.length > 0) {
+                    root.selected-index = min(root.games.length - 1, root.selected-index + 1);
+                    flick.viewport-x = max(flick.width - root.content-width, flick.viewport-x - 216px);
+                }
+                return accept;
+            }
+            if (event.text == Key.UpArrow) {
+                root.focus-header();
+                return accept;
+            }
+            if ((event.text == "\n" || event.text == " ") && root.games.length > 0) {
+                root.game-opened(root.games[root.selected-index].id);
+                return accept;
+            }
+            return reject;
+        }
+    }
 
     // The layout's intrinsic width — exact even with per-card widths varying
     // by cover aspect ratio.
@@ -93,7 +128,7 @@ export component Shelf inherits Rectangle {
                     spacing: Tokens.spacing-lg;
                     alignment: start;
 
-                    for game in root.games: Rectangle {
+                    for game[i] in root.games: Rectangle {
                         width: card.width;
                         background: transparent;
 
@@ -103,7 +138,12 @@ export component Shelf inherits Rectangle {
                             platform: game.platform;
                             cover-image: game.cover;
                             cover-aspect-ratio: game.cover_ratio;
-                            clicked => { root.game-opened(game.id); }
+                            keyboard-focused: shelf-focus.has-focus && i == root.selected-index;
+                            clicked => {
+                                root.selected-index = i;
+                                shelf-focus.focus();
+                                root.game-opened(game.id);
+                            }
                         }
                     }
                 }

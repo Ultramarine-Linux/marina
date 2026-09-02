@@ -14,10 +14,13 @@ export component GameDetailsView inherits Rectangle {
     in property <PreviewDetailsData> details;
     in property <bool> loading: false;
     in property <string> action-label: "Play";
+    in property <int> focus-request: 0;
     callback back;
     callback action-requested;
 
     background: transparent;
+    forward-focus: back-button;
+    changed focus-request => { back-button.focus(); }
 
     VerticalLayout {
         spacing: Tokens.spacing-lg;
@@ -26,7 +29,7 @@ export component GameDetailsView inherits Rectangle {
             padding-left: Tokens.spacing-2xl;
             padding-right: Tokens.spacing-2xl;
             spacing: Tokens.spacing-md;
-            Button {
+            back-button := Button {
                 width: 40px;
                 height: 36px;
                 variant: ButtonVariant.ghost;

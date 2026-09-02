@@ -25,6 +25,7 @@ export component GameCard inherits Card {
     // horizontal shelf — while tall covers (JP SFC) stay bounded.
     // Keep in sync with COVER_HEIGHT in shelf.rs.
     in property <length> cover-height-scale: 200px;
+    in property <bool> keyboard-focused: false;
 
     // Extreme ratios are clamped so a stray banner or scan can't blow the
     // row apart; image-fit: cover crops the overflow instead.
@@ -36,6 +37,8 @@ export component GameCard inherits Card {
     card-padding: CardPadding.none;
     card-radius: CardRadius.lg;
     variant: CardVariant.raised;
+    border-width: root.keyboard-focused ? Tokens.focus-ring-width : 1px;
+    border-color: root.keyboard-focused ? Tokens.color-ring : Tokens.color-border-hairline;
 
     // Card width follows the cover: narrow for tall JP boxart, wide for
     // landscape covers, square for placeholders.

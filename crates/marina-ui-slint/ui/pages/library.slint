@@ -20,6 +20,10 @@ export component LibraryPage inherits Rectangle {
     in-out property <string> search-query;
     in-out property <string> selected-platform;
     in-out property <string> selected-platform-name;
+    in-out property <int> selected-platform-index: 0;
+    in-out property <int> selected-game-index: 0;
+    in property <int> focus-request: 0;
+    private property <length> platform-list-scroll-y: 0px;
     in-out property <length> game-list-scroll-y: 0px;
 
     in property <bool> initial-loading: false;
@@ -28,8 +32,87 @@ export component LibraryPage inherits Rectangle {
 
     callback platform-query(string);
     callback game-selected(string, int);
+    callback focus-header;
 
     background: transparent;
+    forward-focus: page-focus;
+    changed focus-request => { page-focus.focus(); }
+
+    function select-platform(index: int) {
+        if (root.platforms.length <= 0) { return; }
+        root.selected-platform-index = min(max(index, 0), root.platforms.length - 1);
+
+        if (root.selected-platform-index * 52px < -root.platform-list-scroll-y) {
+            root.platform-list-scroll-y = -root.selected-platform-index * 52px;
+        } else if ((root.selected-platform-index + 1) * 52px > -root.platform-list-scroll-y + root.height - 98px) {
+            root.platform-list-scroll-y = root.height - 98px - (root.selected-platform-index + 1) * 52px;
+        }
+    }
+
+    function open-platform(index: int) {
+        if (root.platforms.length <= 0) { return; }
+        root.select-platform(index);
+        root.selected-platform = root.platforms[root.selected-platform-index].slug;
+        root.selected-platform-name = root.platforms[root.selected-platform-index].name;
+        root.selected-game-index = 0;
+        root.game-list-scroll-y = 0px;
+        root.page = 1;
+        root.loading = true;
+        root.details-loading = true;
+        root.platform-query(root.selected-platform);
+    }
+
+    function select-game(index: int) {
+        if (root.games.length <= 0) { return; }
+        root.selected-game-index = min(max(index, 0), root.games.length - 1);
+        root.details-loading = true;
+        root.game-selected(root.games[root.selected-game-index].id, root.selected-game-index);
+
+        if (root.selected-game-index * 42px < -root.game-list-scroll-y) {
+            root.game-list-scroll-y = -root.selected-game-index * 42px;
+        } else if ((root.selected-game-index + 1) * 42px > -root.game-list-scroll-y + root.height - 98px) {
+            root.game-list-scroll-y = root.height - 98px - (root.selected-game-index + 1) * 42px;
+        }
+    }
+
+    page-focus := FocusScope {
+        width: 0px;
+        height: 0px;
+        key-pressed(event) => {
+            if (event.text == "\u{1b}" && root.page == 1) {
+                root.page = 0;
+                return accept;
+            }
+            if (event.text == Key.UpArrow) {
+                if ((root.page == 0 && root.selected-platform-index == 0)
+                        || (root.page == 1 && root.selected-game-index == 0)) {
+                    root.focus-header();
+                } else if (root.page == 0) {
+                    root.select-platform(root.selected-platform-index - 1);
+                } else {
+                    root.select-game(root.selected-game-index - 1);
+                }
+                return accept;
+            }
+            if (event.text == Key.DownArrow) {
+                if (root.page == 0 && root.platforms.length > 0) {
+                    root.select-platform(root.selected-platform-index + 1);
+                } else if (root.page == 1) {
+                    root.select-game(root.selected-game-index + 1);
+                }
+                return accept;
+            }
+            if (event.text == "\n" || event.text == " ") {
+                if (root.page == 0) {
+                    root.open-platform(root.selected-platform-index);
+                } else {
+                    root.select-game(root.selected-game-index);
+                }
+                return accept;
+            }
+            return reject;
+        }
+    }
 
     if root.page == 0: VerticalLayout {
         spacing: Tokens.spacing-lg;
@@ -93,13 +176,16 @@ export component LibraryPage inherits Rectangle {
         if !root.initial-loading: ListView {
             width: parent.width;
             vertical-stretch: 1;
+            viewport-y <=> root.platform-list-scroll-y;
             for platform[i] in root.platforms: Rectangle {
                 width: parent.width;
                 height: 52px;
-                background: platform-touch.has-hover
-                    ? Tokens.color-surface-2
-                    : transparent;
+                background: i == root.selected-platform-index && page-focus.has-focus
+                    ? Tokens.color-surface-3
+                    : (platform-touch.has-hover ? Tokens.color-surface-2 : transparent);
                 border-radius: Tokens.radius-sm;
+                border-width: i == root.selected-platform-index && page-focus.has-focus ? Tokens.focus-ring-width : 0px;
+                border-color: Tokens.color-ring-muted;
 
 
                 Image {
@@ -147,13 +233,8 @@ export component LibraryPage inherits Rectangle {
                 platform-touch := TouchArea {
                     mouse-cursor: pointer;
                     clicked => {
-                        root.selected-platform = platform.slug;
-                        root.selected-platform-name = platform.name;
-                        root.game-list-scroll-y = 0px;
-                        root.page = 1;
-                        root.loading = true;
-                        root.details-loading = true;
-                        root.platform-query(platform.slug);
+                        page-focus.focus();
+                        root.open-platform(i);
                     }
                 }
             }
@@ -220,8 +301,11 @@ export component LibraryPage inherits Rectangle {
             games: root.games;
             details: root.details;
             details-loading <=> root.details-loading;
+            selected-index <=> root.selected-game-index;
             scroll-y <=> root.game-list-scroll-y;
+            keyboard-active: page-focus.has-focus;
             selected(id, index) => { root.game-selected(id, index); }
+            focus-header => { root.focus-header(); }
             vertical-stretch: 1;
         }
 

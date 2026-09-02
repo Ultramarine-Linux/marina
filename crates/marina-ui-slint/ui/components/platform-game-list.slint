@@ -17,13 +17,53 @@ export component PlatformGameList inherits Rectangle {
     in-out property <length> scroll-y: 0px;
     in-out property <bool> details-loading: false;
     in property <string> action-label: "Open";
+    in property <bool> keyboard-active: false;
     callback selected(string, int);
     callback action-requested(string, int);
+    callback focus-header;
 
     private property <int> safe-index:
         min(max(root.selected-index, 0), max(root.games.length - 1, 0));
 
     background: transparent;
+    forward-focus: list-focus;
+
+    function select-index(index: int) {
+        if (root.games.length <= 0) { return; }
+        root.selected-index = min(max(index, 0), root.games.length - 1);
+        root.details-loading = true;
+        root.selected(root.games[root.selected-index].id, root.selected-index);
+
+        if (root.selected-index * 42px < -root.scroll-y) {
+            root.scroll-y = -root.selected-index * 42px;
+        } else if ((root.selected-index + 1) * 42px > -root.scroll-y + list.height) {
+            root.scroll-y = list.height - (root.selected-index + 1) * 42px;
+        }
+    }
+
+    list-focus := FocusScope {
+        width: 0px;
+        height: 0px;
+        key-pressed(event) => {
+            if (event.text == Key.UpArrow) {
+                if (root.safe-index == 0) {
+                    root.focus-header();
+                } else {
+                    root.select-index(root.safe-index - 1);
+                }
+                return accept;
+            }
+            if (event.text == Key.DownArrow) {
+                root.select-index(root.safe-index + 1);
+                return accept;
+            }
+            if ((event.text == "\n" || event.text == " ") && root.games.length > 0) {
+                root.select-index(root.safe-index);
+                return accept;
+            }
+            return reject;
+        }
+    }
 
     HorizontalLayout {
         spacing: Tokens.spacing-lg;
@@ -46,6 +86,8 @@ export component PlatformGameList inherits Rectangle {
                         ? Tokens.color-surface-3
                         : (item-touch.has-hover ? Tokens.color-surface-2 : transparent);
                     border-radius: Tokens.radius-sm;
+                    border-width: (list-focus.has-focus || root.keyboard-active) && i == root.safe-index ? Tokens.focus-ring-width : 0px;
+                    border-color: Tokens.color-ring-muted;
 
                     Typography {
                         x: Tokens.spacing-2xl;
@@ -60,9 +102,8 @@ export component PlatformGameList inherits Rectangle {
                     item-touch := TouchArea {
                         mouse-cursor: pointer;
                         clicked => {
-                            root.selected-index = i;
-                            root.details-loading = true;
-                            root.selected(game.id, i);
+                            list-focus.focus();
+                            root.select-index(i);
                         }
                     }
                 }
