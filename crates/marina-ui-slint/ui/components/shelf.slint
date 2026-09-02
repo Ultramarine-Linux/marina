@@ -12,10 +12,16 @@ export component ShelfSkeleton inherits Rectangle {
     VerticalLayout {
         spacing: Tokens.spacing-sm;
 
-        Typography {
-            text: "Recently added";
-            variant: TextVariant.title;
+        Rectangle {
             height: 32px;
+            Typography {
+                x: Tokens.spacing-2xl;
+                width: parent.width - 2 * Tokens.spacing-2xl;
+                height: parent.height;
+                text: "Recently added";
+                variant: TextVariant.title;
+                vertical-alignment: center;
+            }
         }
 
         Rectangle {
@@ -23,7 +29,7 @@ export component ShelfSkeleton inherits Rectangle {
             clip: true;
 
             HorizontalLayout {
-                padding-left: Tokens.spacing-xs;
+                padding-left: Tokens.spacing-2xl;
                 padding-right: Tokens.spacing-2xl;
                 padding-top: Tokens.spacing-sm;
                 padding-bottom: Tokens.spacing-sm;
@@ -55,10 +61,16 @@ export component Shelf inherits Rectangle {
     VerticalLayout {
         spacing: Tokens.spacing-sm;
 
-        Typography {
-            text: root.title;
-            variant: TextVariant.title;
+        Rectangle {
             height: 32px;
+            Typography {
+                x: Tokens.spacing-2xl;
+                width: parent.width - 2 * Tokens.spacing-2xl;
+                height: parent.height;
+                text: root.title;
+                variant: TextVariant.title;
+                vertical-alignment: center;
+            }
         }
 
         Rectangle {
@@ -74,7 +86,7 @@ export component Shelf inherits Rectangle {
                 init => { root.viewport-changed(self.viewport-x, self.width); }
 
                 row := HorizontalLayout {
-                    padding-left: Tokens.spacing-xs;
+                    padding-left: Tokens.spacing-2xl;
                     padding-right: Tokens.spacing-2xl;
                     padding-top: Tokens.spacing-sm;
                     padding-bottom: Tokens.spacing-sm;

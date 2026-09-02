@@ -9,6 +9,7 @@ import { ScrollArea } from "../slintcn/components/scroll-area.slint";
 import { Sheet, SheetSide } from "../slintcn/components/sheet.slint";
 import { Checkbox } from "../slintcn/components/checkbox.slint";
 import { Card, CardPadding, CardRadius } from "../slintcn/components/card.slint";
+import { Badge, BadgeSize, BadgeVariant } from "../slintcn/components/badge.slint";
 import { PlatformCardData } from "../components/platform-card.slint";
 import { GameCardData } from "../components/card.slint";
 import { PlatformGameList } from "../components/platform-game-list.slint";
@@ -55,6 +56,8 @@ export component StorePage inherits Rectangle {
         spacing: Tokens.spacing-lg;
         HorizontalLayout {
             height: 38px;
+            padding-left: Tokens.spacing-2xl;
+            padding-right: Tokens.spacing-2xl;
             spacing: Tokens.spacing-sm;
             Typography { text: "Store"; variant: TextVariant.headline; vertical-alignment: center; }
             Rectangle { horizontal-stretch: 1; }
@@ -62,6 +65,8 @@ export component StorePage inherits Rectangle {
         }
         Rectangle { height: 1px; background: Tokens.color-border-hairline; }
         if root.loading: HorizontalLayout {
+            padding-left: Tokens.spacing-2xl;
+            padding-right: Tokens.spacing-2xl;
             spacing: Tokens.spacing-md;
             vertical-stretch: 1;
             for _ in 5: Skeleton { width: (parent.width - 4 * Tokens.spacing-md) / 5; height: 158px; radius: Tokens.radius-lg; }
@@ -72,8 +77,35 @@ export component StorePage inherits Rectangle {
                 height: 52px;
                 background: touch.has-hover ? Tokens.color-surface-2 : transparent;
                 border-radius: Tokens.radius-sm;
-                Typography { x: Tokens.spacing-md; width: parent.width - 140px; height: parent.height; text: platform.name; variant: TextVariant.body-lg; vertical-alignment: center; overflow: elide; }
-                Typography { x: parent.width - 112px; width: 96px; height: parent.height; text: platform.game-count; variant: TextVariant.caption; tone: TextTone.muted; horizontal-alignment: right; vertical-alignment: center; }
+                HorizontalLayout {
+                    padding-left: Tokens.spacing-2xl;
+                    padding-right: Tokens.spacing-2xl;
+                    spacing: Tokens.spacing-md;
+                    Typography {
+                        horizontal-stretch: 1;
+                        text: platform.name;
+                        variant: TextVariant.body-lg;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                    VerticalLayout {
+                        horizontal-stretch: 0;
+                        alignment: center;
+                        Badge {
+                            text: platform.slug;
+                            variant: BadgeVariant.outline;
+                            size: BadgeSize.sm;
+                        }
+                    }
+                    Typography {
+                        width: 96px;
+                        text: platform.game-count;
+                        variant: TextVariant.caption;
+                        tone: TextTone.muted;
+                        horizontal-alignment: right;
+                        vertical-alignment: center;
+                    }
+                }
                 touch := TouchArea {
                     mouse-cursor: pointer;
                     clicked => {
@@ -92,6 +124,8 @@ export component StorePage inherits Rectangle {
         spacing: Tokens.spacing-lg;
         HorizontalLayout {
             height: 38px;
+            padding-left: Tokens.spacing-2xl;
+            padding-right: Tokens.spacing-2xl;
             spacing: Tokens.spacing-md;
             Button {
                 width: 36px;

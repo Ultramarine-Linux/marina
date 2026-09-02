@@ -35,6 +35,8 @@ export component LibraryPage inherits Rectangle {
 
         HorizontalLayout {
             height: 38px;
+            padding-left: Tokens.spacing-2xl;
+            padding-right: Tokens.spacing-2xl;
             spacing: Tokens.spacing-sm;
 
             Typography {
@@ -76,6 +78,8 @@ export component LibraryPage inherits Rectangle {
         }
 
         if root.initial-loading: HorizontalLayout {
+            padding-left: Tokens.spacing-2xl;
+            padding-right: Tokens.spacing-2xl;
             spacing: Tokens.spacing-md;
             vertical-stretch: 1;
             for _ in 5: Skeleton {
@@ -98,7 +102,7 @@ export component LibraryPage inherits Rectangle {
 
 
                 Image {
-                    x: Tokens.spacing-sm;
+                    x: Tokens.spacing-2xl;
                     y: 8px;
                     width: 36px;
                     height: 36px;
@@ -117,9 +121,9 @@ export component LibraryPage inherits Rectangle {
                 // }
 
                 Typography {
-                    x: 56px;
+                    x: Tokens.spacing-2xl + 48px;
                     y: 0px;
-                    width: parent.width - 152px;
+                    width: parent.width - 2 * Tokens.spacing-2xl - 48px - 88px;
                     height: parent.height;
                     text: platform.name;
                     variant: TextVariant.body-lg;
@@ -128,7 +132,7 @@ export component LibraryPage inherits Rectangle {
                 }
 
                 Typography {
-                    x: parent.width - 88px;
+                    x: parent.width - Tokens.spacing-2xl - 72px;
                     y: 0px;
                     width: 72px;
                     height: parent.height;
@@ -159,6 +163,8 @@ export component LibraryPage inherits Rectangle {
 
         HorizontalLayout {
             height: 38px;
+            padding-left: Tokens.spacing-2xl;
+            padding-right: Tokens.spacing-2xl;
             spacing: Tokens.spacing-md;
 
             Button {

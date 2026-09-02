@@ -22,89 +22,98 @@ export component AppShell inherits Rectangle {
     background: Tokens.color-background;
 
     VerticalLayout {
-        padding: Tokens.spacing-2xl;
-        spacing: Tokens.spacing-2xl;
-
-        // Explicit thirds keep the nav centered regardless of preferred sizes
-        // in the profile and settings regions.
+        // Only persistent shell chrome owns the outer padding. Routed pages
+        // fill the body and choose their own inset/full-bleed treatment.
         Rectangle {
-            height: 36px;
+            height: Tokens.spacing-2xl + 36px + Tokens.spacing-2xl;
 
+            // Explicit thirds keep the nav centered regardless of preferred
+            // sizes in the profile and settings regions.
             Rectangle {
-                x: 0px;
-                width: parent.width / 3;
-                height: parent.height;
+                x: Tokens.spacing-2xl;
+                y: Tokens.spacing-2xl;
+                width: parent.width - 2 * Tokens.spacing-2xl;
+                height: 36px;
 
-                HorizontalLayout {
-                    spacing: Tokens.spacing-sm;
-                    alignment: start;
+                Rectangle {
+                    x: 0px;
+                    width: parent.width / 3;
+                    height: parent.height;
 
-                    Avatar {
-                        source: root.profile-image;
-                        fallback: root.profile-initials;
-                        size: 36px;
-                    }
+                    HorizontalLayout {
+                        spacing: Tokens.spacing-sm;
+                        alignment: start;
 
-                    VerticalLayout {
-                        alignment: center;
-
-                        Typography {
-                            text: root.profile-name;
-                            variant: TextVariant.body;
-                            tone: TextTone.default;
+                        Avatar {
+                            source: root.profile-image;
+                            fallback: root.profile-initials;
+                            size: 36px;
                         }
 
-                        Typography {
-                            text: root.profile-username;
-                            variant: TextVariant.caption;
-                            tone: TextTone.muted;
+                        VerticalLayout {
+                            alignment: center;
+
+                            Typography {
+                                text: root.profile-name;
+                                variant: TextVariant.body;
+                                tone: TextTone.default;
+                            }
+
+                            Typography {
+                                text: root.profile-username;
+                                variant: TextVariant.caption;
+                                tone: TextTone.muted;
+                            }
                         }
                     }
                 }
-            }
 
-            Rectangle {
-                x: parent.width / 3;
-                width: parent.width / 3;
-                height: parent.height;
+                Rectangle {
+                    x: parent.width / 3;
+                    width: parent.width / 3;
+                    height: parent.height;
 
-                NavigationMenu {
-                    width: self.preferred-width;
-                    x: (parent.width - self.width) / 2;
-                    y: (parent.height - self.height) / 2;
-                    items: root.navigation-items;
-                    active <=> root.active-tab;
-                    navigate(index) => {
-                        root.active-tab = index;
-                        root.navigate(index);
-                    }
-                }
-            }
-
-            Rectangle {
-                x: parent.width * 2 / 3;
-                width: parent.width / 3;
-                height: parent.height;
-
-                Button {
-                    x: parent.width - 36px;
-                    y: 0px;
-                    width: 36px;
-                    height: 36px;
-                    variant: ButtonVariant.ghost;
-                    size: ButtonSize.icon;
-                    text: "";
-                    LucideIcon {
+                    NavigationMenu {
+                        width: self.preferred-width;
                         x: (parent.width - self.width) / 2;
                         y: (parent.height - self.height) / 2;
-                        icon: IconSet.Settings;
-                        size: 18px;
+                        items: root.navigation-items;
+                        active <=> root.active-tab;
+                        navigate(index) => {
+                            root.active-tab = index;
+                            root.navigate(index);
+                        }
                     }
-                    // Settings screen will be wired here later.
+                }
+
+                Rectangle {
+                    x: parent.width * 2 / 3;
+                    width: parent.width / 3;
+                    height: parent.height;
+
+                    Button {
+                        x: parent.width - 36px;
+                        y: 0px;
+                        width: 36px;
+                        height: 36px;
+                        variant: ButtonVariant.ghost;
+                        size: ButtonSize.icon;
+                        text: "";
+                        LucideIcon {
+                            x: (parent.width - self.width) / 2;
+                            y: (parent.height - self.height) / 2;
+                            icon: IconSet.Settings;
+                            size: 18px;
+                        }
+                        // Settings screen will be wired here later.
+                    }
                 }
             }
         }
 
-        @children
+        Rectangle {
+            vertical-stretch: 1;
+            @children
+        }
     }
 }
