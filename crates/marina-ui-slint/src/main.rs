@@ -15,7 +15,7 @@ use marina_romm::{PlatformQuery, RomQuery};
 use marina_scanner::scan;
 use serde::Serialize;
 use slint::{ComponentHandle, Image, Model, ModelRc, SharedString, VecModel};
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 use tracing_subscriber::EnvFilter;
 
 slint::include_modules!();
@@ -124,53 +124,56 @@ async fn main() -> Result<(), slint::PlatformError> {
     window.global::<LibraryState>().set_loading(false);
 
     let library_state: Arc<Mutex<Option<app::AppStateHandle>>> = Arc::new(Mutex::new(None));
-
-    // Keep the loader alive for the lifetime of the window. Metadata and
-    // artwork are populated after the shell is already visible.
-    let (loader, source_store) = covers::spawn_loader(&window, reqwest::Client::new(), Vec::new());
+    let (cover_loader, loader_sources) = covers::ViewportLoader::new(&window);
     let home_source_store = Arc::new(Mutex::new(Vec::new()));
-    let loader_for_scroll = loader.clone();
+    let library_source_store = Arc::new(Mutex::new(Vec::new()));
+    let scroll_loader = cover_loader.clone();
     window
         .global::<HomeState>()
-        .on_viewport_changed(move |scroll_x, viewport_width| {
-            loader_for_scroll
+        .on_viewport_changed(move |scroll_x, width, cover_height| {
+            scroll_loader
                 .borrow_mut()
-                .update(scroll_x, viewport_width);
+                .update(covers::Page::Home, scroll_x, width, cover_height);
         });
-
-    let loader_for_context = loader.clone();
-    let context_sources = source_store.clone();
+    let context_loader = cover_loader.clone();
+    let context_loader_sources = loader_sources.clone();
     let context_home_sources = home_source_store.clone();
+    let context_library_sources = library_source_store.clone();
     window
         .global::<HomeState>()
         .on_cover_context_changed(move |active_tab| {
-            debug!(active_tab, "cover context changed");
-            if active_tab == 1 {
-                let mut loader = loader_for_context.borrow_mut();
-                loader.reset();
-                loader.update(0.0, 1_280.0);
-                debug!("cover context reset complete; refreshing platform residency");
+            let mut loader = context_loader.borrow_mut();
+            loader.reset();
+            if active_tab == 2 {
                 return;
             }
-            let home_sources = context_home_sources
+            let sources = if active_tab == 1 {
+                context_library_sources
+                    .lock()
+                    .expect("library cover source state poisoned")
+                    .clone()
+            } else {
+                context_home_sources
+                    .lock()
+                    .expect("home cover source state poisoned")
+                    .clone()
+            };
+            *context_loader_sources
                 .lock()
-                .expect("home cover source state poisoned")
-                .clone();
-            let source_count = home_sources.len();
-            *context_sources.lock().expect("cover source state poisoned") = home_sources;
-            debug!(source_count, "cover context switched to home sources");
-            let mut loader = loader_for_context.borrow_mut();
-            loader.reset();
-            loader.update(0.0, 1_280.0);
-            debug!("cover context reset complete; refreshing home residency");
+                .expect("cover source state poisoned") = sources;
+            if active_tab == 0 {
+                loader.refresh(covers::Page::Home);
+            }
         });
 
     ui::launch::install(&window, &library_state);
-    ui::pages::home::install(&window, &library_state, &source_store, &home_source_store);
-    ui::pages::library::install(&window, &library_state, &source_store, &loader);
+    ui::pages::home::install(&window, &library_state, &home_source_store);
+    ui::pages::library::install(&window, &library_state, &library_source_store);
 
     let weak_window = window.as_weak();
     let state_store = library_state.clone();
+    let startup_sources = loader_sources.clone();
+    let startup_home_sources = home_source_store.clone();
     slint::Timer::single_shot(Duration::ZERO, move || {
         tokio::spawn(async move {
             let state = match app::AppState::initialize().await {
@@ -256,10 +259,11 @@ async fn main() -> Result<(), slint::PlatformError> {
                 }
             };
             info!(count = metadata.len(), "library loaded");
-            *source_store.lock().expect("cover source state poisoned") = cover_sources.clone();
-            *home_source_store
+            *startup_sources.lock().expect("cover source state poisoned") = cover_sources.clone();
+            *startup_home_sources
                 .lock()
                 .expect("home cover source state poisoned") = cover_sources;
+
             *state_store.lock().expect("library state lock poisoned") = Some(state.clone());
 
             if state.config.import_romm_on_startup {
@@ -383,7 +387,7 @@ async fn main() -> Result<(), slint::PlatformError> {
                     .global::<HomeState>()
                     .set_games(ModelRc::from(std::rc::Rc::new(VecModel::from(games))));
                 window.global::<HomeState>().set_loading(false);
-                // The Shelf's init callback requests the initial visible range.
+                window.global::<HomeState>().invoke_cover_context_changed(0);
             });
         });
     });
@@ -465,8 +469,7 @@ fn populate_store_details(window: &slint::Weak<MainWindow>, rom: marina_romm::Ro
     let preview_window = window.clone();
     let preview_rom_id = rom_id.clone();
     tokio::spawn(async move {
-        let Some(bytes) = covers::load_bytes(&reqwest::Client::new(), &screenshot_source).await
-        else {
+        let Some(bytes) = covers::load_bytes(&screenshot_source).await else {
             return;
         };
         let _ = preview_window.upgrade_in_event_loop(move |window| {
@@ -490,7 +493,7 @@ fn populate_store_details(window: &slint::Weak<MainWindow>, rom: marina_romm::Ro
 
     let cover_window = window.clone();
     tokio::spawn(async move {
-        let Some(bytes) = covers::load_bytes(&reqwest::Client::new(), &cover_source).await else {
+        let Some(bytes) = covers::load_bytes(&cover_source).await else {
             return;
         };
         let _ = cover_window.upgrade_in_event_loop(move |window| {

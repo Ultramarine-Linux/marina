@@ -48,7 +48,7 @@ export component PlatformGameList inherits Rectangle {
         width: 0px;
         height: 0px;
         key-pressed(event) => {
-            if (event.text == Key.LeftArrow) {
+            if (event.text == Key.RightArrow) {
                 root.preview-focus-request += 1;
                 return accept;
             }
@@ -154,7 +154,7 @@ export component PlatformGameList inherits Rectangle {
                         directional-navigation: true;
                         focus-request: root.preview-focus-request;
                         navigation-requested(direction) => {
-                            if (direction == "right") {
+                            if (direction == "left") {
                                 list-focus.focus();
                             }
                         }
@@ -181,7 +181,7 @@ export component PlatformGameList inherits Rectangle {
                         source: root.preview-image.width > 0
                             ? root.preview-image
                             : root.games[root.safe-index].cover;
-                        image-fit: cover;
+                        image-fit: contain;
                     }
                 }
 

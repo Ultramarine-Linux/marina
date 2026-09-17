@@ -2,7 +2,6 @@
 
 use std::{
     collections::BTreeMap,
-    rc::Rc,
     sync::{Arc, Mutex},
 };
 
@@ -27,20 +26,14 @@ pub(crate) fn install(
     window: &MainWindow,
     library_state: &Arc<Mutex<Option<app::AppStateHandle>>>,
     source_store: &Arc<Mutex<Vec<CoverSource>>>,
-    loader: &Rc<std::cell::RefCell<covers::CoverLoader>>,
 ) {
     let detail_state = library_state.clone();
     let detail_window = window.as_weak();
-    let selected_loader = loader.clone();
+    let source_store = source_store.clone();
+
     window
         .global::<LibraryState>()
-        .on_game_selected(move |id, index| {
-            // Load the selected row's cover on demand. The detail request below
-            // supplies the rest of the metadata.
-            let cover_height = detail_window.upgrade().map(|_| 200.0_f32).unwrap_or(200.0);
-            selected_loader
-                .borrow_mut()
-                .update(index as f32 * (cover_height + 16.0), 240.0);
+        .on_game_selected(move |id, _index| {
             let state = detail_state
                 .lock()
                 .expect("library state lock poisoned")
@@ -142,11 +135,11 @@ pub(crate) fn install(
     });
 
     let query_state = library_state.clone();
-    let query_sources = source_store.clone();
+
     let query_window = window.as_weak();
-    window
-        .global::<LibraryState>()
-        .on_platform_query(move |platform_slug| {
+    window.global::<LibraryState>().on_platform_query({
+        let source_store = source_store.clone();
+        move |platform_slug| {
             let state = query_state
                 .lock()
                 .expect("library state lock poisoned")
@@ -155,8 +148,8 @@ pub(crate) fn install(
                 return;
             };
             let base_url = state.config.romm_url.clone();
-            let sources = query_sources.clone();
             let window = query_window.clone();
+            let source_store = source_store.clone();
             tokio::spawn(async move {
                 let loaded = load_platform_games(
                     &state.library,
@@ -174,24 +167,20 @@ pub(crate) fn install(
                         return;
                     }
                 };
-                *sources.lock().expect("cover source state poisoned") = cover_sources;
+                *source_store.lock().expect("cover source state poisoned") = cover_sources;
                 let _ = window.upgrade_in_event_loop(move |window| {
                     let model = window.global::<LibraryState>().get_games();
                     let model = model
                         .as_any()
                         .downcast_ref::<VecModel<GameCardData>>()
                         .expect("platform game model should be a VecModel");
-                    let games = game_cards(metadata);
-                    model.set_vec(games);
+                    model.set_vec(game_cards(metadata));
                     window.global::<LibraryState>().set_loading(false);
-                    if window.global::<ShellState>().get_active_tab() == 1 {
-                        // Replacing the platform model invalidates lazy-cover
-                        // residency; immediately request the visible cards.
-                        window.global::<HomeState>().invoke_cover_context_changed(1);
-                    }
+                    window.global::<HomeState>().invoke_cover_context_changed(1);
                 });
             });
-        });
+        }
+    });
 
     let library_refresh_state = library_state.clone();
     let library_refresh_window = window.as_weak();

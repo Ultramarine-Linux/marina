@@ -23,6 +23,15 @@ pub(crate) fn configure_navigation(window: &MainWindow) {
         };
         let index = index.clamp(0, 2);
         let shell = window.global::<ShellState>();
+        let target = match index {
+            0 => ShellPage::Home,
+            1 => ShellPage::Library,
+            _ => ShellPage::Store,
+        };
+        if shell.get_active_tab() == index && shell.get_page() == target {
+            window.invoke_focus_navigation();
+            return;
+        }
         shell.set_active_tab(index);
 
         match index {
@@ -42,6 +51,9 @@ pub(crate) fn configure_navigation(window: &MainWindow) {
             }
         }
 
+        window
+            .global::<HomeState>()
+            .invoke_cover_context_changed(index);
         window.invoke_focus_navigation();
     });
 
@@ -68,6 +80,15 @@ pub(crate) fn dispatch_controller_action(window: &MainWindow, event: InputEvent)
         event.kind,
         InputEventKind::Pressed | InputEventKind::Repeated
     ) {
+        return;
+    }
+
+    if event.kind == InputEventKind::Repeated
+        && matches!(
+            event.action,
+            InputAction::PreviousTab | InputAction::NextTab
+        )
+    {
         return;
     }
 

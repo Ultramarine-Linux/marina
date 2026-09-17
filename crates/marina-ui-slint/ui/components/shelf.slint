@@ -8,7 +8,7 @@ export global HomeState {
     in-out property <[GameCardData]> games;
     in-out property <bool> loading: true;
     in-out property <int> selected-game-index: 0;
-    callback viewport-changed(length, length);
+    callback viewport-changed(length, length, length);
     callback cover-context-changed(int);
     callback entered;
     callback game-opened(string);
@@ -63,7 +63,7 @@ export component Shelf inherits Rectangle {
     in property <length> cover-height;
     in-out property <int> selected-index: 0;
     in property <int> focus-request: 0;
-    callback viewport-changed(length, length);
+    callback viewport-changed(length, length, length);
     callback game-opened(string);
     callback focus-header;
 
@@ -134,8 +134,8 @@ export component Shelf inherits Rectangle {
                 height: parent.height;
                 viewport-height: parent.height;
                 viewport-width: root.content-width;
-                changed viewport-x => { root.viewport-changed(self.viewport-x, self.width); }
-                init => { root.viewport-changed(self.viewport-x, self.width); }
+                changed viewport-x => { root.viewport-changed(self.viewport-x, self.width, root.cover-height); }
+                init => { root.viewport-changed(self.viewport-x, self.width, root.cover-height); }
 
                 row := HorizontalLayout {
                     padding-left: Tokens.spacing-2xl;

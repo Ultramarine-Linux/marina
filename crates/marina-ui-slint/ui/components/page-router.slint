@@ -34,7 +34,7 @@ export component PageRouter inherits Rectangle {
         cover-height: root.shelf-cover-height;
         selected-index <=> HomeState.selected-game-index;
         focus-request: ShellState.content-focus-request;
-        viewport-changed(x, width) => { HomeState.viewport-changed(x, width); }
+        viewport-changed(x, width, cover-height) => { HomeState.viewport-changed(x, width, cover-height); }
         game-opened(id) => { HomeState.game-opened(id); }
         focus-header => { root.focus-header(); }
     }

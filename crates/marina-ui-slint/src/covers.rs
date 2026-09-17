@@ -1,10 +1,13 @@
-//! Bounded cover residency: cache/network loading plus visible-range eviction.
+//! Page-scoped artwork loading and decoding.
 
 use std::{
     collections::HashSet,
     path::PathBuf,
     rc::Rc,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex, OnceLock,
+        atomic::{AtomicU64, Ordering},
+    },
 };
 
 use marina_library::{
@@ -12,14 +15,10 @@ use marina_library::{
     query::{SearchQuery, SearchSort},
     read::LibraryRead,
 };
-use slint::{ComponentHandle, Image, Model, SharedPixelBuffer};
-use tracing::{debug, warn};
+use slint::{ComponentHandle, Image, Model, ModelRc, SharedPixelBuffer};
+use tracing::debug;
 
-use crate::{HomeState, LibraryState, MainWindow, ShellState, cache};
-
-const CARD_SPACING: f32 = 16.0;
-const CONTENT_PADDING_LEFT: f32 = 4.0;
-const PREFETCH_CARDS: usize = 3;
+use crate::{GameCardData, HomeState, LibraryState, MainWindow, cache};
 
 #[derive(Clone)]
 pub struct CoverSource {
@@ -41,242 +40,168 @@ pub fn source_for(
     }
 }
 
-/// Loads metadata only; artwork is requested by `CoverLoader` as cards enter
-/// the viewport plus a small prefetch buffer.
-pub fn spawn_loader(
-    window: &MainWindow,
-    http: reqwest::Client,
-    sources: Vec<CoverSource>,
-) -> (
-    Rc<std::cell::RefCell<CoverLoader>>,
-    Arc<Mutex<Vec<CoverSource>>>,
-) {
-    let sources = Arc::new(Mutex::new(sources));
-    let loader = Rc::new(std::cell::RefCell::new(CoverLoader {
-        window: window.as_weak(),
-        http,
-        sources: sources.clone(),
-        state: Arc::new(Mutex::new(LoaderState::default())),
-        last_viewport: None,
-    }));
-    (loader, sources)
+#[derive(Clone, Copy, Eq, Hash, PartialEq)]
+pub enum Page {
+    Home,
+    Library,
 }
 
-pub struct CoverLoader {
+pub struct ViewportLoader {
     window: slint::Weak<MainWindow>,
-    http: reqwest::Client,
     sources: Arc<Mutex<Vec<CoverSource>>>,
-    state: Arc<Mutex<LoaderState>>,
-    last_viewport: Option<(f32, f32)>,
+    loading: Arc<Mutex<HashSet<(Page, usize)>>>,
+    resident: Arc<Mutex<HashSet<(Page, usize)>>>,
+    generation: Arc<AtomicU64>,
+    last_viewport: Option<(f32, f32, f32)>,
 }
 
-#[derive(Default)]
-struct LoaderState {
-    loading: HashSet<usize>,
-    resident: HashSet<usize>,
-    generation: u64,
-}
+impl ViewportLoader {
+    pub fn new(
+        window: &MainWindow,
+    ) -> (Rc<std::cell::RefCell<Self>>, Arc<Mutex<Vec<CoverSource>>>) {
+        let sources = Arc::new(Mutex::new(Vec::new()));
+        let loader = Self {
+            window: window.as_weak(),
+            sources: sources.clone(),
+            loading: Arc::new(Mutex::new(HashSet::new())),
+            resident: Arc::new(Mutex::new(HashSet::new())),
+            generation: Arc::new(AtomicU64::new(0)),
+            last_viewport: None,
+        };
+        (Rc::new(std::cell::RefCell::new(loader)), sources)
+    }
 
-impl CoverLoader {
-    /// Clears residency after replacing the game model with another page.
-    #[tracing::instrument(skip(self), fields(loader = "covers"))]
     pub fn reset(&mut self) {
+        self.generation.fetch_add(1, Ordering::Relaxed);
+        self.loading
+            .lock()
+            .expect("cover loading state poisoned")
+            .clear();
+        self.resident
+            .lock()
+            .expect("cover resident state poisoned")
+            .clear();
         if let Some(window) = self.window.upgrade() {
-            debug!(
-                home_rows = window.global::<HomeState>().get_games().row_count(),
-                platform_rows = window.global::<LibraryState>().get_games().row_count(),
-                "resetting cover loader"
-            );
-            for model in [
-                window.global::<HomeState>().get_games(),
-                window.global::<LibraryState>().get_games(),
-            ] {
-                for index in 0..model.row_count() {
-                    if let Some(mut row) = model.row_data(index) {
-                        row.cover = Image::default();
-                        model.set_row_data(index, row);
+            for page in [Page::Home, Page::Library] {
+                let games = page_games(&window, page);
+                for index in 0..games.row_count() {
+                    if let Some(mut game) = games.row_data(index) {
+                        game.cover = Image::default();
+                        game.cover_ratio = 1.0;
+                        games.set_row_data(index, game);
                     }
                 }
             }
         }
-        let mut state = self.state.lock().expect("cover loader state poisoned");
-        state.loading.clear();
-        state.resident.clear();
-        state.generation = state.generation.wrapping_add(1);
-        debug!("cover loader state cleared");
     }
 
-    #[tracing::instrument(skip(self), fields(loader = "covers"))]
-    pub fn update(&mut self, scroll_x: f32, viewport_width: f32) {
-        self.last_viewport = Some((scroll_x, viewport_width));
-        // Slint exposes Flickable::viewport-x as the content translation, so
-        // scrolling right produces negative values. Convert to a positive
-        // distance through the content before calculating card positions.
-        let scroll_x = (-scroll_x).max(0.0);
+    pub fn refresh(&mut self, page: Page) {
+        if let Some((scroll_x, viewport_width, cover_height)) = self.last_viewport {
+            self.update(page, scroll_x, viewport_width, cover_height);
+        }
+    }
+
+    pub fn update(&mut self, page: Page, scroll_x: f32, viewport_width: f32, cover_height: f32) {
+        self.last_viewport = Some((scroll_x, viewport_width, cover_height));
         let Some(window) = self.window.upgrade() else {
             return;
         };
-        let games = if window.global::<ShellState>().get_active_tab() == 1 {
-            window.global::<LibraryState>().get_games()
-        } else {
-            window.global::<HomeState>().get_games()
-        };
+        let games = page_games(&window, page);
         let sources = self
             .sources
             .lock()
             .expect("cover source state poisoned")
             .clone();
-
-        // Cards have variable widths, so derive their actual positions from
-        // the current ratios instead of assuming a fixed slot size.
-        let viewport_end = scroll_x + viewport_width;
-        let cover_height = 200.0_f32;
-        let mut cursor = CONTENT_PADDING_LEFT;
-        let mut first_visible = None;
-        let mut last_visible = None;
-        for index in 0..games.row_count() {
+        let scroll_x = (-scroll_x).max(0.0);
+        let cover_height = cover_height.max(1.0);
+        let prefetch = 2usize;
+        let mut cursor = 4.0_f32;
+        let end = scroll_x + viewport_width;
+        let mut first = None;
+        let mut last = None;
+        for index in 0..games.row_count().min(sources.len()) {
             let ratio = games
                 .row_data(index)
-                .map(|row| row.cover_ratio.clamp(0.4, 2.0))
+                .map(|game| game.cover_ratio.clamp(0.4, 2.0))
                 .unwrap_or(1.0);
             let width = cover_height * ratio;
-            let card_end = cursor + width;
-            if card_end >= scroll_x && cursor <= viewport_end {
-                first_visible.get_or_insert(index);
-                last_visible = Some(index);
+            if cursor + width >= scroll_x && cursor <= end {
+                first.get_or_insert(index);
+                last = Some(index);
             }
-            cursor = card_end + CARD_SPACING;
+            cursor += width + 16.0;
         }
-
-        let first = first_visible.unwrap_or(0).saturating_sub(PREFETCH_CARDS);
-        let last = last_visible
-            .map(|index| (index + PREFETCH_CARDS + 1).min(sources.len()))
+        let first = first.unwrap_or(0).saturating_sub(prefetch);
+        let last = last
+            .map(|index| (index + prefetch + 1).min(sources.len()))
             .unwrap_or(0);
-        let wanted: HashSet<_> = (first..last).collect();
-        let state_snapshot = self.state.lock().expect("cover loader state poisoned");
-        debug!(
-            scroll_x,
-            viewport_width,
-            first,
-            last,
-            active_tab = window.global::<ShellState>().get_active_tab(),
-            rows = games.row_count(),
-            sources = sources.len(),
-            resident = ?state_snapshot.resident,
-            loading = ?state_snapshot.loading,
-            wanted = ?wanted,
-            "updating cover residency range"
-        );
-        drop(state_snapshot);
-        let evict: Vec<_> = self
-            .state
-            .lock()
-            .expect("cover loader state poisoned")
-            .resident
-            .difference(&wanted)
-            .copied()
-            .collect();
-        debug!(?evict, "evicting cover rows");
-        for index in evict {
-            let title = games
-                .row_data(index)
-                .map(|row| row.title.to_string())
-                .unwrap_or_else(|| "<missing>".into());
-            debug!(index, %title, "evicting cover row");
-            if let Some(mut row) = games.row_data(index) {
-                row.cover = Image::default();
-                games.set_row_data(index, row);
-            }
-            self.state
-                .lock()
-                .expect("cover loader state poisoned")
-                .resident
-                .remove(&index);
-        }
-
-        for index in wanted {
-            let should_load = {
-                let mut state = self.state.lock().expect("cover loader state poisoned");
-                !state.resident.contains(&index) && state.loading.insert(index)
-            };
-            if !should_load {
-                continue;
-            }
-            debug!(index, "queueing cover row");
-            let Some(source) = sources.get(index).cloned() else {
-                self.state
+        let wanted = (first..last).collect::<HashSet<_>>();
+        let generation = self.generation.load(Ordering::Relaxed);
+        let key_page = page;
+        let resident = self.resident.clone();
+        let loading = self.loading.clone();
+        for index in 0..games.row_count() {
+            if !wanted.contains(&index) {
+                let was_resident = resident
                     .lock()
-                    .expect("cover loader state poisoned")
-                    .loading
-                    .remove(&index);
+                    .expect("cover resident state poisoned")
+                    .remove(&(key_page, index));
+                if was_resident {
+                    if let Some(mut game) = games.row_data(index) {
+                        game.cover = Image::default();
+                        game.cover_ratio = 1.0;
+                        games.set_row_data(index, game);
+                    }
+                }
+            }
+        }
+        for index in wanted {
+            if resident
+                .lock()
+                .expect("cover resident state poisoned")
+                .contains(&(key_page, index))
+                || !loading
+                    .lock()
+                    .expect("cover loading state poisoned")
+                    .insert((key_page, index))
+            {
+                continue;
+            }
+            let Some(source) = sources.get(index).cloned() else {
                 continue;
             };
-            let http = self.http.clone();
-            let weak = self.window.clone();
-            let state = self.state.clone();
-            let generation = state
-                .lock()
-                .expect("cover loader state poisoned")
-                .generation;
-            let source_kind = if source.local_path.is_some() {
-                "local"
-            } else if source.cache_path.is_some() {
-                "cache-or-url"
-            } else if source.url.is_some() {
-                "url"
-            } else {
-                "none"
-            };
-            debug!(
-                index,
-                source_kind,
-                has_local_path = source.local_path.is_some(),
-                has_cache_path = source.cache_path.is_some(),
-                has_url = source.url.is_some(),
-                "starting cover load"
-            );
-
+            let window = self.window.clone();
+            let generation_state = self.generation.clone();
+            let resident = resident.clone();
+            let loading = loading.clone();
             tokio::spawn(async move {
-                let Some(bytes) = load_bytes(&http, &source).await else {
-                    debug!(index, "cover load produced no bytes");
-                    state
-                        .lock()
-                        .expect("cover loader state poisoned")
-                        .loading
-                        .remove(&index);
+                let decoded = match load_bytes(&source).await {
+                    Some(bytes) => tokio::task::spawn_blocking(move || decode_rgba(&bytes))
+                        .await
+                        .ok()
+                        .flatten(),
+                    None => None,
+                };
+                loading
+                    .lock()
+                    .expect("cover loading state poisoned")
+                    .remove(&(key_page, index));
+                if generation_state.load(Ordering::Relaxed) != generation {
+                    return;
+                }
+                let Some(decoded) = decoded else {
                     return;
                 };
-                {
-                    let mut state = state.lock().expect("cover loader state poisoned");
-                    if state.generation != generation {
-                        debug!(
-                            index,
-                            generation,
-                            current_generation = state.generation,
-                            "discarding stale cover load"
-                        );
-                        state.loading.remove(&index);
-                        return;
-                    }
-                    state.loading.remove(&index);
-                    state.resident.insert(index);
-                }
-                debug!(index, "cover bytes loaded");
-                let _ = weak.upgrade_in_event_loop(move |window| {
-                    let Some((image, ratio)) = decode(&bytes) else {
-                        warn!(index, "cover decode failed, keeping placeholder");
-                        return;
-                    };
-                    let games = if window.global::<ShellState>().get_active_tab() == 1 {
-                        window.global::<LibraryState>().get_games()
-                    } else {
-                        window.global::<HomeState>().get_games()
-                    };
-                    if let Some(mut row) = games.row_data(index) {
-                        debug!(index, title = %row.title, "applying decoded cover to row");
-                        row.cover = image;
-                        row.cover_ratio = ratio;
-                        games.set_row_data(index, row);
+                let _ = window.upgrade_in_event_loop(move |window| {
+                    if let Some(mut game) = page_games(&window, key_page).row_data(index) {
+                        let (image, ratio) = image_from_rgba(decoded);
+                        game.cover = image;
+                        game.cover_ratio = ratio;
+                        page_games(&window, key_page).set_row_data(index, game);
+                        resident
+                            .lock()
+                            .expect("cover resident state poisoned")
+                            .insert((key_page, index));
                     }
                 });
             });
@@ -284,18 +209,63 @@ impl CoverLoader {
     }
 }
 
-pub fn decode(bytes: &[u8]) -> Option<(Image, f32)> {
-    let img = image::load_from_memory(bytes).ok()?.to_rgba8();
-    let (w, h) = img.dimensions();
-    if w == 0 || h == 0 {
-        return None;
+fn page_games(window: &MainWindow, page: Page) -> ModelRc<GameCardData> {
+    match page {
+        Page::Home => window.global::<HomeState>().get_games(),
+        Page::Library => window.global::<LibraryState>().get_games(),
     }
-    let buffer = SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(img.as_raw(), w, h);
-    Some((Image::from_rgba8(buffer), w as f32 / h as f32))
 }
 
-#[tracing::instrument(skip(http, source), fields(loader = "covers"))]
-pub(crate) async fn load_bytes(http: &reqwest::Client, source: &CoverSource) -> Option<Vec<u8>> {
+struct DecodedImage {
+    pixels: Vec<u8>,
+    width: u32,
+    height: u32,
+}
+
+pub fn decode(bytes: &[u8]) -> Option<(Image, f32)> {
+    decode_rgba(bytes).map(image_from_rgba)
+}
+
+fn decode_rgba(bytes: &[u8]) -> Option<DecodedImage> {
+    let svg_prefix = String::from_utf8_lossy(&bytes[..bytes.len().min(1024)]);
+    if svg_prefix.contains("<svg") {
+        let tree = resvg::usvg::Tree::from_data(bytes, &resvg::usvg::Options::default()).ok()?;
+        let size = tree.size().to_int_size();
+        let mut pixmap = resvg::tiny_skia::Pixmap::new(size.width(), size.height())?;
+        resvg::render(
+            &tree,
+            resvg::tiny_skia::Transform::default(),
+            &mut pixmap.as_mut(),
+        );
+        return Some(DecodedImage {
+            pixels: pixmap.data().to_vec(),
+            width: pixmap.width(),
+            height: pixmap.height(),
+        });
+    }
+    let img = image::load_from_memory(bytes).ok()?.to_rgba8();
+    let (width, height) = img.dimensions();
+    (width > 0 && height > 0).then(|| DecodedImage {
+        pixels: img.into_raw(),
+        width,
+        height,
+    })
+}
+
+fn image_from_rgba(decoded: DecodedImage) -> (Image, f32) {
+    let buffer = SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(
+        &decoded.pixels,
+        decoded.width,
+        decoded.height,
+    );
+    (
+        Image::from_rgba8(buffer),
+        decoded.width as f32 / decoded.height as f32,
+    )
+}
+
+#[tracing::instrument(skip(source), fields(loader = "covers"))]
+pub(crate) async fn load_bytes(source: &CoverSource) -> Option<Vec<u8>> {
     if let Some(path) = &source.local_path {
         if let Ok(bytes) = tokio::fs::read(path).await {
             debug!(path = %path.display(), bytes = bytes.len(), "local cover hit");
@@ -311,8 +281,9 @@ pub(crate) async fn load_bytes(http: &reqwest::Client, source: &CoverSource) -> 
         debug!(path = %path.display(), "cover cache miss");
     }
     let url = source.url.as_deref()?;
-    debug!(url, "starting cover URL request");
-    let bytes = http
+    static HTTP: OnceLock<reqwest::Client> = OnceLock::new();
+    let bytes = HTTP
+        .get_or_init(reqwest::Client::new)
         .get(url)
         .send()
         .await
@@ -322,8 +293,6 @@ pub(crate) async fn load_bytes(http: &reqwest::Client, source: &CoverSource) -> 
         .bytes()
         .await
         .ok()?;
-    debug!(bytes = bytes.len(), "cover URL response loaded");
-
     if let Some(path) = &source.cache_path {
         if let Some(parent) = path.parent() {
             if tokio::fs::create_dir_all(parent).await.is_ok() {
@@ -337,24 +306,15 @@ pub(crate) async fn load_bytes(http: &reqwest::Client, source: &CoverSource) -> 
 fn resolve_url(cover: Option<&str>, base_url: Option<&str>) -> Option<String> {
     let cover = cover?;
     if cover.starts_with("http://") || cover.starts_with("https://") {
-        let trimmed = cover.trim_end_matches('/');
-        if trimmed == "https:" || trimmed == "http:" {
-            return None;
-        }
         return Some(cover.to_owned());
     }
     let cover = cover.trim_matches('/');
-    if cover.is_empty() {
-        return None;
-    }
-    Some(format!("{}/{cover}", base_url?.trim_end_matches('/')))
+    let base_url = base_url?.trim_end_matches('/');
+    (!cover.is_empty()).then(|| format!("{base_url}/{cover}"))
 }
 
 fn normalize_cover_source(cover: &str) -> Option<String> {
     let cover = cover.trim();
-    if cover.is_empty() {
-        return None;
-    }
     let cover = cover
         .strip_prefix("@url:`")
         .and_then(|value| value.strip_suffix('`'))
@@ -374,7 +334,7 @@ pub async fn load_games_metadata(
     LibraryError,
 > {
     let items = library
-        .search_cards(SearchQuery::new().sort(SearchSort::LastUpdated).limit(100))
+        .search_cards(SearchQuery::new().sort(SearchSort::LastUpdated).limit(20))
         .await?;
     Ok(items
         .into_iter()
@@ -386,12 +346,14 @@ pub async fn load_games_metadata(
                     .or(item.cover_large_local_path.as_deref()),
                 base_url,
             );
-            let card = crate::ui::pages::library::GameMetadata {
-                id: item.id.to_string(),
-                title: item.title,
-                platform: item.platform_name.unwrap_or_else(|| "Unknown".into()),
-            };
-            (card, source)
+            (
+                crate::ui::pages::library::GameMetadata {
+                    id: item.id.to_string(),
+                    title: item.title,
+                    platform: item.platform_name.unwrap_or_else(|| "Unknown".into()),
+                },
+                source,
+            )
         })
         .unzip())
 }
