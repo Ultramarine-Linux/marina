@@ -319,10 +319,11 @@ pub(crate) fn install(
             for (slug, name) in platform_names {
                 let game_count = platform_counts.get(&slug).copied().unwrap_or_default();
                 let icon = match platform_asset_path(&icon_root, &slug) {
-                    Some(path) => image::load_path(path, "platform-icon").await,
+                    Some(path) => image::load_path_scaled(path, "platform-icon", 256).await,
                     None => None,
                 };
                 cards.push(PlatformCardMetadata {
+                    icon_path: None,
                     icon,
                     slug,
                     name,

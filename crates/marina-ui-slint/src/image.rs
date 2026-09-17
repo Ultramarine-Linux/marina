@@ -48,6 +48,14 @@ pub fn source_for(
 }
 
 pub async fn load(source: &ImageSource, purpose: &'static str) -> Option<DecodedImage> {
+    load_scaled(source, purpose, MAX_IMAGE_DIMENSION).await
+}
+
+pub async fn load_scaled(
+    source: &ImageSource,
+    purpose: &'static str,
+    max_dimension: u32,
+) -> Option<DecodedImage> {
     debug!(
         purpose,
         local_path = ?source.local_path,
@@ -57,7 +65,7 @@ pub async fn load(source: &ImageSource, purpose: &'static str) -> Option<Decoded
     );
     let bytes = load_bytes(source).await?;
     let byte_count = bytes.len();
-    let decoded = tokio::task::spawn_blocking(move || decode_rgba(&bytes))
+    let decoded = tokio::task::spawn_blocking(move || decode_rgba(&bytes, max_dimension))
         .await
         .ok()
         .flatten();
@@ -75,13 +83,22 @@ pub async fn load(source: &ImageSource, purpose: &'static str) -> Option<Decoded
 }
 
 pub async fn load_path(path: impl Into<PathBuf>, purpose: &'static str) -> Option<DecodedImage> {
-    load(
+    load_path_scaled(path, purpose, MAX_IMAGE_DIMENSION).await
+}
+
+pub async fn load_path_scaled(
+    path: impl Into<PathBuf>,
+    purpose: &'static str,
+    max_dimension: u32,
+) -> Option<DecodedImage> {
+    load_scaled(
         &ImageSource {
             url: None,
             cache_path: None,
             local_path: Some(path.into()),
         },
         purpose,
+        max_dimension,
     )
     .await
 }
@@ -150,12 +167,12 @@ async fn load_bytes(source: &ImageSource) -> Option<Vec<u8>> {
     Some(bytes.to_vec())
 }
 
-fn decode_rgba(bytes: &[u8]) -> Option<DecodedImage> {
+fn decode_rgba(bytes: &[u8], max_dimension: u32) -> Option<DecodedImage> {
     let svg_prefix = String::from_utf8_lossy(&bytes[..bytes.len().min(1024)]);
     if svg_prefix.contains("<svg") {
         let tree = resvg::usvg::Tree::from_data(bytes, &resvg::usvg::Options::default()).ok()?;
         let size = tree.size().to_int_size();
-        let scale = (MAX_IMAGE_DIMENSION as f32 / size.width().max(size.height()) as f32).min(1.0);
+        let scale = (max_dimension as f32 / size.width().max(size.height()) as f32).min(1.0);
         let width = ((size.width() as f32 * scale).round() as u32).max(1);
         let height = ((size.height() as f32 * scale).round() as u32).max(1);
         let mut pixmap = resvg::tiny_skia::Pixmap::new(width, height)?;
@@ -181,10 +198,27 @@ fn decode_rgba(bytes: &[u8]) -> Option<DecodedImage> {
     {
         return None;
     }
+    let img = if width.max(height) > max_dimension {
+        img.resize(
+            if width >= height {
+                max_dimension
+            } else {
+                width * max_dimension / height
+            },
+            if height >= width {
+                max_dimension
+            } else {
+                height * max_dimension / width
+            },
+            ::image::imageops::FilterType::Triangle,
+        )
+    } else {
+        img
+    };
     Some(DecodedImage {
+        width: img.width(),
+        height: img.height(),
         pixels: img.to_rgba8().into_raw(),
-        width,
-        height,
     })
 }
 

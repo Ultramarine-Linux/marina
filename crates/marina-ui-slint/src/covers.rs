@@ -190,9 +190,12 @@ impl ViewportLoader {
             let resident = resident.clone();
             let loading = loading.clone();
             tokio::spawn(async move {
-                let decoded =
-                    image_loader::load(&image_loader::ImageSource::from(&source), "shelf-cover")
-                        .await;
+                let decoded = image_loader::load_scaled(
+                    &image_loader::ImageSource::from(&source),
+                    "shelf-cover",
+                    256,
+                )
+                .await;
                 loading
                     .lock()
                     .expect("cover loading state poisoned")
@@ -209,13 +212,13 @@ impl ViewportLoader {
                 let _ = window.upgrade_in_event_loop(move |window| {
                     if let Some(mut game) = page_games(&window, key_page).row_data(index) {
                         let (image, ratio) = image_loader::into_slint_image(decoded);
-                        game.cover = image;
-                        game.cover_ratio = ratio;
-                        page_games(&window, key_page).set_row_data(index, game);
                         resident
                             .lock()
                             .expect("cover resident state poisoned")
                             .insert((key_page, index));
+                        game.cover = image;
+                        game.cover_ratio = ratio;
+                        page_games(&window, key_page).set_row_data(index, game);
                         debug!(?key_page, index, %title, "cover applied");
                     } else {
                         warn!(?key_page, index, %title, "cover row missing when applying image");

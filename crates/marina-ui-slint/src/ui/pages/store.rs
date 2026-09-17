@@ -167,10 +167,11 @@ pub(crate) fn install(
                     let mut cards = Vec::new();
                     for platform in platforms {
                         let icon = match platform_asset_path(&icon_root, &platform.fs_slug) {
-                            Some(path) => image::load_path(path, "platform-icon").await,
+                            Some(path) => image::load_path_scaled(path, "platform-icon", 256).await,
                             None => None,
                         };
                         cards.push(PlatformCardMetadata {
+                            icon_path: None,
                             icon,
                             slug: platform.fs_slug,
                             name: platform.display_name,

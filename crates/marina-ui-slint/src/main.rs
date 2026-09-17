@@ -203,6 +203,29 @@ async fn main() -> Result<(), slint::PlatformError> {
                     return;
                 }
             };
+            *state_store.lock().expect("library state lock poisoned") = Some(state.clone());
+
+            // Hydrate immediately from the persisted card projection. XDG and
+            // filesystem reconciliation can update this cached view afterward.
+            if let Ok((metadata, cover_sources)) =
+                shelf::load_games(&state.library, state.config.romm_url.as_deref()).await
+            {
+                *startup_sources.lock().expect("cover source state poisoned") =
+                    cover_sources.clone();
+                *startup_home_sources
+                    .lock()
+                    .expect("home cover source state poisoned") = cover_sources;
+                let initial_window = weak_window.clone();
+                let _ = initial_window.upgrade_in_event_loop(move |window| {
+                    window
+                        .global::<HomeState>()
+                        .set_games(ModelRc::from(std::rc::Rc::new(VecModel::from(game_cards(
+                            metadata,
+                        )))));
+                    window.global::<HomeState>().set_loading(false);
+                    window.global::<HomeState>().invoke_cover_context_changed(0);
+                });
+            }
 
             let discovered_apps = tokio::task::spawn_blocking(marina_apps::discover)
                 .await
@@ -371,10 +394,7 @@ async fn main() -> Result<(), slint::PlatformError> {
                     .iter()
                     .filter(|game| game.platform.eq_ignore_ascii_case(&platform.name))
                     .count();
-                let icon = match platform_asset_path(&icon_root, &platform.slug) {
-                    Some(path) => image::load_path(path, "platform-icon").await,
-                    None => None,
-                };
+                let icon_path = platform_asset_path(&icon_root, &platform.slug);
                 platform_cards.push(PlatformCardMetadata {
                     slug: platform.slug,
                     name: platform.name,
@@ -383,20 +403,25 @@ async fn main() -> Result<(), slint::PlatformError> {
                         game_count,
                         if game_count == 1 { "game" } else { "games" }
                     ),
-                    icon,
+                    icon_path,
+                    icon: None,
                 });
             }
-
+            let icon_jobs = platform_cards
+                .iter()
+                .enumerate()
+                .filter_map(|(index, platform)| {
+                    platform.icon_path.clone().map(|path| (index, path))
+                })
+                .collect::<Vec<_>>();
+            let icon_window = weak_window.clone();
             let _ = weak_window.upgrade_in_event_loop(move |window| {
                 let platforms: Vec<PlatformCardData> = platform_cards
                     .into_iter()
                     .map(|platform| PlatformCardData {
                         slug: SharedString::from(platform.slug),
                         name: SharedString::from(platform.name),
-                        icon: platform
-                            .icon
-                            .map(|decoded| image::into_slint_image(decoded).0)
-                            .unwrap_or_default(),
+                        icon: Image::default(),
                         game_count: SharedString::from(platform.game_count),
                     })
                     .collect();
@@ -410,6 +435,22 @@ async fn main() -> Result<(), slint::PlatformError> {
                 window.global::<HomeState>().set_loading(false);
                 window.global::<HomeState>().invoke_cover_context_changed(0);
             });
+            for (index, path) in icon_jobs {
+                let icon_window = icon_window.clone();
+                tokio::spawn(async move {
+                    let Some(decoded) = image::load_path_scaled(path, "platform-icon", 256).await
+                    else {
+                        return;
+                    };
+                    let _ = icon_window.upgrade_in_event_loop(move |window| {
+                        let platforms = window.global::<LibraryState>().get_platforms();
+                        if let Some(mut platform) = platforms.row_data(index) {
+                            platform.icon = image::into_slint_image(decoded).0;
+                            platforms.set_row_data(index, platform);
+                        }
+                    });
+                });
+            }
         });
     });
 
@@ -637,6 +678,7 @@ struct PlatformCardMetadata {
     slug: String,
     name: String,
     game_count: String,
+    icon_path: Option<String>,
     icon: Option<image::DecodedImage>,
 }
 
