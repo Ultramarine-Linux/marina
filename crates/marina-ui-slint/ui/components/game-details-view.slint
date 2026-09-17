@@ -9,6 +9,13 @@ import { PreviewDetailsData } from "preview-details.slint";
 import { LucideIcon } from "../slintcn/components/lucide-icon.slint";
 import { IconSet } from "@lucide/lucide.slint";
 
+export global GameState {
+    in-out property <GameCardData> selected-game;
+    in-out property <PreviewDetailsData> details;
+    in-out property <bool> details-loading: false;
+    callback play-requested(string);
+}
+
 export component GameDetailsView inherits Rectangle {
     in property <GameCardData> game;
     in property <PreviewDetailsData> details;
@@ -19,8 +26,9 @@ export component GameDetailsView inherits Rectangle {
     callback action-requested;
 
     background: transparent;
-    forward-focus: back-button;
-    changed focus-request => { back-button.focus(); }
+    forward-focus: action-button;
+    init => { action-button.focus(); }
+    changed focus-request => { action-button.focus(); }
 
     VerticalLayout {
         spacing: Tokens.spacing-lg;
@@ -35,6 +43,12 @@ export component GameDetailsView inherits Rectangle {
                 variant: ButtonVariant.ghost;
                 size: ButtonSize.icon;
                 text: "";
+                directional-navigation: true;
+                navigation-requested(direction) => {
+                    if (direction == "down" || direction == "right") {
+                        action-button.focus();
+                    }
+                }
                 LucideIcon {
                     x: (parent.width - self.width) / 2;
                     y: (parent.height - self.height) / 2;
@@ -71,7 +85,17 @@ export component GameDetailsView inherits Rectangle {
                         spacing: Tokens.spacing-md;
                         Typography { width: parent.width; text: root.details.title != "" ? root.details.title : root.game.title; variant: TextVariant.headline; overflow: clip; }
                         Typography { text: root.game.platform; variant: TextVariant.body-lg; tone: TextTone.muted; }
-                        Button { width: 150px; text: root.action-label; clicked => { root.action-requested(); } }
+                        action-button := Button {
+                            width: 150px;
+                            text: root.action-label;
+                            directional-navigation: true;
+                            navigation-requested(direction) => {
+                                if (direction == "up" || direction == "left") {
+                                    back-button.focus();
+                                }
+                            }
+                            clicked => { root.action-requested(); }
+                        }
                         Rectangle { vertical-stretch: 1; }
                     }
                 }

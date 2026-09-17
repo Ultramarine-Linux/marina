@@ -8,10 +8,60 @@ use slint::{
     platform::{Key, WindowEvent},
 };
 
-use crate::{MainWindow, ToastItem, ToastQueue};
+use crate::{
+    HomeState, LibraryState, MainWindow, ShellPage, ShellState, StoreState, ToastItem, ToastQueue,
+};
 
 const TOAST_DURATION: Duration = Duration::from_secs(4);
 const TOAST_DISMISS_ANIMATION: Duration = Duration::from_millis(250);
+
+pub(crate) fn configure_navigation(window: &MainWindow) {
+    let weak = window.as_weak();
+    window.global::<ShellState>().on_navigate(move |index| {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let index = index.clamp(0, 2);
+        let shell = window.global::<ShellState>();
+        shell.set_active_tab(index);
+
+        match index {
+            0 => {
+                shell.set_page(ShellPage::Home);
+                let home = window.global::<HomeState>();
+                home.set_loading(true);
+                home.invoke_entered();
+            }
+            1 => {
+                shell.set_page(ShellPage::Library);
+                window.global::<LibraryState>().invoke_entered();
+            }
+            _ => {
+                shell.set_page(ShellPage::Store);
+                window.global::<StoreState>().invoke_entered();
+            }
+        }
+
+        window.invoke_focus_navigation();
+    });
+
+    let weak = window.as_weak();
+    window.global::<ShellState>().on_back_requested(move || {
+        let Some(window) = weak.upgrade() else {
+            return;
+        };
+        let shell = window.global::<ShellState>();
+        if shell.get_page() != ShellPage::GameDetails {
+            return;
+        }
+        shell.set_page(match shell.get_active_tab() {
+            0 => ShellPage::Home,
+            1 => ShellPage::Library,
+            _ => ShellPage::Store,
+        });
+        window.invoke_focus_navigation();
+    });
+}
 
 pub(crate) fn dispatch_controller_action(window: &MainWindow, event: InputEvent) {
     if !matches!(
@@ -23,18 +73,20 @@ pub(crate) fn dispatch_controller_action(window: &MainWindow, event: InputEvent)
 
     match event.action {
         InputAction::PreviousTab => {
-            let active = window.get_active_tab();
-            window.set_active_tab((active + 2) % 3);
-            window.invoke_focus_navigation();
+            let shell = window.global::<ShellState>();
+            shell.invoke_navigate((shell.get_active_tab() + 2) % 3);
             return;
         }
         InputAction::NextTab => {
-            let active = window.get_active_tab();
-            window.set_active_tab((active + 1) % 3);
-            window.invoke_focus_navigation();
+            let shell = window.global::<ShellState>();
+            shell.invoke_navigate((shell.get_active_tab() + 1) % 3);
             return;
         }
         InputAction::Menu => return,
+        InputAction::Back if window.global::<ShellState>().get_page() == ShellPage::GameDetails => {
+            window.global::<ShellState>().invoke_back_requested();
+            return;
+        }
         _ => {}
     }
 

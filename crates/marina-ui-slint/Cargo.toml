@@ -23,7 +23,9 @@ slint = { version = "1.17.1", features = [
 ] }
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "bmp"] }
 
+dirs.workspace = true
 dotenvy.workspace = true
+marina-apps.workspace = true
 marina-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true

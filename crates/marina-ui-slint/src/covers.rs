@@ -15,7 +15,7 @@ use marina_library::{
 use slint::{ComponentHandle, Image, Model, SharedPixelBuffer};
 use tracing::{debug, warn};
 
-use crate::{MainWindow, cache};
+use crate::{HomeState, LibraryState, MainWindow, ShellState, cache};
 
 const CARD_SPACING: f32 = 16.0;
 const CONTENT_PADDING_LEFT: f32 = 4.0;
@@ -83,11 +83,14 @@ impl CoverLoader {
     pub fn reset(&mut self) {
         if let Some(window) = self.window.upgrade() {
             debug!(
-                home_rows = window.get_games().row_count(),
-                platform_rows = window.get_platform_games().row_count(),
+                home_rows = window.global::<HomeState>().get_games().row_count(),
+                platform_rows = window.global::<LibraryState>().get_games().row_count(),
                 "resetting cover loader"
             );
-            for model in [window.get_games(), window.get_platform_games()] {
+            for model in [
+                window.global::<HomeState>().get_games(),
+                window.global::<LibraryState>().get_games(),
+            ] {
                 for index in 0..model.row_count() {
                     if let Some(mut row) = model.row_data(index) {
                         row.cover = Image::default();
@@ -113,10 +116,10 @@ impl CoverLoader {
         let Some(window) = self.window.upgrade() else {
             return;
         };
-        let games = if window.get_active_tab() == 1 {
-            window.get_platform_games()
+        let games = if window.global::<ShellState>().get_active_tab() == 1 {
+            window.global::<LibraryState>().get_games()
         } else {
-            window.get_games()
+            window.global::<HomeState>().get_games()
         };
         let sources = self
             .sources
@@ -127,7 +130,7 @@ impl CoverLoader {
         // Cards have variable widths, so derive their actual positions from
         // the current ratios instead of assuming a fixed slot size.
         let viewport_end = scroll_x + viewport_width;
-        let cover_height = window.get_shelf_cover_height();
+        let cover_height = 200.0_f32;
         let mut cursor = CONTENT_PADDING_LEFT;
         let mut first_visible = None;
         let mut last_visible = None;
@@ -156,7 +159,7 @@ impl CoverLoader {
             viewport_width,
             first,
             last,
-            active_tab = window.get_active_tab(),
+            active_tab = window.global::<ShellState>().get_active_tab(),
             rows = games.row_count(),
             sources = sources.len(),
             resident = ?state_snapshot.resident,
@@ -264,10 +267,10 @@ impl CoverLoader {
                         warn!(index, "cover decode failed, keeping placeholder");
                         return;
                     };
-                    let games = if window.get_active_tab() == 1 {
-                        window.get_platform_games()
+                    let games = if window.global::<ShellState>().get_active_tab() == 1 {
+                        window.global::<LibraryState>().get_games()
                     } else {
-                        window.get_games()
+                        window.global::<HomeState>().get_games()
                     };
                     if let Some(mut row) = games.row_data(index) {
                         debug!(index, title = %row.title, "applying decoded cover to row");
@@ -363,7 +366,13 @@ fn normalize_cover_source(cover: &str) -> Option<String> {
 pub async fn load_games_metadata(
     library: &marina_store_sqlite::SqliteLibrary,
     base_url: Option<&str>,
-) -> Result<(Vec<crate::shelf::GameMetadata>, Vec<CoverSource>), LibraryError> {
+) -> Result<
+    (
+        Vec<crate::ui::pages::library::GameMetadata>,
+        Vec<CoverSource>,
+    ),
+    LibraryError,
+> {
     let items = library
         .search_cards(SearchQuery::new().sort(SearchSort::LastUpdated).limit(100))
         .await?;
@@ -377,7 +386,7 @@ pub async fn load_games_metadata(
                     .or(item.cover_large_local_path.as_deref()),
                 base_url,
             );
-            let card = crate::shelf::GameMetadata {
+            let card = crate::ui::pages::library::GameMetadata {
                 id: item.id.to_string(),
                 title: item.title,
                 platform: item.platform_name.unwrap_or_else(|| "Unknown".into()),

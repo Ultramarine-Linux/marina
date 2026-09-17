@@ -5,9 +5,10 @@ use std::sync::{Arc, Mutex};
 use marina_core::LibraryItemId;
 use marina_library::read::LibraryRead;
 use marina_runtime::GameLauncher;
+use slint::ComponentHandle;
 use tracing::{error, info, warn};
 
-use crate::{MainWindow, app};
+use crate::{GameState, MainWindow, app};
 
 pub(crate) fn install(
     window: &MainWindow,
@@ -15,7 +16,7 @@ pub(crate) fn install(
 ) {
     let play_state = library_state.clone();
     let game_launcher = GameLauncher::new();
-    window.on_game_play_requested(move |id| {
+    window.global::<GameState>().on_play_requested(move |id| {
         let state = play_state
             .lock()
             .expect("library state lock poisoned")

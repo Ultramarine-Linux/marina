@@ -4,6 +4,16 @@ import { Text as Typography } from "../slintcn/components/text.slint";
 import { TextVariant } from "../slintcn/components/text.slint";
 import { GameCard, GameCardData } from "card.slint";
 
+export global HomeState {
+    in-out property <[GameCardData]> games;
+    in-out property <bool> loading: true;
+    in-out property <int> selected-game-index: 0;
+    callback viewport-changed(length, length);
+    callback cover-context-changed(int);
+    callback entered;
+    callback game-opened(string);
+}
+
 export component ShelfSkeleton inherits Rectangle {
     in property <length> content-height;
     in property <length> cover-height;

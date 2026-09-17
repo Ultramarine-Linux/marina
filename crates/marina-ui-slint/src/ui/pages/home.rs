@@ -5,7 +5,7 @@ use std::sync::{Arc, Mutex};
 use slint::{ComponentHandle, Model, VecModel};
 
 use super::library as shelf;
-use crate::{GameCardData, MainWindow, app, covers, game_cards};
+use crate::{GameCardData, HomeState, MainWindow, ShellState, app, covers, game_cards};
 
 pub(crate) fn install(
     window: &MainWindow,
@@ -18,7 +18,7 @@ pub(crate) fn install(
     let home_sources = home_source_store.clone();
     let home_loader_sources = source_store.clone();
 
-    window.on_home_entered(move || {
+    window.global::<HomeState>().on_entered(move || {
         let Some(state) = home_state.lock().ok().and_then(|state| state.clone()) else {
             return;
         };
@@ -37,22 +37,23 @@ pub(crate) fn install(
                     .expect("cover source state poisoned") = cover_sources;
                 let _ = window.upgrade_in_event_loop(move |window| {
                     if let Some(model) = window
+                        .global::<HomeState>()
                         .get_games()
                         .as_any()
                         .downcast_ref::<VecModel<GameCardData>>()
                     {
                         model.set_vec(game_cards(metadata));
-                        if window.get_active_tab() == 0 {
+                        if window.global::<ShellState>().get_active_tab() == 0 {
                             // Replacing the model clears its images. Reset the loader so
                             // rows already marked resident are requested for the new model.
-                            window.invoke_cover_context_changed(0);
+                            window.global::<HomeState>().invoke_cover_context_changed(0);
                         }
                     }
-                    window.set_loading(false);
+                    window.global::<HomeState>().set_loading(false);
                 });
             } else {
                 let _ = window.upgrade_in_event_loop(|window| {
-                    window.set_loading(false);
+                    window.global::<HomeState>().set_loading(false);
                 });
             }
         });

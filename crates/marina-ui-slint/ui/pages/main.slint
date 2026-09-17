@@ -1,74 +1,24 @@
-import { Tokens } from "../slintcn/theme/tokens.slint";
-
 import { NavigationItem } from "../slintcn/components/navigation-menu.slint";
 import { AppShell } from "../components/app-shell.slint";
-import { GameCardData } from "../components/card.slint";
-import { Shelf, ShelfSkeleton } from "../components/shelf.slint";
-import { LibraryPage } from "library.slint";
-import { PlatformCardData } from "../components/platform-card.slint";
-import { PreviewDetailsData } from "../components/preview-details.slint";
-import { GameDetailsView } from "../components/game-details-view.slint";
-import { StorePage, StoreArtifact } from "store.slint";
+import { PageRouter } from "../components/page-router.slint";
 import { Toaster } from "../slintcn/components/toast.slint";
+import { ShellPage } from "route.slint";
+import { ShellState } from "../components/app-shell.slint";
+import { HomeState } from "../components/shelf.slint";
+import { LibraryState } from "library.slint";
+import { GameState } from "../components/game-details-view.slint";
+import { StoreState } from "store.slint";
+
 export { ToastQueue, ToastItem, ToastVariant } from "../slintcn/components/toast.slint";
+export { ShellPage } from "route.slint";
+export { ShellState } from "../components/app-shell.slint";
+export { HomeState } from "../components/shelf.slint";
+export { LibraryState } from "library.slint";
+export { GameState } from "../components/game-details-view.slint";
+export { StoreState } from "store.slint";
 
 export component MainWindow inherits Window {
-    in property <[GameCardData]> games;
-    in property <[PlatformCardData]> platforms;
-    in property <[GameCardData]> platform-games;
-    in property <[PlatformCardData]> store-platforms;
-    in property <[GameCardData]> store-games;
-    in property <PreviewDetailsData> store-details;
-    in property <image> store-preview-image;
-    in property <[StoreArtifact]> store-artifacts;
-    in-out property <[bool]> store-selected-artifacts;
-    in-out property <int> store-page: 0;
-
-    in-out property <int> store-selected-game-index: 0;
-    in-out property <int> store-selected-artifact-index: 0;
-    in-out property <length> store-game-list-scroll-y: 0px;
-    in-out property <length> library-game-list-scroll-y: 0px;
-    in-out property <bool> store-loading: false;
-    in-out property <bool> store-details-loading: false;
-    in-out property <string> store-install-status;
-    in-out property <float> store-install-progress: 0;
-    in-out property <string> profile-name: "User";
-    in-out property <string> profile-username: "user";
-    in-out property <string> profile-initials: "U";
-    in-out property <image> profile-image;
-    in-out property <GameCardData> selected-game;
-    in-out property <bool> game-page-visible: false;
-    in-out property <PreviewDetailsData> game-details;
-    in-out property <bool> game-details-loading: false;
-    in-out property <bool> library-loading: false;
-    in-out property <int> home-selected-game-index: 0;
-    in-out property <int> library-selected-platform-index: 0;
-    in-out property <int> library-selected-game-index: 0;
-    in-out property <int> store-selected-platform-index: 0;
-    private property <int> content-focus-request: 0;
-
-    out property <length> shelf-cover-height:
-        max(80px, min(200px, root.height * 50% - 64px));
-    out property <length> shelf-height: root.shelf-cover-height + 64px;
-    in-out property <bool> loading: true;
-    callback viewport-changed(length, length);
-    callback cover-context-changed(int);
-    callback platform-query(string);
-    callback game-selected(string, int);
-    callback game-opened(string);
-    callback game-play-requested(string);
-    callback store-search(string);
-    callback store-platform-query(string);
-    callback store-game-selected(string, int);
-    callback store-artifact-selected(int);
-    callback store-install-requested(string, [bool]);
-    callback store-entered;
-    callback home-entered;
-    callback library-entered;
     callback focus-navigation;
-
-    in-out property <int> active-tab: 0;
-    in-out property <string> search-query;
     property <[NavigationItem]> navigation-items: [
         { label: "Home" },
         { label: "Library" },
@@ -83,101 +33,24 @@ export component MainWindow inherits Window {
     title: "Marina";
     background: transparent;
 
-    changed active-tab => {
-        if (root.active-tab == 0) {
-            root.loading = true;
-            root.home-entered();
-        }
-        if (root.active-tab == 1) { root.library-entered(); }
-        if (root.active-tab == 2) { root.store-entered(); }
-    }
-
     shell := AppShell {
         width: parent.width;
         height: parent.height;
         navigation-items: root.navigation-items;
-        profile-name: root.profile-name;
-        profile-username: root.profile-username;
-        profile-initials: root.profile-initials;
-        profile-image: root.profile-image;
-        active-tab <=> root.active-tab;
-        search-query <=> root.search-query;
-        navigate(index) => { root.active-tab = index; }
-        focus-content => { root.content-focus-request += 1; }
+        profile-name: ShellState.profile-name;
+        profile-username: ShellState.profile-username;
+        profile-initials: ShellState.profile-initials;
+        profile-image: ShellState.profile-image;
+        active-tab <=> ShellState.active-tab;
+        search-query <=> ShellState.search-query;
+        navigate(index) => { ShellState.navigate(index); }
+        focus-content => { ShellState.content-focus-request += 1; }
 
-        if root.game-page-visible: GameDetailsView {
-            game: root.selected-game;
-            details: root.game-details;
-            loading: root.game-details-loading;
-            focus-request: root.content-focus-request;
-            back => { root.game-page-visible = false; shell.focus(); }
-            action-requested => { root.game-play-requested(root.selected-game.id); }
-        }
-
-        if !root.game-page-visible && root.active-tab == 0 && root.loading: ShelfSkeleton {
-            content-height: root.shelf-height;
-            cover-height: root.shelf-cover-height;
-        }
-
-        if !root.game-page-visible && root.active-tab == 0 && !root.loading: shelf := Shelf {
-            title: "Recently added";
-            games: root.games;
-            content-height: root.shelf-height;
-            cover-height: root.shelf-cover-height;
-            selected-index <=> root.home-selected-game-index;
-            focus-request: root.content-focus-request;
-            viewport-changed(x, width) => { root.viewport-changed(x, width); }
-            game-opened(id) => { root.game-opened(id); }
-            focus-header => { shell.focus(); }
-        }
-
-        if !root.game-page-visible && root.active-tab == 1: LibraryPage {
-            platforms: root.platforms;
-            games: root.platform-games;
-            details: root.game-details;
-            details-loading <=> root.game-details-loading;
-            selected-platform-index <=> root.library-selected-platform-index;
-            selected-game-index <=> root.library-selected-game-index;
-            focus-request: root.content-focus-request;
-            game-list-scroll-y <=> root.library-game-list-scroll-y;
-            initial-loading: root.loading;
-            loading <=> root.library-loading;
-            platform-query(slug) => { root.platform-query(slug); }
-            game-selected(id, index) => { root.game-selected(id, index); }
-            focus-header => { shell.focus(); }
-        }
-
-        if !root.game-page-visible && root.active-tab == 2: StorePage {
-            platforms: root.store-platforms;
-            games: root.store-games;
-            details: root.store-details;
-            preview-image: root.store-preview-image;
-            artifacts: root.store-artifacts;
-            selected-artifacts <=> root.store-selected-artifacts;
-            page <=> root.store-page;
-
-            selected-platform-index <=> root.store-selected-platform-index;
-            focus-request: root.content-focus-request;
-            selected-game-index <=> root.store-selected-game-index;
-            selected-artifact-index <=> root.store-selected-artifact-index;
-            game-list-scroll-y <=> root.store-game-list-scroll-y;
-            search-query <=> root.search-query;
-            loading <=> root.store-loading;
-            details-loading <=> root.store-details-loading;
-            install-status <=> root.store-install-status;
-            install-progress <=> root.store-install-progress;
-            platform-query(slug) => { root.store-platform-query(slug); }
-            game-selected(id, index) => { root.store-game-selected(id, index); }
-            artifact-selected(index) => { root.store-artifact-selected(index); }
-            install-requested(id, selected) => { root.store-install-requested(id, selected); }
-            search-requested(query) => { root.store-search(query); }
-            focus-header => { shell.focus(); }
-        }
+        PageRouter { }
     }
 
     focus-navigation => { shell.focus(); }
 
-    // Global overlay: remains above every routed screen, dialog, and sheet.
     Toaster {
         width: parent.width;
         height: parent.height;

@@ -14,7 +14,7 @@ use marina_romm::{PlatformQuery, RomQuery};
 
 use marina_scanner::scan;
 use serde::Serialize;
-use slint::{Image, Model, ModelRc, SharedString, VecModel};
+use slint::{ComponentHandle, Image, Model, ModelRc, SharedString, VecModel};
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::EnvFilter;
 
@@ -56,6 +56,7 @@ async fn main() -> Result<(), slint::PlatformError> {
     slint::set_xdg_app_id("org.ultramarinelinux.MarinaShell")?;
     info!("main window constructed; completing lightweight UI setup");
     ui::controls::configure_toasts(&window);
+    ui::controls::configure_navigation(&window);
 
     // Controller discovery can block inside gilrs while probing input devices.
     // Never make window creation wait for it; initialize it after the event loop
@@ -106,13 +107,21 @@ async fn main() -> Result<(), slint::PlatformError> {
         }
     });
     ui::profile::initialize(&window, username.clone());
-    window.set_games(ModelRc::from(std::rc::Rc::new(VecModel::from(Vec::new()))));
-    window.set_platform_games(ModelRc::from(std::rc::Rc::new(VecModel::from(Vec::new()))));
-    window.set_selected_game(empty_game_card());
-    window.set_game_details(empty_preview_details());
+    window
+        .global::<HomeState>()
+        .set_games(ModelRc::from(std::rc::Rc::new(VecModel::from(Vec::new()))));
+    window
+        .global::<LibraryState>()
+        .set_games(ModelRc::from(std::rc::Rc::new(VecModel::from(Vec::new()))));
+    window
+        .global::<GameState>()
+        .set_selected_game(empty_game_card());
+    window
+        .global::<GameState>()
+        .set_details(empty_preview_details());
 
-    window.set_loading(true);
-    window.set_library_loading(false);
+    window.global::<HomeState>().set_loading(true);
+    window.global::<LibraryState>().set_loading(false);
 
     let library_state: Arc<Mutex<Option<app::AppStateHandle>>> = Arc::new(Mutex::new(None));
 
@@ -121,36 +130,40 @@ async fn main() -> Result<(), slint::PlatformError> {
     let (loader, source_store) = covers::spawn_loader(&window, reqwest::Client::new(), Vec::new());
     let home_source_store = Arc::new(Mutex::new(Vec::new()));
     let loader_for_scroll = loader.clone();
-    window.on_viewport_changed(move |scroll_x, viewport_width| {
-        loader_for_scroll
-            .borrow_mut()
-            .update(scroll_x, viewport_width);
-    });
+    window
+        .global::<HomeState>()
+        .on_viewport_changed(move |scroll_x, viewport_width| {
+            loader_for_scroll
+                .borrow_mut()
+                .update(scroll_x, viewport_width);
+        });
 
     let loader_for_context = loader.clone();
     let context_sources = source_store.clone();
     let context_home_sources = home_source_store.clone();
-    window.on_cover_context_changed(move |active_tab| {
-        debug!(active_tab, "cover context changed");
-        if active_tab == 1 {
+    window
+        .global::<HomeState>()
+        .on_cover_context_changed(move |active_tab| {
+            debug!(active_tab, "cover context changed");
+            if active_tab == 1 {
+                let mut loader = loader_for_context.borrow_mut();
+                loader.reset();
+                loader.update(0.0, 1_280.0);
+                debug!("cover context reset complete; refreshing platform residency");
+                return;
+            }
+            let home_sources = context_home_sources
+                .lock()
+                .expect("home cover source state poisoned")
+                .clone();
+            let source_count = home_sources.len();
+            *context_sources.lock().expect("cover source state poisoned") = home_sources;
+            debug!(source_count, "cover context switched to home sources");
             let mut loader = loader_for_context.borrow_mut();
             loader.reset();
             loader.update(0.0, 1_280.0);
-            debug!("cover context reset complete; refreshing platform residency");
-            return;
-        }
-        let home_sources = context_home_sources
-            .lock()
-            .expect("home cover source state poisoned")
-            .clone();
-        let source_count = home_sources.len();
-        *context_sources.lock().expect("cover source state poisoned") = home_sources;
-        debug!(source_count, "cover context switched to home sources");
-        let mut loader = loader_for_context.borrow_mut();
-        loader.reset();
-        loader.update(0.0, 1_280.0);
-        debug!("cover context reset complete; refreshing home residency");
-    });
+            debug!("cover context reset complete; refreshing home residency");
+        });
 
     ui::launch::install(&window, &library_state);
     ui::pages::home::install(&window, &library_state, &source_store, &home_source_store);
@@ -167,6 +180,16 @@ async fn main() -> Result<(), slint::PlatformError> {
                     return;
                 }
             };
+
+            let discovered_apps = tokio::task::spawn_blocking(marina_apps::discover)
+                .await
+                .unwrap_or_else(|error| {
+                    error!(%error, "XDG application discovery task failed");
+                    Vec::new()
+                });
+            if let Err(error) = marina_apps::sync(&state.library, discovered_apps).await {
+                error!(%error, "failed to sync XDG applications");
+            }
 
             if state.config.scan_on_startup {
                 if let Some(root) = state.config.library_root.as_ref() {
@@ -352,10 +375,14 @@ async fn main() -> Result<(), slint::PlatformError> {
                         game_count: SharedString::from(platform.game_count),
                     })
                     .collect();
-                window.set_platforms(ModelRc::from(std::rc::Rc::new(VecModel::from(platforms))));
+                window
+                    .global::<LibraryState>()
+                    .set_platforms(ModelRc::from(std::rc::Rc::new(VecModel::from(platforms))));
                 let games = game_cards(metadata);
-                window.set_games(ModelRc::from(std::rc::Rc::new(VecModel::from(games))));
-                window.set_loading(false);
+                window
+                    .global::<HomeState>()
+                    .set_games(ModelRc::from(std::rc::Rc::new(VecModel::from(games))));
+                window.global::<HomeState>().set_loading(false);
                 // The Shelf's init callback requests the initial visible range.
             });
         });
@@ -411,21 +438,28 @@ fn populate_store_details(window: &slint::Weak<MainWindow>, rom: marina_romm::Ro
     };
     let selected_rom_id = rom_id.clone();
     let _ = window.upgrade_in_event_loop(move |window| {
-        let games = window.get_store_games();
-        let selected_index = window.get_store_selected_game_index().max(0) as usize;
+        let games = window.global::<StoreState>().get_games();
+        let selected_index = window
+            .global::<StoreState>()
+            .get_selected_game_index()
+            .max(0) as usize;
         if games
             .row_data(selected_index)
             .is_none_or(|game| game.id.as_str() != selected_rom_id)
         {
             return;
         }
-        window.set_store_details(details);
-        window.set_store_preview_image(Image::default());
-        window.set_store_artifacts(ModelRc::from(std::rc::Rc::new(VecModel::from(artifacts))));
-        window.set_store_selected_artifacts(
+        window.global::<StoreState>().set_details(details);
+        window
+            .global::<StoreState>()
+            .set_preview_image(Image::default());
+        window
+            .global::<StoreState>()
+            .set_artifacts(ModelRc::from(std::rc::Rc::new(VecModel::from(artifacts))));
+        window.global::<StoreState>().set_selected_artifacts(
             std::rc::Rc::new(VecModel::from(vec![false; artifact_count])).into(),
         );
-        window.set_store_details_loading(false);
+        window.global::<StoreState>().set_details_loading(false);
     });
 
     let preview_window = window.clone();
@@ -436,8 +470,11 @@ fn populate_store_details(window: &slint::Weak<MainWindow>, rom: marina_romm::Ro
             return;
         };
         let _ = preview_window.upgrade_in_event_loop(move |window| {
-            let games = window.get_store_games();
-            let selected_index = window.get_store_selected_game_index().max(0) as usize;
+            let games = window.global::<StoreState>().get_games();
+            let selected_index = window
+                .global::<StoreState>()
+                .get_selected_game_index()
+                .max(0) as usize;
             if games
                 .row_data(selected_index)
                 .is_none_or(|game| game.id.as_str() != preview_rom_id)
@@ -447,7 +484,7 @@ fn populate_store_details(window: &slint::Weak<MainWindow>, rom: marina_romm::Ro
             let Some((image, _)) = covers::decode(&bytes) else {
                 return;
             };
-            window.set_store_preview_image(image);
+            window.global::<StoreState>().set_preview_image(image);
         });
     });
 
@@ -460,7 +497,7 @@ fn populate_store_details(window: &slint::Weak<MainWindow>, rom: marina_romm::Ro
             let Some((image, ratio)) = covers::decode(&bytes) else {
                 return;
             };
-            let games = window.get_store_games();
+            let games = window.global::<StoreState>().get_games();
             let Some(index) = (0..games.row_count()).find(|&index| {
                 games
                     .row_data(index)

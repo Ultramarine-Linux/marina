@@ -18,15 +18,18 @@ export component PlatformGameList inherits Rectangle {
     in-out property <bool> details-loading: false;
     in property <string> action-label: "Open";
     in property <bool> keyboard-active: false;
+    in property <int> focus-request: 0;
     callback selected(string, int);
     callback action-requested(string, int);
     callback focus-header;
 
     private property <int> safe-index:
         min(max(root.selected-index, 0), max(root.games.length - 1, 0));
+    private property <int> preview-focus-request: 0;
 
     background: transparent;
     forward-focus: list-focus;
+    changed focus-request => { list-focus.focus(); }
 
     function select-index(index: int) {
         if (root.games.length <= 0) { return; }
@@ -45,6 +48,10 @@ export component PlatformGameList inherits Rectangle {
         width: 0px;
         height: 0px;
         key-pressed(event) => {
+            if (event.text == Key.LeftArrow) {
+                root.preview-focus-request += 1;
+                return accept;
+            }
             if (event.text == Key.UpArrow) {
                 if (root.safe-index == 0) {
                     root.focus-header();
@@ -142,8 +149,15 @@ export component PlatformGameList inherits Rectangle {
                         overflow: elide;
                     }
 
-                    Button {
+                    preview-action := Button {
                         text: root.action-label;
+                        directional-navigation: true;
+                        focus-request: root.preview-focus-request;
+                        navigation-requested(direction) => {
+                            if (direction == "right") {
+                                list-focus.focus();
+                            }
+                        }
                         clicked => { root.action-requested(root.games[root.safe-index].id, root.safe-index); }
                     }
 

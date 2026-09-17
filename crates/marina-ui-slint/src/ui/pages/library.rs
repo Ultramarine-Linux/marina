@@ -18,8 +18,9 @@ use tracing::error;
 
 use crate::covers::{self, CoverSource};
 use crate::{
-    GameCardData, MainWindow, PlatformCardData, PlatformCardMetadata, app, game_cards,
-    platform_asset_path, preview_details,
+    GameCardData, GameState, HomeState, LibraryState, MainWindow, PlatformCardData,
+    PlatformCardMetadata, ShellPage, ShellState, app, game_cards, platform_asset_path,
+    preview_details,
 };
 
 pub(crate) fn install(
@@ -31,61 +32,62 @@ pub(crate) fn install(
     let detail_state = library_state.clone();
     let detail_window = window.as_weak();
     let selected_loader = loader.clone();
-    window.on_game_selected(move |id, index| {
-        // Load the selected row's cover on demand. The detail request below
-        // supplies the rest of the metadata.
-        let cover_height = detail_window
-            .upgrade()
-            .map(|window| window.get_shelf_cover_height())
-            .unwrap_or(200.0);
-        selected_loader
-            .borrow_mut()
-            .update(index as f32 * (cover_height + 16.0), 240.0);
-        let state = detail_state
-            .lock()
-            .expect("library state lock poisoned")
-            .clone();
-        let Some(state) = state else {
-            return;
-        };
-        let Ok(item_id) = LibraryItemId::parse(id.as_str()).ok_or(()) else {
-            return;
-        };
-        let window = detail_window.clone();
-        tokio::spawn(async move {
-            match state.library.get(&item_id).await {
-                Ok(Some(item)) => {
-                    let details = preview_details(item);
-                    let _ = window.upgrade_in_event_loop(move |window| {
-                        window.set_game_details(details);
-                        window.set_game_details_loading(false);
-                    });
+    window
+        .global::<LibraryState>()
+        .on_game_selected(move |id, index| {
+            // Load the selected row's cover on demand. The detail request below
+            // supplies the rest of the metadata.
+            let cover_height = detail_window.upgrade().map(|_| 200.0_f32).unwrap_or(200.0);
+            selected_loader
+                .borrow_mut()
+                .update(index as f32 * (cover_height + 16.0), 240.0);
+            let state = detail_state
+                .lock()
+                .expect("library state lock poisoned")
+                .clone();
+            let Some(state) = state else {
+                return;
+            };
+            let Ok(item_id) = LibraryItemId::parse(id.as_str()).ok_or(()) else {
+                return;
+            };
+            let window = detail_window.clone();
+            tokio::spawn(async move {
+                match state.library.get(&item_id).await {
+                    Ok(Some(item)) => {
+                        let details = preview_details(item);
+                        let _ = window.upgrade_in_event_loop(move |window| {
+                            window.global::<GameState>().set_details(details);
+                            window.global::<GameState>().set_details_loading(false);
+                        });
+                    }
+                    Ok(None) | Err(_) => {
+                        let _ = window.upgrade_in_event_loop(|window| {
+                            window.global::<GameState>().set_details_loading(false);
+                        });
+                    }
                 }
-                Ok(None) | Err(_) => {
-                    let _ = window.upgrade_in_event_loop(|window| {
-                        window.set_game_details_loading(false);
-                    });
-                }
-            }
+            });
         });
-    });
 
     let open_state = library_state.clone();
     let open_window = window.as_weak();
-    window.on_game_opened(move |id| {
+    window.global::<HomeState>().on_game_opened(move |id| {
         let Some(window) = open_window.upgrade() else {
             return;
         };
-        let games = window.get_games();
+        let games = window.global::<HomeState>().get_games();
         let Some(game) = (0..games.row_count())
             .filter_map(|index| games.row_data(index))
             .find(|game| game.id == id)
         else {
             return;
         };
-        window.set_selected_game(game);
-        window.set_game_page_visible(true);
-        window.set_game_details_loading(true);
+        window.global::<GameState>().set_selected_game(game);
+        window
+            .global::<ShellState>()
+            .set_page(ShellPage::GameDetails);
+        window.global::<GameState>().set_details_loading(true);
 
         let state = open_state
             .lock()
@@ -119,18 +121,20 @@ pub(crate) fn install(
                         if let Some(path) = detail_cover.and_then(|path| {
                             slint::Image::load_from_path(std::path::Path::new(&path)).ok()
                         }) {
-                            window.set_selected_game(GameCardData {
-                                cover: path,
-                                ..window.get_selected_game()
-                            });
+                            window
+                                .global::<GameState>()
+                                .set_selected_game(GameCardData {
+                                    cover: path,
+                                    ..window.global::<GameState>().get_selected_game()
+                                });
                         }
-                        window.set_game_details(details);
-                        window.set_game_details_loading(false);
+                        window.global::<GameState>().set_details(details);
+                        window.global::<GameState>().set_details_loading(false);
                     });
                 }
                 Ok(None) | Err(_) => {
                     let _ = detail_window.upgrade_in_event_loop(|window| {
-                        window.set_game_details_loading(false);
+                        window.global::<GameState>().set_details_loading(false);
                     });
                 }
             }
@@ -140,53 +144,58 @@ pub(crate) fn install(
     let query_state = library_state.clone();
     let query_sources = source_store.clone();
     let query_window = window.as_weak();
-    window.on_platform_query(move |platform_slug| {
-        let state = query_state
-            .lock()
-            .expect("library state lock poisoned")
-            .clone();
-        let Some(state) = state else {
-            return;
-        };
-        let base_url = state.config.romm_url.clone();
-        let sources = query_sources.clone();
-        let window = query_window.clone();
-        tokio::spawn(async move {
-            let loaded =
-                load_platform_games(&state.library, base_url.as_deref(), platform_slug.as_str())
-                    .await;
-            let (metadata, cover_sources) = match loaded {
-                Ok(loaded) => loaded,
-                Err(error) => {
-                    error!(%error, platform = %platform_slug, "platform games loading failed");
-                    let _ = window.upgrade_in_event_loop(|window| {
-                        window.set_library_loading(false);
-                    });
-                    return;
-                }
+    window
+        .global::<LibraryState>()
+        .on_platform_query(move |platform_slug| {
+            let state = query_state
+                .lock()
+                .expect("library state lock poisoned")
+                .clone();
+            let Some(state) = state else {
+                return;
             };
-            *sources.lock().expect("cover source state poisoned") = cover_sources;
-            let _ = window.upgrade_in_event_loop(move |window| {
-                let model = window.get_platform_games();
-                let model = model
-                    .as_any()
-                    .downcast_ref::<VecModel<GameCardData>>()
-                    .expect("platform game model should be a VecModel");
-                let games = game_cards(metadata);
-                model.set_vec(games);
-                window.set_library_loading(false);
-                if window.get_active_tab() == 1 {
-                    // Replacing the platform model invalidates lazy-cover
-                    // residency; immediately request the visible cards.
-                    window.invoke_cover_context_changed(1);
-                }
+            let base_url = state.config.romm_url.clone();
+            let sources = query_sources.clone();
+            let window = query_window.clone();
+            tokio::spawn(async move {
+                let loaded = load_platform_games(
+                    &state.library,
+                    base_url.as_deref(),
+                    platform_slug.as_str(),
+                )
+                .await;
+                let (metadata, cover_sources) = match loaded {
+                    Ok(loaded) => loaded,
+                    Err(error) => {
+                        error!(%error, platform = %platform_slug, "platform games loading failed");
+                        let _ = window.upgrade_in_event_loop(|window| {
+                            window.global::<LibraryState>().set_loading(false);
+                        });
+                        return;
+                    }
+                };
+                *sources.lock().expect("cover source state poisoned") = cover_sources;
+                let _ = window.upgrade_in_event_loop(move |window| {
+                    let model = window.global::<LibraryState>().get_games();
+                    let model = model
+                        .as_any()
+                        .downcast_ref::<VecModel<GameCardData>>()
+                        .expect("platform game model should be a VecModel");
+                    let games = game_cards(metadata);
+                    model.set_vec(games);
+                    window.global::<LibraryState>().set_loading(false);
+                    if window.global::<ShellState>().get_active_tab() == 1 {
+                        // Replacing the platform model invalidates lazy-cover
+                        // residency; immediately request the visible cards.
+                        window.global::<HomeState>().invoke_cover_context_changed(1);
+                    }
+                });
             });
         });
-    });
 
     let library_refresh_state = library_state.clone();
     let library_refresh_window = window.as_weak();
-    window.on_library_entered(move || {
+    window.global::<LibraryState>().on_entered(move || {
         let Some(state) = library_refresh_state
             .lock()
             .ok()
@@ -196,6 +205,12 @@ pub(crate) fn install(
         };
         let window = library_refresh_window.clone();
         tokio::spawn(async move {
+            let discovered_apps = tokio::task::spawn_blocking(marina_apps::discover)
+                .await
+                .unwrap_or_default();
+            if let Err(error) = marina_apps::sync(&state.library, discovered_apps).await {
+                error!(%error, "library Apps rescan failed");
+            }
             let metadata = match load_games(&state.library, state.config.romm_url.as_deref()).await
             {
                 Ok((metadata, _)) => metadata,
@@ -271,7 +286,9 @@ pub(crate) fn install(
                             .unwrap_or_default(),
                     })
                     .collect::<Vec<_>>();
-                window.set_platforms(ModelRc::from(std::rc::Rc::new(VecModel::from(cards))));
+                window
+                    .global::<LibraryState>()
+                    .set_platforms(ModelRc::from(std::rc::Rc::new(VecModel::from(cards))));
             });
         });
     });

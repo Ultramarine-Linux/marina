@@ -2,7 +2,7 @@
 
 use slint::{ComponentHandle, Image, SharedString};
 
-use crate::{MainWindow, covers};
+use crate::{MainWindow, ShellState, covers};
 
 pub(crate) fn profile_display_name(username: &str, passwd: &str) -> Option<String> {
     passwd.lines().find_map(|line| {
@@ -37,10 +37,18 @@ pub(crate) fn profile_initials(name: &str) -> String {
 }
 
 pub(crate) fn initialize(window: &MainWindow, username: String) {
-    window.set_profile_name(SharedString::from(username.clone()));
-    window.set_profile_username(SharedString::from(username.clone()));
-    window.set_profile_initials(SharedString::from(profile_initials(&username)));
-    window.set_profile_image(Image::default());
+    window
+        .global::<ShellState>()
+        .set_profile_name(SharedString::from(username.clone()));
+    window
+        .global::<ShellState>()
+        .set_profile_username(SharedString::from(username.clone()));
+    window
+        .global::<ShellState>()
+        .set_profile_initials(SharedString::from(profile_initials(&username)));
+    window
+        .global::<ShellState>()
+        .set_profile_image(Image::default());
 
     let profile_window = window.as_weak();
     slint::Timer::single_shot(std::time::Duration::ZERO, move || {
@@ -56,11 +64,15 @@ pub(crate) fn initialize(window: &MainWindow, username: String) {
             let icon_path = format!("/var/lib/AccountsService/icons/{profile_username}");
             let icon = tokio::fs::read(icon_path).await.ok();
             let _ = profile_window.upgrade_in_event_loop(move |window| {
-                window.set_profile_name(SharedString::from(display_name));
-                window.set_profile_initials(SharedString::from(initials));
+                window
+                    .global::<ShellState>()
+                    .set_profile_name(SharedString::from(display_name));
+                window
+                    .global::<ShellState>()
+                    .set_profile_initials(SharedString::from(initials));
                 if let Some(bytes) = icon {
                     if let Some((image, _)) = covers::decode(&bytes) {
-                        window.set_profile_image(image);
+                        window.global::<ShellState>().set_profile_image(image);
                     }
                 }
             });

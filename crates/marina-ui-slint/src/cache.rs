@@ -15,7 +15,7 @@ pub fn cache_root() -> Option<PathBuf> {
     if let Some(dir) = env::var_os("XDG_CACHE_HOME") {
         return Some(PathBuf::from(dir).join("marina"));
     }
-    env::var_os("HOME").map(|home| PathBuf::from(home).join(".cache").join("marina"))
+    dirs::cache_dir().map(|dir| dir.join("marina"))
 }
 
 /// Deterministic cache path for a cover, namespaced by provider.

@@ -1,0 +1,83 @@
+import { ShellPage } from "../pages/route.slint";
+import { ShellState } from "app-shell.slint";
+import { HomeState, Shelf, ShelfSkeleton } from "shelf.slint";
+import { LibraryState, LibraryPage } from "../pages/library.slint";
+import { StoreState, StorePage } from "../pages/store.slint";
+import { GameState, GameDetailsView } from "game-details-view.slint";
+
+// Route-only outlet. Each page reads and owns its domain state through its
+// dedicated global; the router only decides which page component is mounted.
+export component PageRouter inherits Rectangle {
+    private property <length> shelf-cover-height:
+        max(80px, min(200px, root.height * 50% - 64px));
+    private property <length> shelf-height: root.shelf-cover-height + 64px;
+    callback focus-header;
+
+    if ShellState.page == ShellPage.game-details: GameDetailsView {
+        game: GameState.selected-game;
+        details: GameState.details;
+        loading: GameState.details-loading;
+        focus-request: ShellState.content-focus-request;
+        back => { ShellState.back-requested(); }
+        action-requested => { GameState.play-requested(GameState.selected-game.id); }
+    }
+
+    if ShellState.page == ShellPage.home && HomeState.loading: ShelfSkeleton {
+        content-height: root.shelf-height;
+        cover-height: root.shelf-cover-height;
+    }
+
+    if ShellState.page == ShellPage.home && !HomeState.loading: Shelf {
+        title: "Recently added";
+        games: HomeState.games;
+        content-height: root.shelf-height;
+        cover-height: root.shelf-cover-height;
+        selected-index <=> HomeState.selected-game-index;
+        focus-request: ShellState.content-focus-request;
+        viewport-changed(x, width) => { HomeState.viewport-changed(x, width); }
+        game-opened(id) => { HomeState.game-opened(id); }
+        focus-header => { root.focus-header(); }
+    }
+
+    if ShellState.page == ShellPage.library: LibraryPage {
+        platforms: LibraryState.platforms;
+        games: LibraryState.games;
+        details: GameState.details;
+        details-loading <=> GameState.details-loading;
+        selected-platform-index <=> LibraryState.selected-platform-index;
+        selected-game-index <=> LibraryState.selected-game-index;
+        focus-request: ShellState.content-focus-request;
+        game-list-scroll-y <=> LibraryState.game-list-scroll-y;
+        initial-loading: HomeState.loading;
+        loading <=> LibraryState.loading;
+        platform-query(slug) => { LibraryState.platform-query(slug); }
+        game-selected(id, index) => { LibraryState.game-selected(id, index); }
+        focus-header => { root.focus-header(); }
+    }
+
+    if ShellState.page == ShellPage.store: StorePage {
+        platforms: StoreState.platforms;
+        games: StoreState.games;
+        details: StoreState.details;
+        preview-image: StoreState.preview-image;
+        artifacts: StoreState.artifacts;
+        selected-artifacts <=> StoreState.selected-artifacts;
+        page <=> StoreState.page;
+        selected-platform-index <=> StoreState.selected-platform-index;
+        focus-request: ShellState.content-focus-request;
+        selected-game-index <=> StoreState.selected-game-index;
+        selected-artifact-index <=> StoreState.selected-artifact-index;
+        game-list-scroll-y <=> StoreState.game-list-scroll-y;
+        search-query <=> ShellState.search-query;
+        loading <=> StoreState.loading;
+        details-loading <=> StoreState.details-loading;
+        install-status <=> StoreState.install-status;
+        install-progress <=> StoreState.install-progress;
+        platform-query(slug) => { StoreState.platform-query(slug); }
+        game-selected(id, index) => { StoreState.game-selected(id, index); }
+        artifact-selected(index) => { StoreState.artifact-selected(index); }
+        install-requested(id, selected) => { StoreState.install-requested(id, selected); }
+        search-requested(query) => { StoreState.search(query); }
+        focus-header => { root.focus-header(); }
+    }
+}

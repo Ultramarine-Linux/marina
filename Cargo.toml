@@ -9,7 +9,7 @@ strip = true            # Strip debug symbols
 
 resolver = "3"
 members = [
-    "crates/marina-core", "crates/marina-library",
+    "crates/marina-apps", "crates/marina-core", "crates/marina-library",
     "crates/marina-romm",
     "crates/marina-install",
     "crates/marina-scanner",
@@ -32,6 +32,7 @@ base64 = "0.23"
 bytesize = "2.7.0"
 chrono = { version = "0.4", default-features = false, features = ["serde", "clock"] }
 dotenvy = "0.15"
+dirs = "6"
 futures-util = "0.3"
 gilrs = "0.11.2"
 reqwest = { version = "0.13", default-features = false, features = ["json", "query", "rustls"] }
@@ -49,6 +50,7 @@ uuid = { version = "1", features = ["v4", "v5"] }
 ulid = "1"
 
 # marina
+marina-apps = { path = "crates/marina-apps" }
 marina-core = { path = "crates/marina-core" }
 marina-romm = { path = "crates/marina-romm" }
 marina-install = { path = "crates/marina-install" }

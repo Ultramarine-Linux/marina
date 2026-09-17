@@ -42,10 +42,10 @@ impl Config {
                     "0" | "false" | "no" | "off"
                 )
             })
-            .unwrap_or(false);
+            .unwrap_or(true);
         if !scan_on_startup {
             tracing::info!(
-                "local library scan disabled at startup; set MARINA_SCAN_ON_STARTUP=true to enable"
+                "local library scan disabled at startup by MARINA_SCAN_ON_STARTUP=false"
             );
         }
         if !romm_enabled {
@@ -56,15 +56,32 @@ impl Config {
             warn!("ROMM_URL not set — relative cover paths will not resolve");
         }
 
+        let default_library_root = Some(std::path::PathBuf::from("/var/games/library"));
+        let default_storage_uri = state_dir()
+            .map(|path| {
+                format!(
+                    "sqlite://{}",
+                    path.join("marina").join("library.db").display()
+                )
+            })
+            .unwrap_or_else(|| "sqlite://marina.db".to_owned());
+
         Self {
-            storage_uri: env::var("MARINA_STORAGE_URI")
-                .unwrap_or_else(|_| "sqlite://marina.db".to_owned()),
+            storage_uri: env::var("MARINA_STORAGE_URI").unwrap_or(default_storage_uri),
 
             romm_url,
             romm_token,
             import_romm_on_startup,
             scan_on_startup,
-            library_root: env::var_os("MARINA_LIBRARY_ROOT").map(std::path::PathBuf::from),
+            library_root: env::var_os("MARINA_LIBRARY_ROOT")
+                .map(std::path::PathBuf::from)
+                .or(default_library_root),
         }
     }
+}
+
+fn state_dir() -> Option<std::path::PathBuf> {
+    env::var_os("XDG_STATE_HOME")
+        .map(std::path::PathBuf::from)
+        .or_else(|| dirs::home_dir().map(|home| home.join(".local").join("state")))
 }

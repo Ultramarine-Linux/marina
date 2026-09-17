@@ -14,16 +14,37 @@ const APP_SLICE: &str = "app.slice";
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LaunchRequest {
     pub item_id: String,
+    pub application_id: String,
     pub title: String,
     pub executable: PathBuf,
+    pub arguments: Vec<String>,
+    pub working_directory: Option<PathBuf>,
 }
 
 impl LaunchRequest {
     pub fn from_item(item: &LibraryItem) -> Option<Self> {
+        let command = item
+            .provider_ids
+            .get("xdg.exec")
+            .and_then(|value| serde_json::from_str::<Vec<String>>(value).ok())
+            .filter(|command| !command.is_empty());
+        let (executable, arguments) = if let Some(mut command) = command {
+            let executable = PathBuf::from(command.remove(0));
+            (executable, command)
+        } else {
+            (PathBuf::from(item.local_path.as_deref()?), Vec::new())
+        };
         Some(Self {
             item_id: item.id.to_string(),
+            application_id: item
+                .provider_ids
+                .get("xdg.desktop")
+                .cloned()
+                .unwrap_or_else(|| item.id.to_string()),
             title: item.title.clone(),
-            executable: PathBuf::from(item.local_path.as_deref()?),
+            executable,
+            arguments,
+            working_directory: item.provider_ids.get("xdg.path").map(PathBuf::from),
         })
     }
 }
@@ -59,10 +80,18 @@ impl GameLauncher {
     }
 
     pub async fn launch(&self, request: LaunchRequest) -> Result<LaunchedGame, LaunchError> {
-        let unit_name = unit_name(&request.item_id);
-        let output = Command::new(SYSTEMD_RUN)
-            .args(systemd_run_args(&unit_name))
+        let unit_name = unit_name(&request.application_id);
+        let mut command = Command::new(SYSTEMD_RUN);
+        command.args(systemd_run_args(&unit_name));
+        if let Some(working_directory) = &request.working_directory {
+            command.args([
+                "--working-directory",
+                working_directory.to_string_lossy().as_ref(),
+            ]);
+        }
+        let output = command
             .arg(&request.executable)
+            .args(&request.arguments)
             .stdin(Stdio::null())
             .output()
             .await
@@ -133,6 +162,9 @@ mod tests {
         item.local_path = Some("/games/example.sh".into());
         let request = LaunchRequest::from_item(&item).expect("local path");
         assert_eq!(request.executable, PathBuf::from("/games/example.sh"));
+        assert_eq!(request.application_id, item.id.to_string());
+        assert!(request.arguments.is_empty());
+        assert!(request.working_directory.is_none());
     }
 
     #[test]

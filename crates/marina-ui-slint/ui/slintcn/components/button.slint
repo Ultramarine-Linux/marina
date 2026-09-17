@@ -42,6 +42,7 @@ export component Button inherits Rectangle {
     // by default so ordinary buttons retain normal arrow-key behavior.
     callback navigation-requested(string);
     in property <bool> directional-navigation: false;
+    in property <int> focus-request: 0;
 
     // True while focus arrived from a pointer press — suppresses the ring so it
     // is keyboard-only (focus-visible emulation). Set on pointer down, cleared
@@ -193,6 +194,7 @@ export component Button inherits Rectangle {
     }
 
     forward-focus: focus-scope;
+    changed focus-request => { focus-scope.focus(); }
     focus-scope := FocusScope {
         // Zero-size: a default FocusScope fills its parent and grabs the first
         // pointer press to focus itself, which swallows that click (TouchArea

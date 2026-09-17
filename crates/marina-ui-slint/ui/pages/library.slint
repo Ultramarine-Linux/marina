@@ -12,6 +12,18 @@ import { PreviewDetailsData } from "../components/preview-details.slint";
 import { LucideIcon } from "../slintcn/components/lucide-icon.slint";
 import { IconSet } from "@lucide/lucide.slint";
 
+export global LibraryState {
+    in-out property <[PlatformCardData]> platforms;
+    in-out property <[GameCardData]> games;
+    in-out property <bool> loading: false;
+    in-out property <int> selected-platform-index: 0;
+    in-out property <int> selected-game-index: 0;
+    in-out property <length> game-list-scroll-y: 0px;
+    callback entered;
+    callback platform-query(string);
+    callback game-selected(string, int);
+}
+
 export component LibraryPage inherits Rectangle {
     in property <[PlatformCardData]> platforms;
     in property <[GameCardData]> games;
@@ -24,6 +36,7 @@ export component LibraryPage inherits Rectangle {
     in-out property <int> selected-game-index: 0;
     in property <int> focus-request: 0;
     private property <length> platform-list-scroll-y: 0px;
+    private property <int> game-focus-request: 0;
     in-out property <length> game-list-scroll-y: 0px;
 
     in property <bool> initial-loading: false;
@@ -57,6 +70,7 @@ export component LibraryPage inherits Rectangle {
         root.selected-game-index = 0;
         root.game-list-scroll-y = 0px;
         root.page = 1;
+        root.game-focus-request += 1;
         root.loading = true;
         root.details-loading = true;
         root.platform-query(root.selected-platform);
@@ -81,6 +95,10 @@ export component LibraryPage inherits Rectangle {
         key-pressed(event) => {
             if (event.text == "\u{1b}" && root.page == 1) {
                 root.page = 0;
+                return accept;
+            }
+            if (event.text == Key.LeftArrow && root.page == 1) {
+                root.game-focus-request += 1;
                 return accept;
             }
             if (event.text == Key.UpArrow) {
@@ -304,6 +322,7 @@ export component LibraryPage inherits Rectangle {
             selected-index <=> root.selected-game-index;
             scroll-y <=> root.game-list-scroll-y;
             keyboard-active: page-focus.has-focus;
+            focus-request: root.game-focus-request;
             selected(id, index) => { root.game-selected(id, index); }
             focus-header => { root.focus-header(); }
             vertical-stretch: 1;

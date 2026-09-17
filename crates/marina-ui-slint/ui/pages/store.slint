@@ -26,6 +26,30 @@ export struct StoreArtifact {
     file-index: int,
 }
 
+export global StoreState {
+    in-out property <[PlatformCardData]> platforms;
+    in-out property <[GameCardData]> games;
+    in-out property <PreviewDetailsData> details;
+    in-out property <image> preview-image;
+    in-out property <[StoreArtifact]> artifacts;
+    in-out property <[bool]> selected-artifacts;
+    in-out property <int> page: 0;
+    in-out property <int> selected-platform-index: 0;
+    in-out property <int> selected-game-index: 0;
+    in-out property <int> selected-artifact-index: 0;
+    in-out property <length> game-list-scroll-y: 0px;
+    in-out property <bool> loading: false;
+    in-out property <bool> details-loading: false;
+    in-out property <string> install-status;
+    in-out property <float> install-progress: 0;
+    callback entered;
+    callback search(string);
+    callback platform-query(string);
+    callback game-selected(string, int);
+    callback artifact-selected(int);
+    callback install-requested(string, [bool]);
+}
+
 export component StorePage inherits Rectangle {
     in property <[PlatformCardData]> platforms;
     in property <[GameCardData]> games;
