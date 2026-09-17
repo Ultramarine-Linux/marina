@@ -8,7 +8,7 @@ use tokio::process::Command;
 use ulid::Ulid;
 
 const SYSTEMD_RUN: &str = "systemd-run";
-const APP_SLICE: &str = "app.slice";
+const APP_SLICE: &str = "graphical-apps.slice";
 
 /// A game launch request resolved from a library item.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -65,7 +65,7 @@ pub enum LaunchError {
     Systemd { status: String, stderr: String },
 }
 
-/// Launches games as transient per-user systemd services in `app.slice`.
+/// Launches games as transient per-user systemd services in `graphical-apps.slice`.
 #[derive(Clone, Debug, Default)]
 pub struct GameLauncher;
 
