@@ -2,7 +2,7 @@
 
 use slint::{ComponentHandle, Image, SharedString};
 
-use crate::{MainWindow, ShellState, covers};
+use crate::{MainWindow, ShellState, image};
 
 pub(crate) fn profile_display_name(username: &str, passwd: &str) -> Option<String> {
     passwd.lines().find_map(|line| {
@@ -62,7 +62,7 @@ pub(crate) fn initialize(window: &MainWindow, username: String) {
                 .unwrap_or_else(|| profile_username.clone());
             let initials = profile_initials(&display_name);
             let icon_path = format!("/var/lib/AccountsService/icons/{profile_username}");
-            let icon = tokio::fs::read(icon_path).await.ok();
+            let icon = image::load_path(icon_path, "profile-icon").await;
             let _ = profile_window.upgrade_in_event_loop(move |window| {
                 window
                     .global::<ShellState>()
@@ -70,10 +70,9 @@ pub(crate) fn initialize(window: &MainWindow, username: String) {
                 window
                     .global::<ShellState>()
                     .set_profile_initials(SharedString::from(initials));
-                if let Some(bytes) = icon {
-                    if let Some((image, _)) = covers::decode(&bytes) {
-                        window.global::<ShellState>().set_profile_image(image);
-                    }
+                if let Some(icon) = icon {
+                    let (image, _) = image::into_slint_image(icon);
+                    window.global::<ShellState>().set_profile_image(image);
                 }
             });
         });

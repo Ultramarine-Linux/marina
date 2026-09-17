@@ -2,10 +2,9 @@
 
 use std::{
     collections::HashSet,
-    path::PathBuf,
     rc::Rc,
     sync::{
-        Arc, Mutex, OnceLock,
+        Arc, Mutex,
         atomic::{AtomicU64, Ordering},
     },
 };
@@ -15,29 +14,19 @@ use marina_library::{
     query::{SearchQuery, SearchSort},
     read::LibraryRead,
 };
-use slint::{ComponentHandle, Image, Model, ModelRc, SharedPixelBuffer};
+use slint::{ComponentHandle, Image, Model, ModelRc};
 use tracing::{debug, warn};
 
-use crate::{GameCardData, HomeState, MainWindow, cache};
+use crate::{GameCardData, HomeState, MainWindow, image as image_loader};
 
-#[derive(Clone)]
-pub struct CoverSource {
-    pub url: Option<String>,
-    pub cache_path: Option<PathBuf>,
-    pub local_path: Option<PathBuf>,
-}
+pub use crate::image::ImageSource as CoverSource;
 
 pub fn source_for(
-    cover: Option<&str>,
+    source: Option<&str>,
     local_path: Option<&str>,
     base_url: Option<&str>,
 ) -> CoverSource {
-    let cover = cover.and_then(normalize_cover_source);
-    CoverSource {
-        url: resolve_url(cover.as_deref(), base_url),
-        cache_path: cover.as_deref().and_then(cache::cover_cache_path),
-        local_path: local_path.map(PathBuf::from),
-    }
+    crate::image::source_for(source, local_path, base_url)
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -201,19 +190,9 @@ impl ViewportLoader {
             let resident = resident.clone();
             let loading = loading.clone();
             tokio::spawn(async move {
-                let decoded = match load_bytes(&source).await {
-                    Some(bytes) => {
-                        debug!(?key_page, index, %title, bytes = bytes.len(), "cover bytes loaded");
-                        tokio::task::spawn_blocking(move || decode_rgba(&bytes))
-                            .await
-                            .ok()
-                            .flatten()
-                    }
-                    None => {
-                        warn!(?key_page, index, %title, "cover source produced no bytes");
-                        None
-                    }
-                };
+                let decoded =
+                    image_loader::load(&image_loader::ImageSource::from(&source), "shelf-cover")
+                        .await;
                 loading
                     .lock()
                     .expect("cover loading state poisoned")
@@ -229,7 +208,7 @@ impl ViewportLoader {
                 debug!(?key_page, index, %title, width = decoded.width, height = decoded.height, "cover decoded");
                 let _ = window.upgrade_in_event_loop(move |window| {
                     if let Some(mut game) = page_games(&window, key_page).row_data(index) {
-                        let (image, ratio) = image_from_rgba(decoded);
+                        let (image, ratio) = image_loader::into_slint_image(decoded);
                         game.cover = image;
                         game.cover_ratio = ratio;
                         page_games(&window, key_page).set_row_data(index, game);
@@ -251,120 +230,6 @@ fn page_games(window: &MainWindow, page: Page) -> ModelRc<GameCardData> {
     match page {
         Page::Home => window.global::<HomeState>().get_games(),
     }
-}
-
-pub struct DecodedImage {
-    pub pixels: Vec<u8>,
-    pub width: u32,
-    pub height: u32,
-}
-
-pub fn decode(bytes: &[u8]) -> Option<(Image, f32)> {
-    decode_rgba(bytes).map(image_from_rgba)
-}
-
-pub async fn decode_pixels(bytes: Vec<u8>) -> Option<DecodedImage> {
-    tokio::task::spawn_blocking(move || decode_rgba(&bytes))
-        .await
-        .ok()
-        .flatten()
-}
-
-fn decode_rgba(bytes: &[u8]) -> Option<DecodedImage> {
-    let svg_prefix = String::from_utf8_lossy(&bytes[..bytes.len().min(1024)]);
-    if svg_prefix.contains("<svg") {
-        let tree = resvg::usvg::Tree::from_data(bytes, &resvg::usvg::Options::default()).ok()?;
-        let size = tree.size().to_int_size();
-        let mut pixmap = resvg::tiny_skia::Pixmap::new(size.width(), size.height())?;
-        resvg::render(
-            &tree,
-            resvg::tiny_skia::Transform::default(),
-            &mut pixmap.as_mut(),
-        );
-        return Some(DecodedImage {
-            pixels: pixmap.data().to_vec(),
-            width: pixmap.width(),
-            height: pixmap.height(),
-        });
-    }
-    let img = image::load_from_memory(bytes).ok()?.to_rgba8();
-    let (width, height) = img.dimensions();
-    (width > 0 && height > 0).then(|| DecodedImage {
-        pixels: img.into_raw(),
-        width,
-        height,
-    })
-}
-
-pub fn image_from_rgba(decoded: DecodedImage) -> (Image, f32) {
-    let buffer = SharedPixelBuffer::<slint::Rgba8Pixel>::clone_from_slice(
-        &decoded.pixels,
-        decoded.width,
-        decoded.height,
-    );
-    (
-        Image::from_rgba8(buffer),
-        decoded.width as f32 / decoded.height as f32,
-    )
-}
-
-#[tracing::instrument(skip(source), fields(loader = "covers"))]
-pub(crate) async fn load_bytes(source: &CoverSource) -> Option<Vec<u8>> {
-    if let Some(path) = &source.local_path {
-        if let Ok(bytes) = tokio::fs::read(path).await {
-            debug!(path = %path.display(), bytes = bytes.len(), "local cover hit");
-            return Some(bytes);
-        }
-        debug!(path = %path.display(), "local cover miss");
-    }
-    if let Some(path) = &source.cache_path {
-        if let Ok(bytes) = tokio::fs::read(path).await {
-            debug!(path = %path.display(), bytes = bytes.len(), "cover cache hit");
-            return Some(bytes);
-        }
-        debug!(path = %path.display(), "cover cache miss");
-    }
-    let url = source.url.as_deref()?;
-    static HTTP: OnceLock<reqwest::Client> = OnceLock::new();
-    let bytes = HTTP
-        .get_or_init(reqwest::Client::new)
-        .get(url)
-        .send()
-        .await
-        .ok()?
-        .error_for_status()
-        .ok()?
-        .bytes()
-        .await
-        .ok()?;
-    if let Some(path) = &source.cache_path {
-        if let Some(parent) = path.parent() {
-            if tokio::fs::create_dir_all(parent).await.is_ok() {
-                let _ = tokio::fs::write(path, &bytes).await;
-            }
-        }
-    }
-    Some(bytes.to_vec())
-}
-
-fn resolve_url(cover: Option<&str>, base_url: Option<&str>) -> Option<String> {
-    let cover = cover?;
-    if cover.starts_with("http://") || cover.starts_with("https://") {
-        return Some(cover.to_owned());
-    }
-    let cover = cover.trim_matches('/');
-    let base_url = base_url?.trim_end_matches('/');
-    (!cover.is_empty()).then(|| format!("{base_url}/{cover}"))
-}
-
-fn normalize_cover_source(cover: &str) -> Option<String> {
-    let cover = cover.trim();
-    let cover = cover
-        .strip_prefix("@url:`")
-        .and_then(|value| value.strip_suffix('`'))
-        .unwrap_or(cover)
-        .trim();
-    (!cover.is_empty()).then(|| cover.to_owned())
 }
 
 pub async fn load_games_metadata(

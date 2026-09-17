@@ -6,6 +6,7 @@ license.workspace = true
 
 [dependencies]
 freedesktop-desktop-entry = { version = "0.8.3", default-features = false }
+freedesktop-icons = "0.4"
 marina-core.workspace = true
 marina-library.workspace = true
 serde_json.workspace = true

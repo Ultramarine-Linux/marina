@@ -11,7 +11,7 @@ use crate::{
     GameCardData, LibraryState, MainWindow, PlatformCardData, PlatformCardMetadata, StoreState,
     ToastQueue, ToastVariant, game_cards, platform_asset_path,
 };
-use crate::{app, romm_auth};
+use crate::{app, image, romm_auth};
 
 pub(crate) fn install(
     window: &MainWindow,
@@ -164,15 +164,19 @@ pub(crate) fn install(
                 Ok(platforms) => {
                     let icon_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                         .join("ui/assets/platforms/systematic");
-                    let cards = platforms
-                        .into_iter()
-                        .map(|platform| PlatformCardMetadata {
-                            icon_path: platform_asset_path(&icon_root, &platform.fs_slug),
+                    let mut cards = Vec::new();
+                    for platform in platforms {
+                        let icon = match platform_asset_path(&icon_root, &platform.fs_slug) {
+                            Some(path) => image::load_path(path, "platform-icon").await,
+                            None => None,
+                        };
+                        cards.push(PlatformCardMetadata {
+                            icon,
                             slug: platform.fs_slug,
                             name: platform.display_name,
                             game_count: platform.rom_count.to_string(),
-                        })
-                        .collect::<Vec<_>>();
+                        });
+                    }
                     let count = cards.len();
                     let _ = window.upgrade_in_event_loop(move |window| {
                         let cards = cards
@@ -182,10 +186,8 @@ pub(crate) fn install(
                                 name: SharedString::from(platform.name),
                                 game_count: SharedString::from(platform.game_count),
                                 icon: platform
-                                    .icon_path
-                                    .and_then(|path| {
-                                        Image::load_from_path(std::path::Path::new(&path)).ok()
-                                    })
+                                    .icon
+                                    .map(|decoded| image::into_slint_image(decoded).0)
                                     .unwrap_or_default(),
                             })
                             .collect::<Vec<_>>();

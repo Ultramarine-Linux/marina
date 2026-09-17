@@ -86,38 +86,15 @@ pub fn discover() -> Vec<LibraryItem> {
 
 fn resolve_icon(icon: &str) -> Option<String> {
     let icon = expand_home(icon);
-    let icon_path = std::path::Path::new(&icon);
-    if icon_path.is_file() {
+    let path = std::path::Path::new(&icon);
+    if path.is_file() {
         return Some(icon);
     }
-
-    let data_roots = default_paths().filter_map(|path| path.parent().map(ToOwned::to_owned));
-    let extensions = ["svg", "png", "xpm", "jpg", "jpeg"];
-    let sizes = [
-        "scalable", "512x512", "256x256", "128x128", "96x96", "64x64", "48x48", "32x32", "24x24",
-        "16x16",
-    ];
-    for root in data_roots {
-        for size in sizes {
-            for extension in extensions {
-                let candidate = root
-                    .join("icons/hicolor")
-                    .join(size)
-                    .join("apps")
-                    .join(format!("{icon}.{extension}"));
-                if candidate.is_file() {
-                    return Some(candidate.to_string_lossy().into_owned());
-                }
-            }
-        }
-        for extension in extensions {
-            let candidate = root.join("pixmaps").join(format!("{icon}.{extension}"));
-            if candidate.is_file() {
-                return Some(candidate.to_string_lossy().into_owned());
-            }
-        }
-    }
-    None
+    freedesktop_icons::lookup(&icon)
+        .with_size(256)
+        .with_cache()
+        .find()
+        .map(|path| path.to_string_lossy().into_owned())
 }
 
 fn expand_home(path: &str) -> String {

@@ -27,6 +27,7 @@ mod app;
 mod cache;
 mod config;
 mod covers;
+mod image;
 mod romm_auth;
 mod storage;
 mod ui;
@@ -370,7 +371,10 @@ async fn main() -> Result<(), slint::PlatformError> {
                     .iter()
                     .filter(|game| game.platform.eq_ignore_ascii_case(&platform.name))
                     .count();
-                let icon_path = platform_asset_path(&icon_root, &platform.slug);
+                let icon = match platform_asset_path(&icon_root, &platform.slug) {
+                    Some(path) => image::load_path(path, "platform-icon").await,
+                    None => None,
+                };
                 platform_cards.push(PlatformCardMetadata {
                     slug: platform.slug,
                     name: platform.name,
@@ -379,7 +383,7 @@ async fn main() -> Result<(), slint::PlatformError> {
                         game_count,
                         if game_count == 1 { "game" } else { "games" }
                     ),
-                    icon_path,
+                    icon,
                 });
             }
 
@@ -390,10 +394,8 @@ async fn main() -> Result<(), slint::PlatformError> {
                         slug: SharedString::from(platform.slug),
                         name: SharedString::from(platform.name),
                         icon: platform
-                            .icon_path
-                            .and_then(|path| {
-                                Image::load_from_path(std::path::Path::new(&path)).ok()
-                            })
+                            .icon
+                            .map(|decoded| image::into_slint_image(decoded).0)
                             .unwrap_or_default(),
                         game_count: SharedString::from(platform.game_count),
                     })
@@ -488,12 +490,22 @@ fn populate_store_details(window: &slint::Weak<MainWindow>, rom: marina_romm::Ro
     let preview_window = window.clone();
     let preview_rom_id = rom_id.clone();
     tokio::spawn(async move {
-        let Some(bytes) = covers::load_bytes(&screenshot_source).await else {
+        let Some(bytes) = image::load(
+            &image::source_for(
+                None,
+                screenshot_source
+                    .local_path
+                    .as_deref()
+                    .and_then(|path| path.to_str()),
+                None,
+            ),
+            "store-screenshot",
+        )
+        .await
+        else {
             return;
         };
-        let Some(decoded) = covers::decode_pixels(bytes).await else {
-            return;
-        };
+        let decoded = bytes;
         let _ = preview_window.upgrade_in_event_loop(move |window| {
             let games = window.global::<StoreState>().get_games();
             let selected_index = window
@@ -506,19 +518,29 @@ fn populate_store_details(window: &slint::Weak<MainWindow>, rom: marina_romm::Ro
             {
                 return;
             }
-            let (image, _) = covers::image_from_rgba(decoded);
+            let (image, _) = image::into_slint_image(decoded);
             window.global::<StoreState>().set_preview_image(image);
         });
     });
 
     let cover_window = window.clone();
     tokio::spawn(async move {
-        let Some(bytes) = covers::load_bytes(&cover_source).await else {
+        let Some(bytes) = image::load(
+            &image::source_for(
+                None,
+                cover_source
+                    .local_path
+                    .as_deref()
+                    .and_then(|path| path.to_str()),
+                None,
+            ),
+            "store-cover",
+        )
+        .await
+        else {
             return;
         };
-        let Some(decoded) = covers::decode_pixels(bytes).await else {
-            return;
-        };
+        let decoded = bytes;
         let _ = cover_window.upgrade_in_event_loop(move |window| {
             let games = window.global::<StoreState>().get_games();
             let Some(index) = (0..games.row_count()).find(|&index| {
@@ -529,7 +551,7 @@ fn populate_store_details(window: &slint::Weak<MainWindow>, rom: marina_romm::Ro
                 return;
             };
             if let Some(mut game) = games.row_data(index) {
-                let (image, ratio) = covers::image_from_rgba(decoded);
+                let (image, ratio) = image::into_slint_image(decoded);
                 game.cover = image;
                 game.cover_ratio = ratio;
                 games.set_row_data(index, game);
@@ -615,7 +637,7 @@ struct PlatformCardMetadata {
     slug: String,
     name: String,
     game_count: String,
-    icon_path: Option<String>,
+    icon: Option<image::DecodedImage>,
 }
 
 #[derive(Serialize)]

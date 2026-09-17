@@ -12,10 +12,11 @@ use marina_library::{
     read::{LibraryRead, PlatformRead},
 };
 use marina_store_sqlite::SqliteLibrary;
-use slint::{ComponentHandle, Image, Model, ModelRc, SharedString, VecModel};
+use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 use tracing::{debug, error, warn};
 
 use crate::covers::{self, CoverSource};
+use crate::image;
 use crate::{
     GameCardData, GameState, HomeState, LibraryState, MainWindow, PlatformCardData,
     PlatformCardMetadata, ShellPage, ShellState, app, game_cards, platform_asset_path,
@@ -65,8 +66,8 @@ pub(crate) fn install(
                         debug!(game_id = %id, ?cover_path, assets = item.assets.len(), "library preview item loaded");
                         let decoded = if let Some(path) = cover_path {
                             let source = covers::source_for(None, Some(&path), None);
-                            match covers::load_bytes(&source).await {
-                                Some(bytes) => covers::decode_pixels(bytes).await,
+                            match image::load(&image::ImageSource::from(&source), "library-preview").await {
+                                Some(decoded) => Some(decoded),
                                 None => {
                                     warn!(game_id = %id, %path, "library preview cover produced no bytes");
                                     None
@@ -89,7 +90,7 @@ pub(crate) fn install(
                             if let Some(decoded) = decoded
                                 && let Some(mut game) = games.row_data(selected_index)
                             {
-                                let (image, ratio) = covers::image_from_rgba(decoded);
+                                let (image, ratio) = image::into_slint_image(decoded);
                                 game.cover = image;
                                 game.cover_ratio = ratio;
                                 games.set_row_data(selected_index, game);
@@ -163,8 +164,10 @@ pub(crate) fn install(
                         .map(|(_, path)| path);
                     let detail_image = if let Some(path) = detail_cover {
                         let source = covers::source_for(None, Some(&path), None);
-                        match covers::load_bytes(&source).await {
-                            Some(bytes) => covers::decode_pixels(bytes).await,
+                        match image::load(&image::ImageSource::from(&source), "library-detail")
+                            .await
+                        {
+                            Some(decoded) => Some(decoded),
                             None => None,
                         }
                     } else {
@@ -173,7 +176,7 @@ pub(crate) fn install(
                     let details = preview_details(item);
                     let _ = detail_window.upgrade_in_event_loop(move |window| {
                         if let Some(decoded) = detail_image {
-                            let (image, _) = covers::image_from_rgba(decoded);
+                            let (image, _) = image::into_slint_image(decoded);
                             window
                                 .global::<GameState>()
                                 .set_selected_game(GameCardData {
@@ -312,22 +315,24 @@ pub(crate) fn install(
 
             let icon_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                 .join("ui/assets/platforms/systematic");
-            let cards = platform_names
-                .into_iter()
-                .map(|(slug, name)| {
-                    let game_count = platform_counts.get(&slug).copied().unwrap_or_default();
-                    PlatformCardMetadata {
-                        icon_path: platform_asset_path(&icon_root, &slug),
-                        slug,
-                        name,
-                        game_count: format!(
-                            "{} {}",
-                            game_count,
-                            if game_count == 1 { "game" } else { "games" }
-                        ),
-                    }
-                })
-                .collect::<Vec<_>>();
+            let mut cards = Vec::new();
+            for (slug, name) in platform_names {
+                let game_count = platform_counts.get(&slug).copied().unwrap_or_default();
+                let icon = match platform_asset_path(&icon_root, &slug) {
+                    Some(path) => image::load_path(path, "platform-icon").await,
+                    None => None,
+                };
+                cards.push(PlatformCardMetadata {
+                    icon,
+                    slug,
+                    name,
+                    game_count: format!(
+                        "{} {}",
+                        game_count,
+                        if game_count == 1 { "game" } else { "games" }
+                    ),
+                });
+            }
             let _ = window.upgrade_in_event_loop(move |window| {
                 let cards = cards
                     .into_iter()
@@ -336,10 +341,8 @@ pub(crate) fn install(
                         name: SharedString::from(platform.name),
                         game_count: SharedString::from(platform.game_count),
                         icon: platform
-                            .icon_path
-                            .and_then(|path| {
-                                Image::load_from_path(std::path::Path::new(&path)).ok()
-                            })
+                            .icon
+                            .map(|decoded| image::into_slint_image(decoded).0)
                             .unwrap_or_default(),
                     })
                     .collect::<Vec<_>>();
