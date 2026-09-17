@@ -14,6 +14,7 @@ Environment=RUST_LOG=debug
 ExecStart=/opt/marina/marina-ui-slint
 Restart=on-failure
 RestartSec=2s
+Slice=graphical-shell.slice
 
 # The shell is a user application. Keep it in the session's scope and
 # inherit DISPLAY/WAYLAND_DISPLAY/DBUS_SESSION_BUS_ADDRESS from systemd --user.
