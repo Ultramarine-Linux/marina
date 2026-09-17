@@ -150,6 +150,7 @@ async fn main() -> Result<(), slint::PlatformError> {
     // asynchronously once the event loop is running.
     let username = std::env::var("USER").unwrap_or_else(|_| "user".into());
     let window = MainWindow::new()?;
+    slint::set_xdg_app_id("org.ultramarinelinux.MarinaShell")?;
     info!("main window constructed; completing lightweight UI setup");
     configure_toasts(&window);
 
