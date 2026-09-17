@@ -22,6 +22,7 @@ export component GameDetailsView inherits Rectangle {
     in property <bool> loading: false;
     in property <string> action-label: "Play";
     in property <int> focus-request: 0;
+    private property <int> scroll-focus-request: 0;
     callback back;
     callback action-requested;
 
@@ -63,6 +64,7 @@ export component GameDetailsView inherits Rectangle {
 
         ScrollArea {
             width: parent.width;
+            focus-request: root.scroll-focus-request;
             vertical-stretch: 1;
             content-height: max(parent.height, 520px);
             VerticalLayout {
@@ -92,6 +94,8 @@ export component GameDetailsView inherits Rectangle {
                             navigation-requested(direction) => {
                                 if (direction == "up" || direction == "left") {
                                     back-button.focus();
+                                } else if (direction == "down") {
+                                    root.scroll-focus-request += 1;
                                 }
                             }
                             clicked => { root.action-requested(); }

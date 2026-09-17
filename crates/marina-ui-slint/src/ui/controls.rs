@@ -83,11 +83,30 @@ pub(crate) fn dispatch_controller_action(window: &MainWindow, event: InputEvent)
             return;
         }
         InputAction::Menu => return,
+        InputAction::ScrollUp
+        | InputAction::ScrollDown
+        | InputAction::ScrollLeft
+        | InputAction::ScrollRight => {}
         InputAction::Back if window.global::<ShellState>().get_page() == ShellPage::GameDetails => {
             window.global::<ShellState>().invoke_back_requested();
             return;
         }
         _ => {}
+    }
+
+    if matches!(
+        event.action,
+        InputAction::ScrollLeft | InputAction::ScrollRight
+    ) {
+        let text = if event.action == InputAction::ScrollLeft {
+            "ScrollLeft"
+        } else {
+            "ScrollRight"
+        };
+        window
+            .window()
+            .dispatch_event(WindowEvent::KeyPressed { text: text.into() });
+        return;
     }
 
     let key = match event.action {
@@ -97,6 +116,9 @@ pub(crate) fn dispatch_controller_action(window: &MainWindow, event: InputEvent)
         InputAction::Right => Key::RightArrow,
         InputAction::Accept => Key::Return,
         InputAction::Back => Key::Escape,
+        InputAction::ScrollUp => Key::PageUp,
+        InputAction::ScrollDown => Key::PageDown,
+        InputAction::ScrollLeft | InputAction::ScrollRight => return,
         InputAction::PreviousTab | InputAction::NextTab | InputAction::Menu => return,
     };
     window

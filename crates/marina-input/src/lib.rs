@@ -19,6 +19,10 @@ use thiserror::Error;
 pub enum InputAction {
     Up,
     Down,
+    ScrollUp,
+    ScrollDown,
+    ScrollLeft,
+    ScrollRight,
     Left,
     Right,
     Accept,
@@ -384,6 +388,8 @@ fn axis_actions(axis: Axis) -> Option<(InputAction, InputAction)> {
     match axis {
         Axis::LeftStickX | Axis::DPadX => Some((InputAction::Left, InputAction::Right)),
         Axis::LeftStickY | Axis::DPadY => Some((InputAction::Down, InputAction::Up)),
+        Axis::RightStickX => Some((InputAction::ScrollLeft, InputAction::ScrollRight)),
+        Axis::RightStickY => Some((InputAction::ScrollDown, InputAction::ScrollUp)),
         _ => None,
     }
 }

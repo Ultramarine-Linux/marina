@@ -72,19 +72,24 @@ export component Shelf inherits Rectangle {
     changed focus-request => { shelf-focus.focus(); }
 
     shelf-focus := FocusScope {
+        init => { shelf-focus.focus(); }
         width: 0px;
         height: 0px;
         key-pressed(event) => {
-            if (event.text == Key.LeftArrow) {
+            if (event.text == Key.LeftArrow || event.text == "ScrollLeft") {
                 if (root.games.length > 0) {
-                    root.selected-index = max(0, root.selected-index - 1);
+                    if (event.text == Key.LeftArrow) {
+                        root.selected-index = max(0, root.selected-index - 1);
+                    }
                     flick.viewport-x = min(0px, flick.viewport-x + root.cover-height + Tokens.spacing-lg);
                 }
                 return accept;
             }
-            if (event.text == Key.RightArrow) {
+            if (event.text == Key.RightArrow || event.text == "ScrollRight") {
                 if (root.games.length > 0) {
-                    root.selected-index = min(root.games.length - 1, root.selected-index + 1);
+                    if (event.text == Key.RightArrow) {
+                        root.selected-index = min(root.games.length - 1, root.selected-index + 1);
+                    }
                     flick.viewport-x = max(flick.width - root.content-width, flick.viewport-x - root.cover-height - Tokens.spacing-lg);
                 }
                 return accept;

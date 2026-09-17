@@ -311,7 +311,15 @@ impl SqliteLibrary {
     fn save(&self, x: LibraryItem) -> Result<LibraryItem, LibraryError> {
         let j = serde_json::to_string(&Stored::from(&x)).map_err(err)?;
         let c = self.conn.lock().unwrap();
-        let last_updated = Utc::now().timestamp_millis();
+        // `last_updated` is the item's added-to-library timestamp. Preserve it
+        // for every replacement and only assign it when the record is new.
+        let last_updated = c
+            .query_row(
+                "SELECT last_updated FROM library_items WHERE id=?",
+                params![x.id.to_string()],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap_or_else(|_| Utc::now().timestamp_millis());
         c.execute("INSERT OR REPLACE INTO library_items(id,title,platform_slug,local_path,json,last_updated) VALUES(?,?,?,?,?,?)",params![x.id.to_string(),x.title,x.platform_slug,x.local_path,j,last_updated]).map_err(err)?;
         c.execute(
             "DELETE FROM library_item_files WHERE library_item_id=?",
@@ -500,7 +508,24 @@ mod tests {
             )
             .unwrap();
         assert!(last_updated > 0);
-        assert_eq!(db.get(&x.id).await.unwrap().unwrap().title, "Zelda");
+        let mut refreshed = x.clone();
+        refreshed.title = "The Legend of Zelda".into();
+        db.update(refreshed).await.unwrap();
+        let preserved_last_updated = db
+            .conn
+            .lock()
+            .unwrap()
+            .query_row(
+                "SELECT last_updated FROM library_items WHERE id=?",
+                params![x.id.to_string()],
+                |row| row.get::<_, i64>(0),
+            )
+            .unwrap();
+        assert_eq!(preserved_last_updated, last_updated);
+        assert_eq!(
+            db.get(&x.id).await.unwrap().unwrap().title,
+            "The Legend of Zelda"
+        );
         assert_eq!(
             db.search(SearchQuery::new().text("zel"))
                 .await

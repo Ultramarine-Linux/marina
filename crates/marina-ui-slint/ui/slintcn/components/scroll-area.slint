@@ -6,6 +6,8 @@ import { Tokens } from "../theme/tokens.slint";
 export component ScrollArea inherits Rectangle {
     // Logical height of the scrollable content; scrolls when this exceeds the visible height.
     in property <length> content-height;
+    in property <int> focus-request: 0;
+    in property <length> scroll-step: 80px;
 
     clip: true;
     background: transparent;
@@ -17,6 +19,25 @@ export component ScrollArea inherits Rectangle {
         viewport-height: root.content-height;
         @children
     }
+
+    scroll-focus := FocusScope {
+        width: 0px;
+        height: 0px;
+        key-pressed(event) => {
+            if (event.text == Key.DownArrow || event.text == Key.PageDown) {
+                flick.viewport-y = max(flick.height - root.content-height,
+                    flick.viewport-y - root.scroll-step);
+                return accept;
+            }
+            if (event.text == Key.UpArrow || event.text == Key.PageUp) {
+                flick.viewport-y = min(0px, flick.viewport-y + root.scroll-step);
+                return accept;
+            }
+            return reject;
+        }
+    }
+    forward-focus: scroll-focus;
+    changed focus-request => { scroll-focus.focus(); }
 
     // Vertical scrollbar — only when the content overflows.
     if root.content-height > flick.height: Rectangle {
