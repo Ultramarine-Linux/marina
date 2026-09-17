@@ -3407,6 +3407,7 @@ dependencies = [
  "bytesize",
  "dirs",
  "dotenvy",
+ "i-slint-core",
  "image",
  "lucide-slint",
  "marina-apps",

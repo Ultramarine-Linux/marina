@@ -135,6 +135,8 @@ export component Shelf inherits Rectangle {
                 viewport-height: parent.height;
                 viewport-width: root.content-width;
                 changed viewport-x => { root.viewport-changed(self.viewport-x, self.width, root.cover-height); }
+                changed width => { root.viewport-changed(self.viewport-x, self.width, root.cover-height); }
+                changed viewport-width => { root.viewport-changed(self.viewport-x, self.width, root.cover-height); }
                 init => { root.viewport-changed(self.viewport-x, self.width, root.cover-height); }
 
                 row := HorizontalLayout {

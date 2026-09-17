@@ -44,13 +44,15 @@ pub fn discover() -> Vec<LibraryItem> {
             continue;
         }
         command[0] = expand_home(&raw_executable);
-        let executable = command[0].clone();
 
         let mut item = LibraryItem::new_game(name);
         item.id = LibraryItemId::from_provider("xdg", "desktop", entry.id());
         item.kind = ItemKind::App;
         item.platform_slug = Some(PLATFORM_SLUG.to_owned());
-        item.local_path = Some(executable);
+        // Desktop entries may share an executable while representing distinct
+        // applications or profiles. Use the unique desktop-file path as the
+        // local identity; launching uses the parsed `xdg.exec` command below.
+        item.local_path = Some(entry.path.to_string_lossy().into_owned());
         item.provider_ids
             .insert("xdg.desktop".to_owned(), entry.id().to_owned());
         if let Ok(exec) = serde_json::to_string(&command) {
@@ -141,25 +143,30 @@ where
     library
         .add_platform(marina_core::Platform::new(PLATFORM_SLUG, PLATFORM_NAME))
         .await?;
+    let existing = library
+        .search(SearchQuery::new().platform(PLATFORM_SLUG).limit(usize::MAX))
+        .await?
+        .into_iter()
+        .map(|item| (item.id.clone(), item))
+        .collect::<std::collections::HashMap<_, _>>();
     let discovered_ids = discovered
         .iter()
         .map(|item| item.id.clone())
         .collect::<std::collections::HashSet<_>>();
-    for existing in library
-        .search(SearchQuery::new().platform(PLATFORM_SLUG).limit(usize::MAX))
-        .await?
-    {
-        if existing.provider_ids.contains_key("xdg.desktop")
-            && !discovered_ids.contains(&existing.id)
-        {
-            library.remove(&existing.id).await?;
+    for item in existing.values() {
+        if item.provider_ids.contains_key("xdg.desktop") && !discovered_ids.contains(&item.id) {
+            library.remove(&item.id).await?;
         }
     }
     for item in discovered {
-        if library.get(&item.id).await?.is_some() {
-            library.update(item).await?;
-        } else {
-            library.add(item).await?;
+        match existing.get(&item.id) {
+            Some(previous) if previous == &item => {}
+            Some(_) => {
+                library.update(item).await?;
+            }
+            None => {
+                library.add(item).await?;
+            }
         }
     }
     Ok(())

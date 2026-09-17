@@ -35,6 +35,7 @@ dotenvy = "0.15"
 dirs = "6"
 futures-util = "0.3"
 gilrs = "0.11.2"
+i-slint-core = "=1.17.1"
 reqwest = { version = "0.13", default-features = false, features = ["json", "query", "rustls"] }
 resvg = "0.47"
 serde = { version = "1", features = ["derive"] }

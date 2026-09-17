@@ -6,10 +6,10 @@ use marina_core::{
 use marina_library::{
     error::LibraryError,
     query::{SearchQuery, SearchSort},
-    read::{LibraryRead, PlatformRead},
+    read::{LibraryRead, PlatformCount, PlatformRead},
     write::{LibraryWrite, PlatformWrite},
 };
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, ToSql, params, params_from_iter};
 use serde::{Deserialize, Serialize};
 use std::{path::Path, sync::Mutex};
 use tracing::debug;
@@ -154,6 +154,35 @@ fn parse(v: Option<String>) -> Option<DateTime<FixedOffset>> {
 fn err<E: std::error::Error + Send + Sync + 'static>(e: E) -> LibraryError {
     LibraryError::backend(e)
 }
+
+fn card(row: &rusqlite::Row<'_>) -> Result<LibraryCard, rusqlite::Error> {
+    let id: String = row.get(0)?;
+    let regions_json: String = row.get(4)?;
+    let regions = serde_json::from_str(&regions_json).map_err(|error| {
+        rusqlite::Error::FromSqlConversionFailure(4, rusqlite::types::Type::Text, Box::new(error))
+    })?;
+    Ok(LibraryCard {
+        id: LibraryItemId::parse(&id).ok_or_else(|| {
+            rusqlite::Error::FromSqlConversionFailure(
+                0,
+                rusqlite::types::Type::Text,
+                Box::new(std::io::Error::other("invalid id")),
+            )
+        })?,
+        title: row.get(1)?,
+        kind: if row.get::<_, String>(2)? == "app" {
+            ItemKind::App
+        } else {
+            ItemKind::Game
+        },
+        platform_name: row.get(3)?,
+        regions,
+        cover: row.get(5)?,
+        cover_small_local_path: row.get(6)?,
+        cover_large_local_path: row.get(7)?,
+    })
+}
+
 impl SqliteLibrary {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, rusqlite::Error> {
         let path = path.as_ref();
@@ -167,7 +196,7 @@ impl SqliteLibrary {
             }
         }
         let c = Connection::open(path)?;
-        c.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; CREATE TABLE IF NOT EXISTS platforms(slug TEXT PRIMARY KEY,name TEXT NOT NULL); CREATE TABLE IF NOT EXISTS library_items(id TEXT PRIMARY KEY,title TEXT NOT NULL,platform_slug TEXT,local_path TEXT,json TEXT NOT NULL,last_updated INTEGER NOT NULL DEFAULT 0, UNIQUE(platform_slug,local_path)); CREATE TABLE IF NOT EXISTS library_item_files(library_item_id TEXT NOT NULL,provider_id TEXT,local_path TEXT NOT NULL,name TEXT NOT NULL,size_bytes INTEGER,PRIMARY KEY(library_item_id,local_path),UNIQUE(provider_id)); CREATE TABLE IF NOT EXISTS remote_rom_cache(provider TEXT NOT NULL,rom_id TEXT NOT NULL,title TEXT NOT NULL,platform_slug TEXT NOT NULL,json TEXT NOT NULL,PRIMARY KEY(provider,rom_id)); CREATE INDEX IF NOT EXISTS idx_remote_rom_title ON remote_rom_cache(provider,title); CREATE INDEX IF NOT EXISTS idx_remote_rom_platform ON remote_rom_cache(provider,platform_slug); CREATE INDEX IF NOT EXISTS idx_items_title ON library_items(title); CREATE INDEX IF NOT EXISTS idx_items_platform ON library_items(platform_slug); CREATE INDEX IF NOT EXISTS idx_items_path ON library_items(local_path); CREATE INDEX IF NOT EXISTS idx_item_files_provider ON library_item_files(provider_id);")?;
+        c.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; CREATE TABLE IF NOT EXISTS platforms(slug TEXT PRIMARY KEY,name TEXT NOT NULL); CREATE TABLE IF NOT EXISTS library_items(id TEXT PRIMARY KEY,title TEXT NOT NULL,kind TEXT NOT NULL DEFAULT 'game',platform_slug TEXT,local_path TEXT,json TEXT NOT NULL,last_updated INTEGER NOT NULL DEFAULT 0,regions_json TEXT NOT NULL DEFAULT '[]',cover TEXT,cover_small_local_path TEXT,cover_large_local_path TEXT, UNIQUE(platform_slug,local_path)); CREATE TABLE IF NOT EXISTS library_item_files(library_item_id TEXT NOT NULL,provider_id TEXT,local_path TEXT NOT NULL,name TEXT NOT NULL,size_bytes INTEGER,PRIMARY KEY(library_item_id,local_path),UNIQUE(provider_id)); CREATE TABLE IF NOT EXISTS remote_rom_cache(provider TEXT NOT NULL,rom_id TEXT NOT NULL,title TEXT NOT NULL,platform_slug TEXT NOT NULL,json TEXT NOT NULL,PRIMARY KEY(provider,rom_id)); CREATE INDEX IF NOT EXISTS idx_remote_rom_title ON remote_rom_cache(provider,title); CREATE INDEX IF NOT EXISTS idx_remote_rom_platform ON remote_rom_cache(provider,platform_slug); CREATE INDEX IF NOT EXISTS idx_items_title ON library_items(title); CREATE INDEX IF NOT EXISTS idx_items_platform ON library_items(platform_slug); CREATE INDEX IF NOT EXISTS idx_items_path ON library_items(local_path); CREATE INDEX IF NOT EXISTS idx_item_files_provider ON library_item_files(provider_id);")?;
         let has_last_updated = c
             .prepare("PRAGMA table_info(library_items)")?
             .query_map([], |row| row.get::<_, String>(1))?
@@ -184,6 +213,39 @@ impl SqliteLibrary {
             "UPDATE library_items SET last_updated = CAST(strftime('%s', 'now') AS INTEGER) * 1000 WHERE last_updated = 0",
             [],
         )?;
+        let mut needs_card_backfill = false;
+        for (name, definition) in [
+            ("kind", "TEXT NOT NULL DEFAULT 'game'"),
+            ("regions_json", "TEXT NOT NULL DEFAULT '[]'"),
+            ("cover", "TEXT"),
+            ("cover_small_local_path", "TEXT"),
+            ("cover_large_local_path", "TEXT"),
+        ] {
+            let exists = c
+                .prepare("PRAGMA table_info(library_items)")?
+                .query_map([], |row| row.get::<_, String>(1))?
+                .collect::<Result<Vec<_>, _>>()?
+                .iter()
+                .any(|column| column == name);
+            if !exists {
+                c.execute(
+                    &format!("ALTER TABLE library_items ADD COLUMN {name} {definition}"),
+                    [],
+                )?;
+                needs_card_backfill = true;
+            }
+        }
+        if needs_card_backfill {
+            c.execute(
+                "UPDATE library_items SET kind=COALESCE(json_extract(json, '$.kind'), 'game'),
+             regions_json=COALESCE(json_extract(json, '$.regions'), '[]'),
+             cover=json_extract(json, '$.cover'),
+             cover_small_local_path=(SELECT json_extract(value, '$.local_path') FROM json_each(json, '$.assets') WHERE json_extract(value, '$.kind')='cover_small' LIMIT 1),
+             cover_large_local_path=(SELECT json_extract(value, '$.local_path') FROM json_each(json, '$.assets') WHERE json_extract(value, '$.kind')='cover_large' LIMIT 1)
+             WHERE json_extract(json, '$.regions') IS NOT NULL",
+                [],
+            )?;
+        }
         c.execute_batch(
             "CREATE INDEX IF NOT EXISTS idx_items_last_updated ON library_items(last_updated DESC);",
         )?;
@@ -309,26 +371,79 @@ impl SqliteLibrary {
             })
     }
     fn save(&self, x: LibraryItem) -> Result<LibraryItem, LibraryError> {
+        let item_id = x.id.to_string();
         let j = serde_json::to_string(&Stored::from(&x)).map_err(err)?;
-        let c = self.conn.lock().unwrap();
-        // `last_updated` is the item's added-to-library timestamp. Preserve it
-        // for every replacement and only assign it when the record is new.
-        let last_updated = c
-            .query_row(
-                "SELECT last_updated FROM library_items WHERE id=?",
-                params![x.id.to_string()],
-                |row| row.get::<_, i64>(0),
-            )
-            .unwrap_or_else(|_| Utc::now().timestamp_millis());
-        c.execute("INSERT OR REPLACE INTO library_items(id,title,platform_slug,local_path,json,last_updated) VALUES(?,?,?,?,?,?)",params![x.id.to_string(),x.title,x.platform_slug,x.local_path,j,last_updated]).map_err(err)?;
-        c.execute(
-            "DELETE FROM library_item_files WHERE library_item_id=?",
-            params![x.id.to_string()],
+        let regions_json = serde_json::to_string(&x.regions).map_err(err)?;
+        let (cover_small, cover_large) = (
+            x.assets
+                .iter()
+                .find(|asset| matches!(asset.kind, LibraryAssetKind::CoverSmall))
+                .and_then(|asset| asset.local_path.as_deref()),
+            x.assets
+                .iter()
+                .find(|asset| matches!(asset.kind, LibraryAssetKind::CoverLarge))
+                .and_then(|asset| asset.local_path.as_deref()),
+        );
+        let mut c = self.conn.lock().unwrap();
+        let tx = c.transaction().map_err(err)?;
+        // `last_updated` is the item's added-to-library timestamp. Preserve it on replacement;
+        // the scalar subquery avoids a separate read round-trip.
+        tx.execute(
+            "INSERT INTO library_items(id,title,kind,platform_slug,local_path,json,last_updated,regions_json,cover,cover_small_local_path,cover_large_local_path)
+             VALUES(?,?,?,?,?,?,COALESCE((SELECT last_updated FROM library_items WHERE id=?),?),?,?,?,?)
+             ON CONFLICT(id) DO UPDATE SET title=excluded.title, kind=excluded.kind, platform_slug=excluded.platform_slug,
+             local_path=excluded.local_path, json=excluded.json, regions_json=excluded.regions_json,
+             cover=excluded.cover, cover_small_local_path=excluded.cover_small_local_path,
+             cover_large_local_path=excluded.cover_large_local_path",
+            params![
+                item_id,
+                x.title,
+                match x.kind {
+                    ItemKind::Game => "game",
+                    ItemKind::App => "app",
+                },
+                x.platform_slug,
+                x.local_path,
+                j,
+                item_id,
+                Utc::now().timestamp_millis(),
+                regions_json,
+                x.cover,
+                cover_small,
+                cover_large,
+            ],
         )
         .map_err(err)?;
-        for file in &x.files {
-            c.execute("INSERT OR REPLACE INTO library_item_files(library_item_id,provider_id,local_path,name,size_bytes) VALUES(?,?,?,?,?)", params![x.id.to_string(), file.provider_id, file.path, file.name, file.size_bytes.map(|size| size as i64)]).map_err(err)?;
+
+        if x.files.is_empty() {
+            tx.execute(
+                "DELETE FROM library_item_files WHERE library_item_id=?",
+                params![item_id],
+            )
+            .map_err(err)?;
+        } else {
+            let mut paths: Vec<&dyn ToSql> = vec![&item_id];
+            paths.extend(x.files.iter().map(|file| &file.path as &dyn ToSql));
+            let placeholders = std::iter::repeat_n("?", x.files.len())
+                .collect::<Vec<_>>()
+                .join(",");
+            tx.execute(
+                &format!("DELETE FROM library_item_files WHERE library_item_id=? AND local_path NOT IN ({placeholders})"),
+                params_from_iter(paths),
+            )
+            .map_err(err)?;
+            for file in &x.files {
+                tx.execute(
+                    "INSERT INTO library_item_files(library_item_id,provider_id,local_path,name,size_bytes) VALUES(?,?,?,?,?)
+                     ON CONFLICT(library_item_id,local_path) DO UPDATE SET provider_id=excluded.provider_id,
+                     name=excluded.name,size_bytes=excluded.size_bytes
+                     WHERE provider_id IS NOT excluded.provider_id OR name IS NOT excluded.name OR size_bytes IS NOT excluded.size_bytes",
+                    params![item_id, file.provider_id, file.path, file.name, file.size_bytes.map(|size| size as i64)],
+                )
+                .map_err(err)?;
+            }
         }
+        tx.commit().map_err(err)?;
         Ok(x)
     }
 }
@@ -393,6 +508,31 @@ impl LibraryRead for SqliteLibrary {
             .transpose()
             .map_err(err)
     }
+    async fn find_by_local_paths(
+        &self,
+        paths: &[String],
+    ) -> Result<Vec<LibraryItem>, LibraryError> {
+        if paths.is_empty() {
+            return Ok(Vec::new());
+        }
+        let c = self.conn.lock().unwrap();
+        let mut items = Vec::new();
+        for batch in paths.chunks(900) {
+            let placeholders = std::iter::repeat_n("?", batch.len())
+                .collect::<Vec<_>>()
+                .join(",");
+            let sql =
+                format!("SELECT json FROM library_items WHERE local_path IN ({placeholders})");
+            let mut statement = c.prepare(&sql).map_err(err)?;
+            let batch_items = statement
+                .query_map(rusqlite::params_from_iter(batch), Self::item)
+                .map_err(err)?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(err)?;
+            items.extend(batch_items);
+        }
+        Ok(items)
+    }
     async fn list(&self, l: u32) -> Result<Vec<LibraryItem>, LibraryError> {
         self.search(SearchQuery::new().limit(l as usize)).await
     }
@@ -401,30 +541,63 @@ impl LibraryRead for SqliteLibrary {
             .await
     }
     async fn search_cards(&self, q: SearchQuery) -> Result<Vec<LibraryCard>, LibraryError> {
-        self.search(q)
-            .await?
-            .into_iter()
-            .map(|x| {
-                Ok(LibraryCard {
-                    id: x.id,
-                    title: x.title,
-                    kind: x.kind,
-                    platform_name: x.platform_slug,
-                    regions: x.regions,
-                    cover: x.cover,
-                    cover_small_local_path: x
-                        .assets
-                        .iter()
-                        .find(|asset| matches!(asset.kind, LibraryAssetKind::CoverSmall))
-                        .and_then(|asset| asset.local_path.clone()),
-                    cover_large_local_path: x
-                        .assets
-                        .iter()
-                        .find(|asset| matches!(asset.kind, LibraryAssetKind::CoverLarge))
-                        .and_then(|asset| asset.local_path.clone()),
+        let c = self.conn.lock().unwrap();
+        let order_by = match q.sort {
+            SearchSort::Title => "title",
+            SearchSort::LastUpdated => "last_updated DESC, title",
+        };
+        let sql = format!(
+            "SELECT id,title,kind,platform_slug,regions_json,cover,cover_small_local_path,cover_large_local_path
+             FROM library_items
+             WHERE (?1 IS NULL OR lower(title) LIKE '%'||lower(?1)||'%')
+             AND (?2 IS NULL OR platform_slug=?2)
+             ORDER BY {order_by} LIMIT ?3 OFFSET ?4"
+        );
+        let mut statement = c.prepare(&sql).map_err(err)?;
+        let limit = q.limit.map(|limit| limit as i64).unwrap_or(-1);
+        statement
+            .query_map(params![q.text, q.platform, limit, q.offset as i64], card)
+            .map_err(err)?
+            .collect::<Result<_, _>>()
+            .map_err(err)
+    }
+
+    async fn get_by_local_path(
+        &self,
+        local_path: &str,
+    ) -> Result<Option<LibraryItem>, LibraryError> {
+        let c = self.conn.lock().unwrap();
+        c.query_row(
+            "SELECT json FROM library_items WHERE local_path=?",
+            params![local_path],
+            Self::item,
+        )
+        .optional()
+        .map_err(err)
+    }
+
+    async fn platform_counts(&self) -> Result<Vec<PlatformCount>, LibraryError> {
+        let c = self.conn.lock().unwrap();
+        let mut statement = c
+            .prepare(
+                "SELECT library_items.platform_slug, COALESCE(platforms.name, library_items.platform_slug), COUNT(*)
+                 FROM library_items
+                 LEFT JOIN platforms ON platforms.slug=library_items.platform_slug
+                 WHERE library_items.platform_slug IS NOT NULL
+                 GROUP BY library_items.platform_slug, platforms.name
+                 ORDER BY COALESCE(platforms.name, library_items.platform_slug)",
+            )
+            .map_err(err)?;
+        statement
+            .query_map([], |row| {
+                Ok(PlatformCount {
+                    platform: Platform::new(row.get::<_, String>(0)?, row.get::<_, String>(1)?),
+                    count: row.get::<_, i64>(2)? as usize,
                 })
             })
-            .collect()
+            .map_err(err)?
+            .collect::<Result<_, _>>()
+            .map_err(err)
     }
 }
 impl LibraryWrite for SqliteLibrary {
@@ -435,15 +608,19 @@ impl LibraryWrite for SqliteLibrary {
         self.save(x)
     }
     async fn remove(&self, id: &LibraryItemId) -> Result<(), LibraryError> {
-        self.conn
-            .lock()
-            .unwrap()
-            .execute(
-                "DELETE FROM library_items WHERE id=?",
-                params![id.to_string()],
-            )
-            .map(|_| ())
-            .map_err(err)
+        let mut c = self.conn.lock().unwrap();
+        let tx = c.transaction().map_err(err)?;
+        tx.execute(
+            "DELETE FROM library_item_files WHERE library_item_id=?",
+            params![id.to_string()],
+        )
+        .map_err(err)?;
+        tx.execute(
+            "DELETE FROM library_items WHERE id=?",
+            params![id.to_string()],
+        )
+        .map_err(err)?;
+        tx.commit().map_err(err)
     }
 }
 impl PlatformWrite for SqliteLibrary {
@@ -492,8 +669,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn crud_search() {
+    async fn save_replaces_item_and_files_atomically() {
         let db = SqliteLibrary::in_memory().unwrap();
+
         let mut x = LibraryItem::new_game("Zelda");
         x.platform_slug = Some("snes".into());
         db.add(x.clone()).await.unwrap();
@@ -560,5 +738,51 @@ mod tests {
         assert_eq!(recently_added[0].title, "Metroid");
         db.remove(&x.id).await.unwrap();
         assert!(db.get(&x.id).await.unwrap().is_none());
+    }
+
+    #[tokio::test]
+    async fn cards_use_card_columns_and_indexed_path_lookup() {
+        let db = SqliteLibrary::in_memory().unwrap();
+        let mut item = LibraryItem::new_game("Card title");
+        item.platform_slug = Some("snes".into());
+        item.local_path = Some("/games/card.rom".into());
+        item.summary = Some("secret searchable summary".into());
+        item.regions = vec!["US".into()];
+        item.cover = Some("cover.jpg".into());
+        item.assets.push(LibraryAsset {
+            kind: LibraryAssetKind::CoverSmall,
+            source: None,
+            local_path: Some("small.jpg".into()),
+        });
+        db.add(item.clone()).await.unwrap();
+
+        assert_eq!(
+            db.search_cards(SearchQuery::new().text("secret"))
+                .await
+                .unwrap()
+                .len(),
+            0
+        );
+        let card = db
+            .search_cards(SearchQuery::new().text("card"))
+            .await
+            .unwrap()
+            .pop()
+            .unwrap();
+        assert_eq!(card.regions, vec!["US"]);
+        assert_eq!(card.cover.as_deref(), Some("cover.jpg"));
+        assert_eq!(card.cover_small_local_path.as_deref(), Some("small.jpg"));
+        assert_eq!(
+            db.get_by_local_path("/games/card.rom")
+                .await
+                .unwrap()
+                .unwrap()
+                .id,
+            item.id
+        );
+
+        let counts = db.platform_counts().await.unwrap();
+        assert_eq!(counts[0].platform.slug, "snes");
+        assert_eq!(counts[0].count, 1);
     }
 }

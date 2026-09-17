@@ -21,6 +21,7 @@ slint = { version = "1.17.1", features = [
     "raw-window-handle-06",
     "image-default-formats",
 ] }
+i-slint-core.workspace = true
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp", "bmp"] }
 
 dirs.workspace = true

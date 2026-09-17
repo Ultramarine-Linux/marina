@@ -1,6 +1,9 @@
 use std::{
     collections::BTreeMap,
-    sync::{Arc, Mutex},
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicBool, Ordering},
+    },
     time::Duration,
 };
 
@@ -53,6 +56,15 @@ async fn main() -> Result<(), slint::PlatformError> {
     // asynchronously once the event loop is running.
     let username = std::env::var("USER").unwrap_or_else(|_| "user".into());
     let window = MainWindow::new()?;
+    let controller_enabled = Arc::new(AtomicBool::new(true));
+    let focus_state = controller_enabled.clone();
+    i_slint_core::context::set_window_event_hook(Some(Box::new(
+        move |_adapter, event, _result| {
+            if let i_slint_core::platform::WindowEvent::WindowActiveChanged(active) = event {
+                focus_state.store(*active, Ordering::Release);
+            }
+        },
+    )))?;
     slint::set_xdg_app_id("org.ultramarinelinux.MarinaShell")?;
     info!("main window constructed; completing lightweight UI setup");
     ui::controls::configure_toasts(&window);
@@ -62,6 +74,7 @@ async fn main() -> Result<(), slint::PlatformError> {
     // Never make window creation wait for it; initialize it after the event loop
     // has started and keep the returned loop alive in its background task.
     let controller_window = window.as_weak();
+    let controller_enabled = controller_enabled.clone();
     tokio::spawn(async move {
         // gilrs probes every input device during construction. Let the first
         // frame and initial library query get CPU priority before doing that
@@ -71,8 +84,14 @@ async fn main() -> Result<(), slint::PlatformError> {
         info!("starting controller input discovery");
         let result = tokio::task::spawn_blocking(move || {
             InputLoop::spawn(InputConfig::default(), move |event| {
+                if !controller_enabled.load(Ordering::Acquire) {
+                    return;
+                }
                 let controller_window = controller_window.clone();
                 let _ = controller_window.upgrade_in_event_loop(move |window| {
+                    // gilrs remains alive while another application owns focus,
+                    // but controller actions must only reach Marina when its
+                    // native window is active.
                     ui::controls::dispatch_controller_action(&window, event);
                 });
             })
@@ -472,6 +491,9 @@ fn populate_store_details(window: &slint::Weak<MainWindow>, rom: marina_romm::Ro
         let Some(bytes) = covers::load_bytes(&screenshot_source).await else {
             return;
         };
+        let Some(decoded) = covers::decode_pixels(bytes).await else {
+            return;
+        };
         let _ = preview_window.upgrade_in_event_loop(move |window| {
             let games = window.global::<StoreState>().get_games();
             let selected_index = window
@@ -484,9 +506,7 @@ fn populate_store_details(window: &slint::Weak<MainWindow>, rom: marina_romm::Ro
             {
                 return;
             }
-            let Some((image, _)) = covers::decode(&bytes) else {
-                return;
-            };
+            let (image, _) = covers::image_from_rgba(decoded);
             window.global::<StoreState>().set_preview_image(image);
         });
     });
@@ -496,10 +516,10 @@ fn populate_store_details(window: &slint::Weak<MainWindow>, rom: marina_romm::Ro
         let Some(bytes) = covers::load_bytes(&cover_source).await else {
             return;
         };
+        let Some(decoded) = covers::decode_pixels(bytes).await else {
+            return;
+        };
         let _ = cover_window.upgrade_in_event_loop(move |window| {
-            let Some((image, ratio)) = covers::decode(&bytes) else {
-                return;
-            };
             let games = window.global::<StoreState>().get_games();
             let Some(index) = (0..games.row_count()).find(|&index| {
                 games
@@ -509,6 +529,7 @@ fn populate_store_details(window: &slint::Weak<MainWindow>, rom: marina_romm::Ro
                 return;
             };
             if let Some(mut game) = games.row_data(index) {
+                let (image, ratio) = covers::image_from_rgba(decoded);
                 game.cover = image;
                 game.cover_ratio = ratio;
                 games.set_row_data(index, game);

@@ -69,8 +69,8 @@ impl Default for InputConfig {
             stick_press_threshold: 0.65,
             stick_release_threshold: 0.35,
             initial_repeat_delay: Duration::from_millis(350),
-            repeat_interval: Duration::from_millis(90),
-            poll_interval: Duration::from_millis(8),
+            repeat_interval: Duration::from_millis(100),
+            poll_interval: Duration::from_millis(16),
         }
     }
 }
@@ -137,16 +137,14 @@ impl InputLoop {
 
                 let mut state = SemanticState::new(config);
                 loop {
-                    if shutdown_rx.try_recv().is_ok() {
-                        break;
-                    }
-
                     while let Some(event) = gilrs.next_event() {
                         state.handle_event(event.id, event.event, &mut handler);
                     }
 
                     state.emit_repeats(Instant::now(), &mut handler);
-                    thread::sleep(config.poll_interval);
+                    if shutdown_rx.recv_timeout(config.poll_interval).is_ok() {
+                        break;
+                    }
                 }
             })
             .map_err(InputError::ThreadSpawn)?;

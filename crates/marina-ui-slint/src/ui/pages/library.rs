@@ -13,7 +13,7 @@ use marina_library::{
 };
 use marina_store_sqlite::SqliteLibrary;
 use slint::{ComponentHandle, Image, Model, ModelRc, SharedString, VecModel};
-use tracing::error;
+use tracing::{debug, error, warn};
 
 use crate::covers::{self, CoverSource};
 use crate::{
@@ -33,7 +33,8 @@ pub(crate) fn install(
 
     window
         .global::<LibraryState>()
-        .on_game_selected(move |id, _index| {
+        .on_game_selected(move |id, index| {
+                    debug!(game_id = %id, index, "library preview selection requested");
             let state = detail_state
                 .lock()
                 .expect("library state lock poisoned")
@@ -48,13 +49,64 @@ pub(crate) fn install(
             tokio::spawn(async move {
                 match state.library.get(&item_id).await {
                     Ok(Some(item)) => {
+                        let cover_path = item
+                            .assets
+                            .iter()
+                            .filter_map(|asset| {
+                                let priority = match asset.kind {
+                                    marina_core::LibraryAssetKind::CoverLarge => 0,
+                                    marina_core::LibraryAssetKind::CoverSmall => 1,
+                                    _ => return None,
+                                };
+                                asset.local_path.clone().map(|path| (priority, path))
+                            })
+                            .min_by_key(|(priority, _)| *priority)
+                            .map(|(_, path)| path);
+                        debug!(game_id = %id, ?cover_path, assets = item.assets.len(), "library preview item loaded");
+                        let decoded = if let Some(path) = cover_path {
+                            let source = covers::source_for(None, Some(&path), None);
+                            match covers::load_bytes(&source).await {
+                                Some(bytes) => covers::decode_pixels(bytes).await,
+                                None => {
+                                    warn!(game_id = %id, %path, "library preview cover produced no bytes");
+                                    None
+                                }
+                            }
+                        } else {
+                            warn!(game_id = %id, "library preview item has no local cover asset");
+                            None
+                        };
                         let details = preview_details(item);
                         let _ = window.upgrade_in_event_loop(move |window| {
+                            let games = window.global::<LibraryState>().get_games();
+                            let selected_index = window.global::<LibraryState>().get_selected_game_index().max(0) as usize;
+                            if selected_index != index as usize
+                                || games.row_data(selected_index).is_none_or(|game| game.id != id)
+                            {
+                                debug!(game_id = %id, index, selected_index, "discarding stale library preview");
+                                return;
+                            }
+                            if let Some(decoded) = decoded
+                                && let Some(mut game) = games.row_data(selected_index)
+                            {
+                                let (image, ratio) = covers::image_from_rgba(decoded);
+                                game.cover = image;
+                                game.cover_ratio = ratio;
+                                games.set_row_data(selected_index, game);
+                                debug!(game_id = %id, index, "library preview cover applied");
+                            }
                             window.global::<GameState>().set_details(details);
                             window.global::<GameState>().set_details_loading(false);
                         });
                     }
-                    Ok(None) | Err(_) => {
+                    Ok(None) => {
+                        warn!(game_id = %id, "library preview item missing");
+                        let _ = window.upgrade_in_event_loop(|window| {
+                            window.global::<GameState>().set_details_loading(false);
+                        });
+                    }
+                    Err(error) => {
+                        error!(%error, game_id = %id, "library preview lookup failed");
                         let _ = window.upgrade_in_event_loop(|window| {
                             window.global::<GameState>().set_details_loading(false);
                         });
@@ -109,15 +161,23 @@ pub(crate) fn install(
                         })
                         .min_by_key(|(priority, _)| *priority)
                         .map(|(_, path)| path);
+                    let detail_image = if let Some(path) = detail_cover {
+                        let source = covers::source_for(None, Some(&path), None);
+                        match covers::load_bytes(&source).await {
+                            Some(bytes) => covers::decode_pixels(bytes).await,
+                            None => None,
+                        }
+                    } else {
+                        None
+                    };
                     let details = preview_details(item);
                     let _ = detail_window.upgrade_in_event_loop(move |window| {
-                        if let Some(path) = detail_cover.and_then(|path| {
-                            slint::Image::load_from_path(std::path::Path::new(&path)).ok()
-                        }) {
+                        if let Some(decoded) = detail_image {
+                            let (image, _) = covers::image_from_rgba(decoded);
                             window
                                 .global::<GameState>()
                                 .set_selected_game(GameCardData {
-                                    cover: path,
+                                    cover: image,
                                     ..window.global::<GameState>().get_selected_game()
                                 });
                         }
@@ -174,9 +234,17 @@ pub(crate) fn install(
                         .as_any()
                         .downcast_ref::<VecModel<GameCardData>>()
                         .expect("platform game model should be a VecModel");
-                    model.set_vec(game_cards(metadata));
+                    let games = game_cards(metadata);
+                    let first_id = games.first().map(|game| game.id.clone());
+                    model.set_vec(games);
+                    window.global::<LibraryState>().set_selected_game_index(0);
                     window.global::<LibraryState>().set_loading(false);
-                    window.global::<HomeState>().invoke_cover_context_changed(1);
+                    if let Some(first_id) = first_id {
+                        window.global::<GameState>().set_details_loading(true);
+                        window
+                            .global::<LibraryState>()
+                            .invoke_game_selected(first_id, 0);
+                    }
                 });
             });
         }
