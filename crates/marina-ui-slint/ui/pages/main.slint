@@ -63,6 +63,7 @@ export component MainWindow inherits Window {
     callback store-entered;
     callback home-entered;
     callback library-entered;
+    callback focus-navigation;
 
     in-out property <int> active-tab: 0;
     in-out property <string> search-query;
@@ -164,6 +165,8 @@ export component MainWindow inherits Window {
             focus-header => { shell.focus(); }
         }
     }
+
+    focus-navigation => { shell.focus(); }
 
     // Global overlay: remains above every routed screen, dialog, and sheet.
     Toaster {

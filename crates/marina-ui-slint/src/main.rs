@@ -7,6 +7,7 @@ use std::{
 };
 
 use marina_core::LibraryItemId;
+use marina_input::{InputAction, InputConfig, InputEvent, InputEventKind, InputLoop};
 use marina_library::{
     query::SearchQuery,
     read::{LibraryRead, PlatformRead},
@@ -15,8 +16,11 @@ use marina_library::{
 use marina_romm::{PlatformQuery, RomQuery};
 use marina_scanner::scan;
 use serde::Serialize;
-use slint::{Image, Model, ModelRc, SharedString, VecModel};
-use tracing::{debug, error, info};
+use slint::{
+    Image, Model, ModelRc, SharedString, VecModel,
+    platform::{Key, WindowEvent},
+};
+use tracing::{debug, error, info, warn};
 use tracing_subscriber::EnvFilter;
 
 slint::include_modules!();
@@ -31,6 +35,45 @@ mod storage;
 
 const TOAST_DURATION: Duration = Duration::from_secs(4);
 const TOAST_DISMISS_ANIMATION: Duration = Duration::from_millis(250);
+
+fn dispatch_controller_action(window: &MainWindow, event: InputEvent) {
+    if !matches!(
+        event.kind,
+        InputEventKind::Pressed | InputEventKind::Repeated
+    ) {
+        return;
+    }
+
+    match event.action {
+        InputAction::PreviousTab => {
+            let active = window.get_active_tab();
+            window.set_active_tab((active + 2) % 3);
+            window.invoke_focus_navigation();
+            return;
+        }
+        InputAction::NextTab => {
+            let active = window.get_active_tab();
+            window.set_active_tab((active + 1) % 3);
+            window.invoke_focus_navigation();
+            return;
+        }
+        InputAction::Menu => return,
+        _ => {}
+    }
+
+    let key = match event.action {
+        InputAction::Up => Key::UpArrow,
+        InputAction::Down => Key::DownArrow,
+        InputAction::Left => Key::LeftArrow,
+        InputAction::Right => Key::RightArrow,
+        InputAction::Accept => Key::Return,
+        InputAction::Back => Key::Escape,
+        InputAction::PreviousTab | InputAction::NextTab | InputAction::Menu => return,
+    };
+    window
+        .window()
+        .dispatch_event(WindowEvent::KeyPressed { text: key.into() });
+}
 
 fn configure_toasts(window: &MainWindow) {
     let items = Rc::new(VecModel::from(Vec::<ToastItem>::new()));
@@ -104,6 +147,20 @@ async fn main() -> Result<(), slint::PlatformError> {
     let (username, display_name, initials) = profile_identity();
     let window = MainWindow::new()?;
     configure_toasts(&window);
+
+    let controller_window = window.as_weak();
+    let _controller_input = match InputLoop::spawn(InputConfig::default(), move |event| {
+        let controller_window = controller_window.clone();
+        let _ = controller_window.upgrade_in_event_loop(move |window| {
+            dispatch_controller_action(&window, event);
+        });
+    }) {
+        Ok(input) => Some(input),
+        Err(error) => {
+            warn!(%error, "controller input unavailable; keyboard and pointer input remain active");
+            None
+        }
+    };
     window.set_profile_name(SharedString::from(display_name));
     window.set_profile_username(SharedString::from(username.clone()));
     window.set_profile_initials(SharedString::from(initials));

@@ -32,6 +32,7 @@ marina-romm.workspace = true
 marina-install.workspace = true
 marina-scanner.workspace = true
 marina-store-sqlite.workspace = true
+marina-input.workspace = true
 reqwest.workspace = true
 tokio = { workspace = true, features = ["fs"] }
 tracing.workspace = true

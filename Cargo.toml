@@ -15,6 +15,7 @@ members = [
     "crates/marina-scanner",
     "crates/marina-store-sqlite",
     "crates/marina-test",
+    "crates/marina-input",
     "crates/marina-ui-slint",
 ]
 
@@ -31,6 +32,7 @@ bytesize = "2.7.0"
 chrono = { version = "0.4", default-features = false, features = ["serde", "clock"] }
 dotenvy = "0.15"
 futures-util = "0.3"
+gilrs = "0.11.2"
 reqwest = { version = "0.13", default-features = false, features = ["json", "query", "rustls"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
@@ -51,3 +53,4 @@ marina-install = { path = "crates/marina-install" }
 marina-scanner = { path = "crates/marina-scanner" }
 marina-library = { path = "crates/marina-library" }
 marina-store-sqlite = { path = "crates/marina-store-sqlite" }
+marina-input = { path = "crates/marina-input" }

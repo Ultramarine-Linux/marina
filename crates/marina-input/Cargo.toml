@@ -1,0 +1,9 @@
+[package]
+name = "marina-input"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+gilrs.workspace = true
+thiserror.workspace = true
