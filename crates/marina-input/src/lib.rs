@@ -103,16 +103,33 @@ impl InputLoop {
         let input_thread = thread::Builder::new()
             .name("marina-controller-input".into())
             .spawn(move || {
+                let started = Instant::now();
+                tracing::info!("controller thread started; building gilrs backend");
+                let build_started = Instant::now();
                 let mut gilrs = match GilrsBuilder::new().build() {
                     Ok(gilrs) => {
+                        tracing::info!(
+                            elapsed_ms = build_started.elapsed().as_millis() as u64,
+                            "gilrs backend built"
+                        );
                         let _ = initialized_tx.send(Ok(()));
                         gilrs
                     }
                     Err(error) => {
+                        tracing::warn!(
+                            %error,
+                            elapsed_ms = build_started.elapsed().as_millis() as u64,
+                            "gilrs backend failed to build"
+                        );
                         let _ = initialized_tx.send(Err(error.to_string()));
                         return;
                     }
                 };
+
+                tracing::debug!(
+                    elapsed_ms = started.elapsed().as_millis() as u64,
+                    "controller thread initialized"
+                );
 
                 let mut state = SemanticState::new(config);
                 loop {

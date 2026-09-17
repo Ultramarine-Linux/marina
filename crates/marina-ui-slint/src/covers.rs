@@ -17,7 +17,6 @@ use tracing::{debug, warn};
 
 use crate::{MainWindow, cache};
 
-const COVER_HEIGHT: f32 = 200.0;
 const CARD_SPACING: f32 = 16.0;
 const CONTENT_PADDING_LEFT: f32 = 4.0;
 const PREFETCH_CARDS: usize = 3;
@@ -128,6 +127,7 @@ impl CoverLoader {
         // Cards have variable widths, so derive their actual positions from
         // the current ratios instead of assuming a fixed slot size.
         let viewport_end = scroll_x + viewport_width;
+        let cover_height = window.get_shelf_cover_height();
         let mut cursor = CONTENT_PADDING_LEFT;
         let mut first_visible = None;
         let mut last_visible = None;
@@ -136,7 +136,7 @@ impl CoverLoader {
                 .row_data(index)
                 .map(|row| row.cover_ratio.clamp(0.4, 2.0))
                 .unwrap_or(1.0);
-            let width = COVER_HEIGHT * ratio;
+            let width = cover_height * ratio;
             let card_end = cursor + width;
             if card_end >= scroll_x && cursor <= viewport_end {
                 first_visible.get_or_insert(index);

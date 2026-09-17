@@ -7,7 +7,11 @@ PartOf=graphical-session.target
 
 [Service]
 Type=simple
-ExecStart=/opt/marina/marina
+
+# 640x360 logical pixels render at 1280x720 physical pixels.
+Environment=SLINT_SCALE_FACTOR=2.0
+Environment=RUST_LOG=debug
+ExecStart=/opt/marina/marina-ui-slint
 Restart=on-failure
 RestartSec=2s
 

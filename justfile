@@ -8,7 +8,7 @@ service := "systemd/marina-shell.service"
 service_name := "marina-shell.service"
 deploy_target := env_var_or_default("DEPLOY_TARGET", "root@handheld")
 user_target := env_var_or_default("USER_TARGET", "ultramarine@handheld")
-deploy_path := env_var_or_default("DEPLOY_PATH", "/opt/marina/marina")
+deploy_path := env_var_or_default("DEPLOY_PATH", "/opt/marina/marina-ui-slint")
 deploy_service_path := env_var_or_default("DEPLOY_SERVICE_PATH", "/etc/systemd/user/marina-shell.service")
 ssh_opts := env_var_or_default("MARINA_SSH_OPTS", "")
 
@@ -19,13 +19,13 @@ check:
 
 # Build the graphical application for the handheld target.
 cross-build:
-    cross build --config 'build.rustc-wrapper=""' --release --target {{target}} -p {{package}}
+    CARGO_INCREMENTAL=1 cross build --config 'build.rustc-wrapper=""' --target {{target}} -p {{package}}
 
 # Upload the cross-compiled binary and user service to the configured handheld.
 deploy: cross-build deploy-service
     ssh {{ssh_opts}} {{deploy_target}} "mkdir -p \"$(dirname '{{deploy_path}}')\""
-    rsync -e "ssh {{ssh_opts}}" --archive --compress --partial --progress --partial-dir=.rsync-partial "target/{{target}}/release/{{binary}}" "{{deploy_target}}:{{deploy_path}}.new"
-    ssh {{ssh_opts}} {{deploy_target}} "chmod +x '{{deploy_path}}.new' && mv '{{deploy_path}}.new' '{{deploy_path}}'"
+    rsync -e "ssh {{ssh_opts}}" --archive --compress --progress --stats "target/{{target}}/debug/{{binary}}" "{{deploy_target}}:{{deploy_path}}"
+    ssh {{ssh_opts}} {{deploy_target}} "chmod +x '{{deploy_path}}'"
 
 deploy-service:
     ssh {{ssh_opts}} {{deploy_target}} "mkdir -p \"$(dirname '{{deploy_service_path}}')\""

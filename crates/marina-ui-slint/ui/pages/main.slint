@@ -47,7 +47,9 @@ export component MainWindow inherits Window {
     in-out property <int> store-selected-platform-index: 0;
     private property <int> content-focus-request: 0;
 
-    in property <length> shelf-height;
+    out property <length> shelf-cover-height:
+        max(80px, min(200px, root.height * 50% - 64px));
+    out property <length> shelf-height: root.shelf-cover-height + 64px;
     in-out property <bool> loading: true;
     callback viewport-changed(length, length);
     callback cover-context-changed(int);
@@ -73,10 +75,13 @@ export component MainWindow inherits Window {
         { label: "Store" },
     ];
 
-    width: 1280px;
-    height: 720px;
+    // At the handheld's 2x UI scale this opens at 1280x720 physical pixels.
+    preferred-width: 640px;
+    preferred-height: 360px;
+    min-width: 400px;
+    min-height: 225px;
     title: "Marina";
-
+    background: transparent;
 
     changed active-tab => {
         if (root.active-tab == 0) {
@@ -88,6 +93,8 @@ export component MainWindow inherits Window {
     }
 
     shell := AppShell {
+        width: parent.width;
+        height: parent.height;
         navigation-items: root.navigation-items;
         profile-name: root.profile-name;
         profile-username: root.profile-username;
@@ -109,12 +116,14 @@ export component MainWindow inherits Window {
 
         if !root.game-page-visible && root.active-tab == 0 && root.loading: ShelfSkeleton {
             content-height: root.shelf-height;
+            cover-height: root.shelf-cover-height;
         }
 
         if !root.game-page-visible && root.active-tab == 0 && !root.loading: shelf := Shelf {
             title: "Recently added";
             games: root.games;
             content-height: root.shelf-height;
+            cover-height: root.shelf-cover-height;
             selected-index <=> root.home-selected-game-index;
             focus-request: root.content-focus-request;
             viewport-changed(x, width) => { root.viewport-changed(x, width); }

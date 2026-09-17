@@ -15,6 +15,7 @@ export component NavigationMenu inherits Rectangle {
     callback navigate(int);
     // Moves keyboard focus from the persistent navigation into the active page.
     callback focus-content;
+    callback focus-settings;
 
     background: transparent;
     preferred-width:  row.preferred-width;
@@ -32,8 +33,12 @@ export component NavigationMenu inherits Rectangle {
             }
             if (event.text == Key.RightArrow) {
                 if (root.items.length > 0) {
-                    root.active = min(root.items.length - 1, root.active + 1);
-                    root.navigate(root.active);
+                    if (root.active == root.items.length - 1) {
+                        root.focus-settings();
+                    } else {
+                        root.active += 1;
+                        root.navigate(root.active);
+                    }
                 }
                 return accept;
             }
@@ -50,13 +55,13 @@ export component NavigationMenu inherits Rectangle {
     }
 
     row := HorizontalLayout {
-        spacing: 4px;
+        spacing: Tokens.spacing-xs;
         for it[i] in root.items: Rectangle {
-            height: 36px;
+            height: Tokens.density-button-default;
             // Intrinsic width must live on the item itself: the label now sits
             // inside `surface` (width: parent.width), so without this the item
             // collapses to 0 in the horizontal row. 14px padding each side.
-            min-width: lab.preferred-width + 28px;
+            min-width: lab.preferred-width + 2 * Tokens.spacing-md;
 
             surface := Rectangle {
                 x: 0;
@@ -71,8 +76,8 @@ export component NavigationMenu inherits Rectangle {
                 border-color: Tokens.color-ring-muted;
 
                 HorizontalLayout {
-                    padding-left: 14px;
-                    padding-right: 14px;
+                    padding-left: Tokens.spacing-md;
+                    padding-right: Tokens.spacing-md;
                     lab := Text {
                         text: it.label;
                         color: i == root.active

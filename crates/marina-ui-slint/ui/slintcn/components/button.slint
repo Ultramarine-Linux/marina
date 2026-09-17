@@ -38,6 +38,10 @@ export component Button inherits Rectangle {
     in property <bool>   haspopup: false;
     // Fired on press release while enabled.
     callback clicked();
+    // Optional directional navigation hook for chrome/action buttons. Disabled
+    // by default so ordinary buttons retain normal arrow-key behavior.
+    callback navigation-requested(string);
+    in property <bool> directional-navigation: false;
 
     // True while focus arrived from a pointer press — suppresses the ring so it
     // is keyboard-only (focus-visible emulation). Set on pointer down, cleared
@@ -202,6 +206,18 @@ export component Button inherits Rectangle {
             root.pointer-focus = false;
             if (event.text == "\n" || event.text == " ") {
                 if (!root.disabled) { root.clicked(); }
+                return accept;
+            }
+            if (root.directional-navigation && event.text == Key.LeftArrow) {
+                root.navigation-requested("left");
+                return accept;
+            }
+            if (root.directional-navigation && event.text == Key.UpArrow) {
+                root.navigation-requested("up");
+                return accept;
+            }
+            if (root.directional-navigation && event.text == Key.DownArrow) {
+                root.navigation-requested("down");
                 return accept;
             }
             return reject;

@@ -35,6 +35,7 @@ mod storage;
 
 const TOAST_DURATION: Duration = Duration::from_secs(4);
 const TOAST_DISMISS_ANIMATION: Duration = Duration::from_millis(250);
+const CONTROLLER_STARTUP_DELAY: Duration = Duration::from_secs(1);
 
 fn dispatch_controller_action(window: &MainWindow, event: InputEvent) {
     if !matches!(
@@ -144,45 +145,96 @@ async fn main() -> Result<(), slint::PlatformError> {
         return Ok(());
     }
 
-    let (username, display_name, initials) = profile_identity();
+    // Keep the first window construction independent of filesystem-backed profile
+    // discovery. The shell starts with a useful fallback and hydrates the profile
+    // asynchronously once the event loop is running.
+    let username = std::env::var("USER").unwrap_or_else(|_| "user".into());
     let window = MainWindow::new()?;
+    info!("main window constructed; completing lightweight UI setup");
     configure_toasts(&window);
 
+    // Controller discovery can block inside gilrs while probing input devices.
+    // Never make window creation wait for it; initialize it after the event loop
+    // has started and keep the returned loop alive in its background task.
     let controller_window = window.as_weak();
-    let _controller_input = match InputLoop::spawn(InputConfig::default(), move |event| {
-        let controller_window = controller_window.clone();
-        let _ = controller_window.upgrade_in_event_loop(move |window| {
-            dispatch_controller_action(&window, event);
-        });
-    }) {
-        Ok(input) => Some(input),
-        Err(error) => {
-            warn!(%error, "controller input unavailable; keyboard and pointer input remain active");
-            None
+    tokio::spawn(async move {
+        // gilrs probes every input device during construction. Let the first
+        // frame and initial library query get CPU priority before doing that
+        // work, especially on handhelds with slow input device enumeration.
+        tokio::time::sleep(CONTROLLER_STARTUP_DELAY).await;
+        let started = std::time::Instant::now();
+        info!("starting controller input discovery");
+        let result = tokio::task::spawn_blocking(move || {
+            InputLoop::spawn(InputConfig::default(), move |event| {
+                let controller_window = controller_window.clone();
+                let _ = controller_window.upgrade_in_event_loop(move |window| {
+                    dispatch_controller_action(&window, event);
+                });
+            })
+        })
+        .await;
+
+        match result {
+            Ok(Ok(input)) => {
+                info!(
+                    elapsed_ms = started.elapsed().as_millis() as u64,
+                    "controller input ready"
+                );
+                // InputLoop owns its polling thread and must stay alive for the
+                // lifetime of the application.
+                std::future::pending::<()>().await;
+                drop(input);
+            }
+            Ok(Err(error)) => {
+                warn!(
+                    %error,
+                    elapsed_ms = started.elapsed().as_millis() as u64,
+                    "controller input unavailable; keyboard and pointer input remain active"
+                );
+            }
+            Err(error) => {
+                warn!(
+                    %error,
+                    elapsed_ms = started.elapsed().as_millis() as u64,
+                    "controller input task failed; keyboard and pointer input remain active"
+                );
+            }
         }
-    };
-    window.set_profile_name(SharedString::from(display_name));
+    });
+    window.set_profile_name(SharedString::from(username.clone()));
     window.set_profile_username(SharedString::from(username.clone()));
-    window.set_profile_initials(SharedString::from(initials));
+    window.set_profile_initials(SharedString::from(profile_initials(&username)));
     window.set_profile_image(Image::default());
 
     let profile_window = window.as_weak();
-    tokio::spawn(async move {
-        let icon_path = format!("/var/lib/AccountsService/icons/{username}");
-        let Some(bytes) = tokio::fs::read(icon_path).await.ok() else {
-            return;
-        };
-        let _ = profile_window.upgrade_in_event_loop(move |window| {
-            if let Some((image, _)) = covers::decode(&bytes) {
-                window.set_profile_image(image);
-            }
+    let profile_username = username.clone();
+    slint::Timer::single_shot(Duration::ZERO, move || {
+        let profile_window = profile_window.clone();
+        tokio::spawn(async move {
+            let passwd = tokio::fs::read_to_string("/etc/passwd").await.ok();
+            let display_name = passwd
+                .as_deref()
+                .and_then(|passwd| profile_display_name(&profile_username, passwd))
+                .unwrap_or_else(|| profile_username.clone());
+            let initials = profile_initials(&display_name);
+            let icon_path = format!("/var/lib/AccountsService/icons/{profile_username}");
+            let icon = tokio::fs::read(icon_path).await.ok();
+            let _ = profile_window.upgrade_in_event_loop(move |window| {
+                window.set_profile_name(SharedString::from(display_name));
+                window.set_profile_initials(SharedString::from(initials));
+                if let Some(bytes) = icon {
+                    if let Some((image, _)) = covers::decode(&bytes) {
+                        window.set_profile_image(image);
+                    }
+                }
+            });
         });
     });
     window.set_games(ModelRc::from(std::rc::Rc::new(VecModel::from(Vec::new()))));
     window.set_platform_games(ModelRc::from(std::rc::Rc::new(VecModel::from(Vec::new()))));
     window.set_selected_game(empty_game_card());
     window.set_game_details(empty_preview_details());
-    window.set_shelf_height(shelf::shelf_height());
+
     window.set_loading(true);
     window.set_library_loading(false);
 
@@ -231,9 +283,13 @@ async fn main() -> Result<(), slint::PlatformError> {
     window.on_game_selected(move |id, index| {
         // Load the selected row's cover on demand. The detail request below
         // supplies the rest of the metadata.
+        let cover_height = detail_window
+            .upgrade()
+            .map(|window| window.get_shelf_cover_height())
+            .unwrap_or(200.0);
         selected_loader
             .borrow_mut()
-            .update(index as f32 * 216.0, 240.0);
+            .update(index as f32 * (cover_height + 16.0), 240.0);
         let state = detail_state
             .lock()
             .expect("library state lock poisoned")
@@ -543,248 +599,207 @@ async fn main() -> Result<(), slint::PlatformError> {
     });
 
     let state_store = library_state.clone();
-    tokio::spawn(async move {
-        let state = match app::AppState::initialize().await {
-            Ok(state) => state,
-            Err(error) => {
-                error!(%error, "application initialization failed");
-                return;
-            }
-        };
-
-        if let Some(root) = state.config.library_root.as_ref() {
-            match tokio::fs::try_exists(root).await {
-                Ok(false) => {
-                    info!(path = %root.display(), "local library root does not exist yet; skipping scan");
-                }
-                Ok(true) => match scan(root) {
-                    Ok(items) => {
-                        info!(count = items.len(), "local game scan completed");
-                        for item in items {
-                            let platform_slug = item.platform_slug.clone();
-                            if let Some(slug) = platform_slug.as_deref() {
-                                let _ = state
-                                    .library
-                                    .add_platform(marina_core::Platform::new(slug, slug))
-                                    .await;
-                            }
-                            let existing = state
-                                .library
-                                .search(
-                                    SearchQuery::new()
-                                        .platform(platform_slug.as_deref().unwrap_or_default())
-                                        .limit(usize::MAX),
-                                )
-                                .await
-                                .ok()
-                                .and_then(|items| {
-                                    items
-                                        .into_iter()
-                                        .find(|candidate| candidate.local_path == item.local_path)
-                                });
-                            let result = if let Some(mut existing) = existing {
-                                // Scanner data describes filesystem presence only. Preserve
-                                // provider metadata/assets from an enriched installed record.
-                                existing.files = item.files;
-                                state.library.update(existing).await
-                            } else {
-                                state.library.add(item).await
-                            };
-                            if let Err(error) = result {
-                                error!(%error, "failed to store scanned local game");
-                            }
-                        }
-                    }
-                    Err(error) => error!(%error, "local game scan failed"),
-                },
+    slint::Timer::single_shot(Duration::ZERO, move || {
+        tokio::spawn(async move {
+            let state = match app::AppState::initialize().await {
+                Ok(state) => state,
                 Err(error) => {
-                    error!(%error, path = %root.display(), "could not inspect local library root")
+                    error!(%error, "application initialization failed");
+                    return;
                 }
-            }
-        }
+            };
 
-        info!("loading game metadata");
-        let loaded = shelf::load_games(&state.library, state.config.romm_url.as_deref()).await;
-        let (metadata, cover_sources) = match loaded {
-            Ok(loaded) => loaded,
-            Err(error) => {
-                error!(%error, "game metadata loading failed");
-                return;
-            }
-        };
-        info!(count = metadata.len(), "library loaded");
-        *source_store.lock().expect("cover source state poisoned") = cover_sources.clone();
-        *home_source_store
-            .lock()
-            .expect("home cover source state poisoned") = cover_sources;
-        *state_store.lock().expect("library state lock poisoned") = Some(state.clone());
-
-        if state.config.import_romm_on_startup {
-            if let Some(base_url) = state.config.romm_url.clone() {
-                let sync_state = state.clone();
-                tokio::spawn(async move {
-                    let client =
-                        romm_auth::client(base_url, sync_state.config.romm_token.as_deref());
-                    match client.list_platforms(&PlatformQuery::default()).await {
-                        Ok(platforms) => {
-                            for platform in platforms {
-                                let mut offset = 0_i64;
-                                loop {
-                                    let query = RomQuery {
-                                        platform_ids: vec![platform.id],
-                                        limit: Some(100),
-                                        offset: Some(offset),
-                                        with_files: Some(true),
-                                        ..Default::default()
-                                    };
-                                    let page = match client.list_roms(&query).await {
-                                        Ok(page) => page,
-                                        Err(error) => {
-                                            error!(%error, platform = %platform.fs_slug, "RomM catalog sync failed");
-                                            break;
-                                        }
-                                    };
-                                    let rows = page
-                                        .items
-                                        .iter()
-                                        .filter_map(|rom| {
-                                            Some((
-                                                rom.id.to_string(),
-                                                rom.name
-                                                    .clone()
-                                                    .unwrap_or_else(|| rom.files.fs_name.clone()),
-                                                rom.platform.platform_fs_slug.clone(),
-                                                serde_json::to_string(rom).ok()?,
-                                            ))
-                                        })
-                                        .collect::<Vec<_>>();
-                                    if let Err(error) =
-                                        sync_state.library.upsert_remote_json("romm", &rows)
-                                    {
-                                        error!(%error, "RomM catalog cache write failed");
-                                        break;
+            if state.config.scan_on_startup {
+                if let Some(root) = state.config.library_root.as_ref() {
+                    match tokio::fs::try_exists(root).await {
+                        Ok(false) => {
+                            info!(path = %root.display(), "local library root does not exist yet; skipping scan");
+                        }
+                        Ok(true) => match scan(root) {
+                            Ok(items) => {
+                                info!(count = items.len(), "local game scan completed");
+                                for item in items {
+                                    let platform_slug = item.platform_slug.clone();
+                                    if let Some(slug) = platform_slug.as_deref() {
+                                        let _ = state
+                                            .library
+                                            .add_platform(marina_core::Platform::new(slug, slug))
+                                            .await;
                                     }
-                                    let count = page.items.len() as i64;
-                                    info!(platform = %platform.fs_slug, offset, rows = count, total = ?page.total, "RomM catalog page cached");
-                                    if count == 0
-                                        || page.total.is_some_and(|total| offset + count >= total)
-                                    {
-                                        break;
+                                    let existing = state
+                                        .library
+                                        .search(
+                                            SearchQuery::new()
+                                                .platform(
+                                                    platform_slug.as_deref().unwrap_or_default(),
+                                                )
+                                                .limit(usize::MAX),
+                                        )
+                                        .await
+                                        .ok()
+                                        .and_then(|items| {
+                                            items.into_iter().find(|candidate| {
+                                                candidate.local_path == item.local_path
+                                            })
+                                        });
+                                    let result = if let Some(mut existing) = existing {
+                                        // Scanner data describes filesystem presence only. Preserve
+                                        // provider metadata/assets from an enriched installed record.
+                                        existing.files = item.files;
+                                        state.library.update(existing).await
+                                    } else {
+                                        state.library.add(item).await
+                                    };
+                                    if let Err(error) = result {
+                                        error!(%error, "failed to store scanned local game");
                                     }
-                                    offset += count;
                                 }
                             }
+                            Err(error) => error!(%error, "local game scan failed"),
+                        },
+                        Err(error) => {
+                            error!(%error, path = %root.display(), "could not inspect local library root")
                         }
-                        Err(error) => error!(%error, "RomM catalog platform sync failed"),
-                    }
-                });
-            }
-        } else {
-            info!("RomM startup catalog import disabled by MARINA_IMPORT_ROMM_ON_STARTUP");
-        }
-
-        let platform_metadata = match state.library.platforms().await {
-            Ok(platforms) => platforms,
-            Err(error) => {
-                error!(%error, "platform metadata loading failed");
-                Vec::new()
-            }
-        };
-        info!(
-            count = platform_metadata.len(),
-            "local platform records loaded"
-        );
-        let icon_root =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("ui/assets/platforms/systematic");
-        let mut platform_cards = Vec::with_capacity(platform_metadata.len());
-        for platform in platform_metadata {
-            let game_count = metadata
-                .iter()
-                .filter(|game| game.platform.eq_ignore_ascii_case(&platform.name))
-                .count();
-            let icon_path = platform_asset_path(&icon_root, &platform.slug);
-            platform_cards.push(PlatformCardMetadata {
-                slug: platform.slug,
-                name: platform.name,
-                game_count: format!(
-                    "{} {}",
-                    game_count,
-                    if game_count == 1 { "game" } else { "games" }
-                ),
-                icon_path,
-            });
-        }
-
-        let _ = weak_window.upgrade_in_event_loop(move |window| {
-            let platforms: Vec<PlatformCardData> = platform_cards
-                .into_iter()
-                .map(|platform| PlatformCardData {
-                    slug: SharedString::from(platform.slug),
-                    name: SharedString::from(platform.name),
-                    icon: platform
-                        .icon_path
-                        .and_then(|path| Image::load_from_path(std::path::Path::new(&path)).ok())
-                        .unwrap_or_default(),
-                    game_count: SharedString::from(platform.game_count),
-                })
-                .collect();
-            window.set_platforms(ModelRc::from(std::rc::Rc::new(VecModel::from(platforms))));
-            let games = game_cards(metadata);
-            window.set_games(ModelRc::from(std::rc::Rc::new(VecModel::from(games))));
-            window.set_loading(false);
-            // The Shelf's init callback requests the initial visible range.
-        });
-
-        if let Some(base_url) = state.config.romm_url.clone() {
-            let store_window = weak_window.clone();
-            tokio::spawn(async move {
-                let result = romm_auth::client(base_url, state.config.romm_token.as_deref())
-                    .list_platforms(&PlatformQuery::default())
-                    .await;
-                match result {
-                    Ok(remote_platforms) => {
-                        let icon_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                            .join("ui/assets/platforms/systematic");
-                        let cards = remote_platforms
-                            .into_iter()
-                            .map(|platform| PlatformCardMetadata {
-                                icon_path: platform_asset_path(&icon_root, &platform.fs_slug),
-                                slug: platform.fs_slug,
-                                name: platform.display_name,
-                                game_count: format!("{} games", platform.rom_count),
-                            })
-                            .collect::<Vec<_>>();
-                        let _ = store_window.upgrade_in_event_loop(move |window| {
-                            let cards = cards
-                                .into_iter()
-                                .map(|platform| PlatformCardData {
-                                    slug: SharedString::from(platform.slug),
-                                    name: SharedString::from(platform.name),
-                                    icon: platform
-                                        .icon_path
-                                        .and_then(|path| {
-                                            Image::load_from_path(std::path::Path::new(&path)).ok()
-                                        })
-                                        .unwrap_or_default(),
-                                    game_count: SharedString::from(platform.game_count),
-                                })
-                                .collect::<Vec<_>>();
-                            window.set_store_platforms(ModelRc::from(std::rc::Rc::new(
-                                VecModel::from(cards),
-                            )));
-                            window.set_store_loading(false);
-                        });
-                    }
-                    Err(error) => {
-                        error!(%error, "RomM Store platform loading failed");
-                        let _ = store_window
-                            .upgrade_in_event_loop(|window| window.set_store_loading(false));
                     }
                 }
+            }
+
+            info!("loading game metadata");
+            let loaded = shelf::load_games(&state.library, state.config.romm_url.as_deref()).await;
+            let (metadata, cover_sources) = match loaded {
+                Ok(loaded) => loaded,
+                Err(error) => {
+                    error!(%error, "game metadata loading failed");
+                    return;
+                }
+            };
+            info!(count = metadata.len(), "library loaded");
+            *source_store.lock().expect("cover source state poisoned") = cover_sources.clone();
+            *home_source_store
+                .lock()
+                .expect("home cover source state poisoned") = cover_sources;
+            *state_store.lock().expect("library state lock poisoned") = Some(state.clone());
+
+            if state.config.import_romm_on_startup {
+                if let Some(base_url) = state.config.romm_url.clone() {
+                    let sync_state = state.clone();
+                    tokio::spawn(async move {
+                        let client =
+                            romm_auth::client(base_url, sync_state.config.romm_token.as_deref());
+                        match client.list_platforms(&PlatformQuery::default()).await {
+                            Ok(platforms) => {
+                                for platform in platforms {
+                                    let mut offset = 0_i64;
+                                    loop {
+                                        let query = RomQuery {
+                                            platform_ids: vec![platform.id],
+                                            limit: Some(100),
+                                            offset: Some(offset),
+                                            with_files: Some(true),
+                                            ..Default::default()
+                                        };
+                                        let page = match client.list_roms(&query).await {
+                                            Ok(page) => page,
+                                            Err(error) => {
+                                                error!(%error, platform = %platform.fs_slug, "RomM catalog sync failed");
+                                                break;
+                                            }
+                                        };
+                                        let rows = page
+                                            .items
+                                            .iter()
+                                            .filter_map(|rom| {
+                                                Some((
+                                                    rom.id.to_string(),
+                                                    rom.name.clone().unwrap_or_else(|| {
+                                                        rom.files.fs_name.clone()
+                                                    }),
+                                                    rom.platform.platform_fs_slug.clone(),
+                                                    serde_json::to_string(rom).ok()?,
+                                                ))
+                                            })
+                                            .collect::<Vec<_>>();
+                                        if let Err(error) =
+                                            sync_state.library.upsert_remote_json("romm", &rows)
+                                        {
+                                            error!(%error, "RomM catalog cache write failed");
+                                            break;
+                                        }
+                                        let count = page.items.len() as i64;
+                                        info!(platform = %platform.fs_slug, offset, rows = count, total = ?page.total, "RomM catalog page cached");
+                                        if count == 0
+                                            || page
+                                                .total
+                                                .is_some_and(|total| offset + count >= total)
+                                        {
+                                            break;
+                                        }
+                                        offset += count;
+                                    }
+                                }
+                            }
+                            Err(error) => error!(%error, "RomM catalog platform sync failed"),
+                        }
+                    });
+                }
+            } else {
+                info!("RomM startup catalog import disabled by MARINA_IMPORT_ROMM_ON_STARTUP");
+            }
+
+            let platform_metadata = match state.library.platforms().await {
+                Ok(platforms) => platforms,
+                Err(error) => {
+                    error!(%error, "platform metadata loading failed");
+                    Vec::new()
+                }
+            };
+            info!(
+                count = platform_metadata.len(),
+                "local platform records loaded"
+            );
+            let icon_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("ui/assets/platforms/systematic");
+            let mut platform_cards = Vec::with_capacity(platform_metadata.len());
+            for platform in platform_metadata {
+                let game_count = metadata
+                    .iter()
+                    .filter(|game| game.platform.eq_ignore_ascii_case(&platform.name))
+                    .count();
+                let icon_path = platform_asset_path(&icon_root, &platform.slug);
+                platform_cards.push(PlatformCardMetadata {
+                    slug: platform.slug,
+                    name: platform.name,
+                    game_count: format!(
+                        "{} {}",
+                        game_count,
+                        if game_count == 1 { "game" } else { "games" }
+                    ),
+                    icon_path,
+                });
+            }
+
+            let _ = weak_window.upgrade_in_event_loop(move |window| {
+                let platforms: Vec<PlatformCardData> = platform_cards
+                    .into_iter()
+                    .map(|platform| PlatformCardData {
+                        slug: SharedString::from(platform.slug),
+                        name: SharedString::from(platform.name),
+                        icon: platform
+                            .icon_path
+                            .and_then(|path| {
+                                Image::load_from_path(std::path::Path::new(&path)).ok()
+                            })
+                            .unwrap_or_default(),
+                        game_count: SharedString::from(platform.game_count),
+                    })
+                    .collect();
+                window.set_platforms(ModelRc::from(std::rc::Rc::new(VecModel::from(platforms))));
+                let games = game_cards(metadata);
+                window.set_games(ModelRc::from(std::rc::Rc::new(VecModel::from(games))));
+                window.set_loading(false);
+                // The Shelf's init callback requests the initial visible range.
             });
-        } else {
-            let _ = weak_window.upgrade_in_event_loop(|window| window.set_store_loading(false));
-        }
+        });
     });
 
     window.on_store_search(|query| {
@@ -1153,6 +1168,7 @@ async fn main() -> Result<(), slint::PlatformError> {
         });
     });
 
+    info!("starting Slint event loop; deferred startup work will run in background");
     window.run()
 }
 
@@ -1399,27 +1415,19 @@ async fn export_ui_fixture(path: &str) -> Result<(), Box<dyn std::error::Error +
     Ok(())
 }
 
-fn profile_identity() -> (String, String, String) {
-    let username = std::env::var("USER").unwrap_or_else(|_| "user".into());
-    let gecos = std::fs::read_to_string("/etc/passwd")
-        .ok()
-        .and_then(|passwd| {
-            passwd.lines().find_map(|line| {
-                let fields: Vec<_> = line.split(':').collect();
-                if fields.first().copied() != Some(username.as_str()) {
-                    return None;
-                }
-                fields
-                    .get(4)
-                    .and_then(|gecos| gecos.split(',').next())
-                    .map(str::trim)
-                    .filter(|name| !name.is_empty())
-                    .map(str::to_owned)
-            })
-        });
-    let display_name = gecos.unwrap_or_else(|| username.clone());
-    let initials = profile_initials(&display_name);
-    (username, display_name, initials)
+fn profile_display_name(username: &str, passwd: &str) -> Option<String> {
+    passwd.lines().find_map(|line| {
+        let fields: Vec<_> = line.split(':').collect();
+        if fields.first().copied() != Some(username) {
+            return None;
+        }
+        fields
+            .get(4)
+            .and_then(|gecos| gecos.split(',').next())
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(str::to_owned)
+    })
 }
 
 fn profile_initials(name: &str) -> String {

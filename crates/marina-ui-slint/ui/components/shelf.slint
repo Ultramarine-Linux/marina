@@ -6,6 +6,7 @@ import { GameCard, GameCardData } from "card.slint";
 
 export component ShelfSkeleton inherits Rectangle {
     in property <length> content-height;
+    in property <length> cover-height;
 
     background: transparent;
 
@@ -36,8 +37,8 @@ export component ShelfSkeleton inherits Rectangle {
                 spacing: Tokens.spacing-lg;
 
                 for _ in 6: Skeleton {
-                    width: 200px;
-                    height: 258px;
+                    width: root.cover-height;
+                    height: root.cover-height + 36px;
                     radius: Tokens.radius-lg;
                 }
             }
@@ -49,6 +50,7 @@ export component Shelf inherits Rectangle {
     in property <string> title;
     in property <[GameCardData]> games;
     in property <length> content-height;
+    in property <length> cover-height;
     in-out property <int> selected-index: 0;
     in property <int> focus-request: 0;
     callback viewport-changed(length, length);
@@ -66,14 +68,14 @@ export component Shelf inherits Rectangle {
             if (event.text == Key.LeftArrow) {
                 if (root.games.length > 0) {
                     root.selected-index = max(0, root.selected-index - 1);
-                    flick.viewport-x = min(0px, flick.viewport-x + 216px);
+                    flick.viewport-x = min(0px, flick.viewport-x + root.cover-height + Tokens.spacing-lg);
                 }
                 return accept;
             }
             if (event.text == Key.RightArrow) {
                 if (root.games.length > 0) {
                     root.selected-index = min(root.games.length - 1, root.selected-index + 1);
-                    flick.viewport-x = max(flick.width - root.content-width, flick.viewport-x - 216px);
+                    flick.viewport-x = max(flick.width - root.content-width, flick.viewport-x - root.cover-height - Tokens.spacing-lg);
                 }
                 return accept;
             }
@@ -138,6 +140,7 @@ export component Shelf inherits Rectangle {
                             platform: game.platform;
                             cover-image: game.cover;
                             cover-aspect-ratio: game.cover_ratio;
+                            cover-height-scale: root.cover-height;
                             keyboard-focused: shelf-focus.has-focus && i == root.selected-index;
                             clicked => {
                                 root.selected-index = i;

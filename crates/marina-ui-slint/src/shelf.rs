@@ -5,11 +5,6 @@ use marina_store_sqlite::SqliteLibrary;
 
 use crate::covers::{self, CoverSource};
 
-const CARD_METADATA_HEIGHT: f32 = 58.0;
-const COVER_HEIGHT: f32 = 200.0;
-const SHELF_VERTICAL_PADDING: f32 = 20.0;
-const SCROLLBAR_PADDING: f32 = 8.0;
-
 /// Sendable metadata that can cross from the Tokio task to the UI event loop.
 /// The Slint image is created only after crossing onto the UI thread.
 #[derive(Clone, Debug)]
@@ -23,7 +18,15 @@ pub async fn load_games(
     library: &SqliteLibrary,
     romm_base_url: Option<&str>,
 ) -> Result<(Vec<GameMetadata>, Vec<CoverSource>), LibraryError> {
-    covers::load_games_metadata(library, romm_base_url).await
+    let started = std::time::Instant::now();
+    tracing::info!("loading home game metadata");
+    let result = covers::load_games_metadata(library, romm_base_url).await;
+    tracing::info!(
+        elapsed_ms = started.elapsed().as_millis() as u64,
+        success = result.is_ok(),
+        "home game metadata request finished"
+    );
+    result
 }
 
 /// Loads one alphabetized page of games for a platform.
@@ -58,8 +61,4 @@ pub async fn load_platform_games(
             (metadata, source)
         })
         .unzip())
-}
-
-pub fn shelf_height() -> f32 {
-    COVER_HEIGHT + CARD_METADATA_HEIGHT + SHELF_VERTICAL_PADDING + SCROLLBAR_PADDING
 }

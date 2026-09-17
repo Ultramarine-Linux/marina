@@ -20,6 +20,8 @@ impl AppState {
     /// Loads configuration and initializes the services required by the UI.
     pub(crate) async fn initialize()
     -> Result<AppStateHandle, Box<dyn std::error::Error + Send + Sync>> {
+        let started = std::time::Instant::now();
+        tracing::info!("initializing application state");
         let config = Config::from_env();
 
         tracing::info!(
@@ -31,7 +33,12 @@ impl AppState {
         } else {
             tracing::warn!("MARINA_LIBRARY_ROOT not set; local installation discovery is disabled");
         }
+        tracing::info!("opening library store");
         let library = storage::connect(&config).await?;
+        tracing::info!(
+            elapsed_ms = started.elapsed().as_millis() as u64,
+            "application state ready"
+        );
 
         Ok(Arc::new(Self { config, library }))
     }

@@ -26,7 +26,7 @@ just status
 just stop
 ```
 
-The deploy recipe incrementally uploads the binary to `DEPLOY_PATH` with `rsync` and uploads the user service to `DEPLOY_SERVICE_PATH` with `scp`. Both use temporary files and rename them into place. Interrupted binary transfers retain partial data for resuming. `rsync` must be installed locally and on the handheld. `DEPLOY_SERVICE_PATH` defaults to the global user-unit directory, `/etc/systemd/user/marina-shell.service`. Override it when needed. Override the SSH options when needed:
+The deploy recipe incrementally uploads the binary directly to `DEPLOY_PATH` with `rsync`, so each deployment can delta-transfer against the existing remote binary. The user service is uploaded to `DEPLOY_SERVICE_PATH` with `scp` using a temporary file and rename. If a binary transfer is interrupted, rsync leaves the existing deployed binary untouched and the next run can use it as the delta basis. `rsync` must be installed locally and on the handheld. `DEPLOY_SERVICE_PATH` defaults to the global user-unit directory, `/etc/systemd/user/marina-shell.service`. Override it when needed. Override the SSH options when needed:
 
 ```sh
 MARINA_SSH_OPTS="-i /home/user/.ssh/handheld" just deploy

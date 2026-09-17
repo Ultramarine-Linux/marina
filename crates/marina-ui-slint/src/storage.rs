@@ -10,9 +10,16 @@ use crate::config::Config;
 pub async fn connect(
     config: &Config,
 ) -> Result<SqliteLibrary, Box<dyn std::error::Error + Send + Sync>> {
+    let started = std::time::Instant::now();
+    tracing::info!(uri = %config.storage_uri, "opening SQLite connection");
     let path = config
         .storage_uri
         .strip_prefix("sqlite://")
         .unwrap_or(config.storage_uri.as_str());
-    Ok(SqliteLibrary::open(path)?)
+    let library = SqliteLibrary::open(path)?;
+    tracing::info!(
+        elapsed_ms = started.elapsed().as_millis() as u64,
+        "SQLite connection ready"
+    );
+    Ok(library)
 }
