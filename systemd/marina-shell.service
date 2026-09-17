@@ -1,0 +1,18 @@
+# systemd user service for marina shell
+[Unit]
+Description=Marina game launcher shell
+
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=/opt/marina/marina
+Restart=on-failure
+RestartSec=2s
+
+# The shell is a user application. Keep it in the session's scope and
+# inherit DISPLAY/WAYLAND_DISPLAY/DBUS_SESSION_BUS_ADDRESS from systemd --user.
+
+[Install]
+WantedBy=graphical-session.target
