@@ -110,7 +110,10 @@ impl InputLoop {
                 let started = Instant::now();
                 tracing::info!("controller thread started; building gilrs backend");
                 let build_started = Instant::now();
-                let mut gilrs = match GilrsBuilder::new().build() {
+                // Marina currently consumes controller input only. Disabling gilrs force
+                // feedback avoids opening/managing the Linux FF path, which can
+                // emit unsolicited EV_FF writes on some handheld controllers.
+                let mut gilrs = match GilrsBuilder::new().with_force_feedback(false).build() {
                     Ok(gilrs) => {
                         tracing::info!(
                             elapsed_ms = build_started.elapsed().as_millis() as u64,

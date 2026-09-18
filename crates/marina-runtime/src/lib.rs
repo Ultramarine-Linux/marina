@@ -2,9 +2,10 @@
 
 use std::{path::PathBuf, process::Stdio};
 
-use marina_core::LibraryItem;
+use marina_core::{LibraryItem, Platform};
 use thiserror::Error;
 use tokio::process::Command;
+use tracing::{debug, info, warn};
 use ulid::Ulid;
 
 const SYSTEMD_RUN: &str = "systemd-run";
@@ -55,6 +56,14 @@ pub struct LaunchedGame {
     pub unit_name: String,
 }
 
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub enum RuntimeBackend {
+    #[default]
+    Native,
+    Runtime(String),
+    RetroArch(String),
+}
+
 #[derive(Debug, Error)]
 pub enum LaunchError {
     #[error("game has no local launch path")]
@@ -63,24 +72,103 @@ pub enum LaunchError {
     Spawn(#[source] std::io::Error),
     #[error("systemd-run failed with status {status}: {stderr}")]
     Systemd { status: String, stderr: String },
+    #[error("runtime backend is not implemented: {0}")]
+    UnsupportedBackend(String),
 }
 
 /// Launches games as transient per-user systemd services in `graphical-apps.slice`.
 #[derive(Clone, Debug, Default)]
-pub struct GameLauncher;
+pub struct GameLauncher {
+    backend: RuntimeBackend,
+}
+
+impl RuntimeBackend {
+    pub fn for_platform(platform: &Platform) -> Self {
+        let backend = Self::for_platform_slug(&platform.slug);
+        debug!(platform = %platform.slug, ?backend, "selected runtime backend for platform");
+        backend
+    }
+
+    pub fn for_platform_slug(slug: &str) -> Self {
+        let backend = match slug {
+            // XDG desktop entries are already executable application commands.
+            "apps" => Self::Native,
+            // Platform-specific emulator mappings will be added here.
+            _ => Self::Native,
+        };
+        debug!(platform = %slug, ?backend, "resolved runtime backend slug");
+        backend
+    }
+}
 
 impl GameLauncher {
     pub fn new() -> Self {
-        Self
+        Self::default()
+    }
+
+    pub fn with_backend(backend: RuntimeBackend) -> Self {
+        Self { backend }
+    }
+
+    pub fn backend(&self) -> &RuntimeBackend {
+        &self.backend
     }
 
     pub async fn launch_item(&self, item: &LibraryItem) -> Result<LaunchedGame, LaunchError> {
-        let request = LaunchRequest::from_item(item).ok_or(LaunchError::MissingLocalPath)?;
-        self.launch(request).await
+        debug!(
+            game_id = %item.id,
+            title = %item.title,
+            platform = ?item.platform_slug,
+            configured_backend = ?self.backend,
+            "resolving launch backend"
+        );
+        let request = LaunchRequest::from_item(item).ok_or_else(|| {
+            warn!(game_id = %item.id, "launch request has no executable path");
+            LaunchError::MissingLocalPath
+        })?;
+        let launcher = if self.backend == RuntimeBackend::Native {
+            Self::with_backend(
+                item.platform_slug
+                    .as_deref()
+                    .map(RuntimeBackend::for_platform_slug)
+                    .unwrap_or(RuntimeBackend::Native),
+            )
+        } else {
+            self.clone()
+        };
+        debug!(game_id = %item.id, backend = ?launcher.backend, "dispatching launch request");
+        launcher.launch(request).await
     }
 
     pub async fn launch(&self, request: LaunchRequest) -> Result<LaunchedGame, LaunchError> {
+        debug!(
+            application_id = %request.application_id,
+            executable = %request.executable.display(),
+            arguments = ?request.arguments,
+            working_directory = ?request.working_directory,
+            backend = ?self.backend,
+            "launch backend invoked"
+        );
+        match &self.backend {
+            RuntimeBackend::Native => self.launch_native(request).await,
+            RuntimeBackend::Runtime(runtime) => {
+                warn!(runtime = %runtime, "runtime backend is not implemented");
+                Err(LaunchError::UnsupportedBackend(format!(
+                    "Runtime({runtime})"
+                )))
+            }
+            RuntimeBackend::RetroArch(core) => {
+                warn!(core = %core, "RetroArch backend is not implemented");
+                Err(LaunchError::UnsupportedBackend(format!(
+                    "RetroArch({core})"
+                )))
+            }
+        }
+    }
+
+    async fn launch_native(&self, request: LaunchRequest) -> Result<LaunchedGame, LaunchError> {
         let unit_name = unit_name(&request.application_id);
+        info!(unit = %unit_name, slice = APP_SLICE, "starting native transient launch service");
         let mut command = Command::new(SYSTEMD_RUN);
         command.args(systemd_run_args(&unit_name));
         if let Some(working_directory) = &request.working_directory {
@@ -98,6 +186,7 @@ impl GameLauncher {
             .map_err(LaunchError::Spawn)?;
 
         if !output.status.success() {
+            warn!(unit = %unit_name, status = ?output.status, "native transient launch service failed");
             return Err(LaunchError::Systemd {
                 status: output
                     .status
@@ -153,6 +242,33 @@ mod tests {
             value
                 .bytes()
                 .all(|byte| byte.is_ascii_digit() || (b'A'..=b'Z').contains(&byte))
+        );
+    }
+
+    #[test]
+    fn native_is_the_default_backend() {
+        assert_eq!(RuntimeBackend::default(), RuntimeBackend::Native);
+        assert_eq!(GameLauncher::new().backend(), &RuntimeBackend::Native);
+    }
+
+    #[test]
+    fn platform_backend_defaults_are_explicit() {
+        assert_eq!(
+            RuntimeBackend::for_platform(&Platform::new("apps", "Apps")),
+            RuntimeBackend::Native
+        );
+        assert_eq!(
+            RuntimeBackend::for_platform_slug("snes"),
+            RuntimeBackend::Native
+        );
+    }
+
+    #[test]
+    fn backend_configuration_is_preserved() {
+        let launcher = GameLauncher::with_backend(RuntimeBackend::RetroArch("snes9x".into()));
+        assert_eq!(
+            launcher.backend(),
+            &RuntimeBackend::RetroArch("snes9x".into())
         );
     }
 
