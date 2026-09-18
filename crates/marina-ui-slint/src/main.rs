@@ -131,6 +131,9 @@ async fn main() -> Result<(), slint::PlatformError> {
         .global::<HomeState>()
         .set_games(ModelRc::from(std::rc::Rc::new(VecModel::from(Vec::new()))));
     window
+        .global::<HomeState>()
+        .set_played_games(ModelRc::from(std::rc::Rc::new(VecModel::from(Vec::new()))));
+    window
         .global::<LibraryState>()
         .set_games(ModelRc::from(std::rc::Rc::new(VecModel::from(Vec::new()))));
     window
@@ -186,8 +189,9 @@ async fn main() -> Result<(), slint::PlatformError> {
             }
         });
 
-    ui::launch::install(&window, &library_state);
-    ui::pages::home::install(&window, &library_state, &home_source_store);
+    let played_store = ui::pages::home::new_played_store();
+    ui::launch::install(&window, &library_state, &played_store);
+    ui::pages::home::install(&window, &library_state, &home_source_store, &played_store);
     ui::pages::library::install(&window, &library_state, &library_source_store);
 
     let weak_window = window.as_weak();

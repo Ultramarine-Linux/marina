@@ -9,12 +9,16 @@ use slint::ComponentHandle;
 use tracing::{error, info, warn};
 
 use crate::{GameState, MainWindow, app};
+use crate::ui::pages::home;
 
 pub(crate) fn install(
     window: &MainWindow,
     library_state: &Arc<Mutex<Option<app::AppStateHandle>>>,
+    played_store: &home::PlayedStore,
 ) {
     let play_state = library_state.clone();
+    let played_store = played_store.clone();
+    let played_window = window.as_weak();
     let game_launcher = GameLauncher::new();
     window.global::<GameState>().on_play_requested(move |id| {
         let state = play_state
@@ -30,14 +34,24 @@ pub(crate) fn install(
             return;
         };
         let game_launcher = game_launcher.clone();
+        let played_store = played_store.clone();
+        let played_window = played_window.clone();
         tokio::spawn(async move {
             match state.library.get(&item_id).await {
                 Ok(Some(item)) => match game_launcher.launch_item(&item).await {
-                    Ok(launched) => info!(
-                        game_id = %id,
-                        unit = %launched.unit_name,
-                        "game launch requested"
-                    ),
+                    Ok(launched) => {
+                        info!(
+                            game_id = %id,
+                            unit = %launched.unit_name,
+                            "game launch requested"
+                        );
+                        home::record_played(
+                            &played_store,
+                            &played_window,
+                            &item,
+                            state.config.romm_url.as_deref(),
+                        );
+                    }
                     Err(error) => error!(%error, game_id = %id, "failed to launch game"),
                 },
                 Ok(None) => {
