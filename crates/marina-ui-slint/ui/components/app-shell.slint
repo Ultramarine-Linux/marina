@@ -1,11 +1,9 @@
 import { Tokens } from "../slintcn/theme/tokens.slint";
-import { Button, ButtonVariant, ButtonSize } from "../slintcn/components/button.slint";
+
 import { Avatar } from "../slintcn/components/avatar.slint";
 import { NavigationMenu, NavigationItem } from "../slintcn/components/navigation-menu.slint";
 import { Text as Typography } from "../slintcn/components/text.slint";
 import { TextVariant, TextTone } from "../slintcn/components/text.slint";
-import { LucideIcon } from "../slintcn/components/lucide-icon.slint";
-import { IconSet } from "@lucide/lucide.slint";
 import { ShellPage } from "../pages/route.slint";
 
 export global ShellState {
@@ -19,7 +17,6 @@ export global ShellState {
     in-out property <int> content-focus-request: 0;
     callback navigate(int);
     callback back-requested;
-    callback quit-requested;
 }
 
 // Shared application chrome. Screens are supplied as children and are kept
@@ -34,7 +31,6 @@ export component AppShell inherits Rectangle {
     in-out property <string> search-query;
     callback navigate(int);
     callback focus-content;
-    callback quit-requested;
 
     background: Tokens.color-background.with-alpha(0.92);
     forward-focus: navigation;
@@ -111,7 +107,6 @@ export component AppShell inherits Rectangle {
                                 root.navigate(index);
                             }
                             focus-content => { root.focus-content(); }
-                            focus-settings => { settings-button.focus(); }
                         }
                     }
 
@@ -132,80 +127,6 @@ export component AppShell inherits Rectangle {
             @children
         }
 
-        // Switch-style bottom action row: a rounded pill bar holding the
-        // settings and power buttons. Only the home tab gets it; other tabs
-        // reclaim the space for their content.
-        Rectangle {
-            height: ShellState.page == ShellPage.home
-                ? Tokens.spacing-2xl + Tokens.density-button-default + Tokens.spacing-2xl
-                : 0px;
-            clip: true;
 
-            Rectangle {
-                visible: ShellState.page == ShellPage.home;
-                width: row.preferred-width;
-                height: row.preferred-height;
-                x: (parent.width - self.width) / 2;
-                y: (parent.height - self.height) / 2;
-                border-radius: self.height / 2;
-                background: Tokens.color-card;
-                border-width: 1px;
-                border-color: Tokens.color-border-hairline;
-
-                row := HorizontalLayout {
-                    padding-left: Tokens.spacing-lg;
-                    padding-right: Tokens.spacing-lg;
-                    padding-top: Tokens.spacing-md;
-                    padding-bottom: Tokens.spacing-md;
-                    spacing: Tokens.spacing-md;
-
-                    settings-button := Button {
-                        width: Tokens.density-button-default;
-                        height: Tokens.density-button-default;
-                        variant: ButtonVariant.ghost;
-                        size: ButtonSize.icon;
-                        text: "";
-                        directional-navigation: true;
-                        navigation-requested(direction) => {
-                            if (direction == "right") {
-                                power-button.focus();
-                            } else if (direction == "up") {
-                                root.focus-content();
-                            }
-                        }
-                        LucideIcon {
-                            x: (parent.width - self.width) / 2;
-                            y: (parent.height - self.height) / 2;
-                            icon: IconSet.Settings;
-                            size: Tokens.typography-title-size;
-                        }
-                        // Settings screen will be wired here later.
-                    }
-
-                    power-button := Button {
-                        width: Tokens.density-button-default;
-                        height: Tokens.density-button-default;
-                        variant: ButtonVariant.ghost;
-                        size: ButtonSize.icon;
-                        text: "";
-                        directional-navigation: true;
-                        navigation-requested(direction) => {
-                            if (direction == "left") {
-                                settings-button.focus();
-                            } else if (direction == "up") {
-                                root.focus-content();
-                            }
-                        }
-                        clicked => { root.quit-requested(); }
-                        LucideIcon {
-                            x: (parent.width - self.width) / 2;
-                            y: (parent.height - self.height) / 2;
-                            icon: IconSet.Power;
-                            size: Tokens.typography-title-size;
-                        }
-                    }
-                }
-            }
-        }
     }
 }

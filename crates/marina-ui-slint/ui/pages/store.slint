@@ -30,6 +30,7 @@ export global StoreState {
     in-out property <[PlatformCardData]> platforms;
     in-out property <[GameCardData]> games;
     in-out property <PreviewDetailsData> details;
+    in-out property <[string]> tags;
     in-out property <image> preview-image;
     in-out property <[StoreArtifact]> artifacts;
     in-out property <[bool]> selected-artifacts;
@@ -54,6 +55,7 @@ export component StorePage inherits Rectangle {
     in property <[PlatformCardData]> platforms;
     in property <[GameCardData]> games;
     in property <PreviewDetailsData> details;
+    in property <[string]> tags: [];
     in property <image> preview-image;
     in property <[StoreArtifact]> artifacts;
     in-out property <[bool]> selected-artifacts;
@@ -298,6 +300,7 @@ export component StorePage inherits Rectangle {
     if root.page == 2: GameDetailsView {
         game: root.games[root.selected-game-index];
         details: root.details;
+        tags: root.tags;
         loading: root.details-loading;
         action-label: "Download";
         back => { root.page = 1; }

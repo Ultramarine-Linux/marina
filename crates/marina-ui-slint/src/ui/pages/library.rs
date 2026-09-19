@@ -77,6 +77,7 @@ pub(crate) fn install(
                             warn!(game_id = %id, "library preview item has no local cover asset");
                             None
                         };
+                        let tags = item.tags.clone();
                         let details = preview_details(item);
                         let _ = window.upgrade_in_event_loop(move |window| {
                             let games = window.global::<LibraryState>().get_games();
@@ -97,6 +98,7 @@ pub(crate) fn install(
                                 debug!(game_id = %id, index, "library preview cover applied");
                             }
                             window.global::<GameState>().set_details(details);
+                            window.global::<GameState>().set_tags(crate::string_model(tags));
                             window.global::<GameState>().set_details_loading(false);
                         });
                     }
@@ -116,6 +118,32 @@ pub(crate) fn install(
             });
         });
 
+    let open_window = window.as_weak();
+    window
+        .global::<LibraryState>()
+        .on_game_opened(move |id, index| {
+            let Some(window) = open_window.upgrade() else {
+                return;
+            };
+            let games = window.global::<LibraryState>().get_games();
+            let Some(game) = games.row_data(index.max(0) as usize) else {
+                return;
+            };
+            if game.id != id {
+                return;
+            }
+            window.global::<GameState>().set_selected_game(game);
+            window.global::<GameState>().set_details_loading(true);
+
+            // Defer the route change until the list click callback has unwound.
+            let route_window = window.as_weak();
+            let _ = route_window.upgrade_in_event_loop(|window| {
+                window
+                    .global::<ShellState>()
+                    .set_page(ShellPage::GameDetails);
+            });
+        });
+
     let open_state = library_state.clone();
     let open_window = window.as_weak();
     window.global::<HomeState>().on_game_opened(move |id| {
@@ -130,10 +158,18 @@ pub(crate) fn install(
             return;
         };
         window.global::<GameState>().set_selected_game(game);
-        window
-            .global::<ShellState>()
-            .set_page(ShellPage::GameDetails);
         window.global::<GameState>().set_details_loading(true);
+
+        // Changing routes synchronously from the card's click callback deletes
+        // the callback's parent item while Slint is still dispatching the
+        // pointer event (Slint issue #6426). Defer the destructive tree change
+        // until the callback has unwound.
+        let route_window = window.as_weak();
+        let _ = route_window.upgrade_in_event_loop(|window| {
+            window
+                .global::<ShellState>()
+                .set_page(ShellPage::GameDetails);
+        });
 
         let state = open_state
             .lock()
@@ -173,8 +209,16 @@ pub(crate) fn install(
                     } else {
                         None
                     };
+                    let tags = item.tags.clone();
                     let details = preview_details(item);
                     let _ = detail_window.upgrade_in_event_loop(move |window| {
+                        let game_state = window.global::<GameState>();
+                        if game_state.get_selected_game().id != id
+                            || window.global::<ShellState>().get_page() != ShellPage::GameDetails
+                        {
+                            debug!(game_id = %id, "discarding stale game details");
+                            return;
+                        }
                         if let Some(decoded) = detail_image {
                             let (image, _) = image::into_slint_image(decoded);
                             window
@@ -185,6 +229,9 @@ pub(crate) fn install(
                                 });
                         }
                         window.global::<GameState>().set_details(details);
+                        window
+                            .global::<GameState>()
+                            .set_tags(crate::string_model(tags));
                         window.global::<GameState>().set_details_loading(false);
                     });
                 }

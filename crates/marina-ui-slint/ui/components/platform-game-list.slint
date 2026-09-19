@@ -3,7 +3,7 @@ import { Tokens } from "../slintcn/theme/tokens.slint";
 import { Skeleton } from "../slintcn/components/skeleton.slint";
 import { Text as Typography } from "../slintcn/components/text.slint";
 import { TextVariant, TextTone } from "../slintcn/components/text.slint";
-import { Button } from "../slintcn/components/button.slint";
+
 import { GameCardData } from "card.slint";
 import { PreviewDetailsData } from "preview-details.slint";
 
@@ -16,16 +16,16 @@ export component PlatformGameList inherits Rectangle {
     // losing the user's position in the platform.
     in-out property <length> scroll-y: 0px;
     in-out property <bool> details-loading: false;
-    in property <string> action-label: "Open";
+
     in property <bool> keyboard-active: false;
     in property <int> focus-request: 0;
     callback selected(string, int);
-    callback action-requested(string, int);
+    callback activate-requested;
     callback focus-header;
 
     private property <int> safe-index:
         min(max(root.selected-index, 0), max(root.games.length - 1, 0));
-    private property <int> preview-focus-request: 0;
+
 
     background: transparent;
     forward-focus: list-focus;
@@ -48,10 +48,7 @@ export component PlatformGameList inherits Rectangle {
         width: 0px;
         height: 0px;
         key-pressed(event) => {
-            if (event.text == Key.RightArrow) {
-                root.preview-focus-request += 1;
-                return accept;
-            }
+
             if (event.text == Key.UpArrow) {
                 if (root.safe-index == 0) {
                     root.focus-header();
@@ -66,6 +63,7 @@ export component PlatformGameList inherits Rectangle {
             }
             if ((event.text == "\n" || event.text == " ") && root.games.length > 0) {
                 root.select-index(root.safe-index);
+                root.activate-requested();
                 return accept;
             }
             return reject;
@@ -111,6 +109,7 @@ export component PlatformGameList inherits Rectangle {
                         clicked => {
                             list-focus.focus();
                             root.select-index(i);
+                            root.activate-requested();
                         }
                     }
                 }
@@ -149,23 +148,11 @@ export component PlatformGameList inherits Rectangle {
                         overflow: elide;
                     }
 
-                    preview-action := Button {
-                        text: root.action-label;
-                        directional-navigation: true;
-                        focus-request: root.preview-focus-request;
-                        navigation-requested(direction) => {
-                            if (direction == "left") {
-                                list-focus.focus();
-                            }
-                        }
-                        clicked => { root.action-requested(root.games[root.safe-index].id, root.safe-index); }
-                    }
-
                     Rectangle { horizontal-stretch: 1; }
                 }
 
                 Rectangle {
-                    height: 260px;
+                    height: 180px;
                     background: Tokens.color-surface-2;
                     border-radius: Tokens.radius-md;
                     clip: true;

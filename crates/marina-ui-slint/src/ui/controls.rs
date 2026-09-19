@@ -73,12 +73,6 @@ pub(crate) fn configure_navigation(window: &MainWindow) {
         });
         window.invoke_focus_navigation();
     });
-
-    window
-        .global::<ShellState>()
-        .on_quit_requested(move || {
-            let _ = slint::quit_event_loop();
-        });
 }
 
 pub(crate) fn dispatch_controller_action(window: &MainWindow, event: InputEvent) {

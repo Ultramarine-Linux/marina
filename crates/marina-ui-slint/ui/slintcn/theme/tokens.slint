@@ -52,13 +52,9 @@ export global Tokens {
     out property <color> color-scrim-1: Palette.alpha-b-45;
 
     // focus / interaction
-    out property <color> color-ring:
-        Theme.mode == ThemeMode.light ? Palette.neutral-700 : Palette.neutral-500;
-    // Translucent ring for the shadcn `ring-[3px] ring-ring/50` focus look.
-    out property <color> color-ring-muted:
-        Theme.mode == ThemeMode.light
-            ? Palette.neutral-700.with-alpha(0.5)
-            : Palette.neutral-500.with-alpha(0.5);
+    out property <color> color-ring: Palette.blue-500;
+    // Translucent blue ring for the shadcn `ring-[3px] ring-ring/50` focus look.
+    out property <color> color-ring-muted: Palette.blue-500.with-alpha(0.65);
     out property <length> focus-ring-width:  3px;
     out property <length> focus-ring-offset: 2px;
 

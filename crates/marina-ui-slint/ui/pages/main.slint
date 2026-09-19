@@ -45,7 +45,6 @@ export component MainWindow inherits Window {
         search-query <=> ShellState.search-query;
         navigate(index) => { ShellState.navigate(index); }
         focus-content => { ShellState.content-focus-request += 1; }
-        quit-requested => { ShellState.quit-requested(); }
 
         PageRouter { }
     }

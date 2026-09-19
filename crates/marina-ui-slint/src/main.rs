@@ -142,6 +142,12 @@ async fn main() -> Result<(), slint::PlatformError> {
     window
         .global::<GameState>()
         .set_details(empty_preview_details());
+    window
+        .global::<GameState>()
+        .set_tags(ModelRc::from(std::rc::Rc::new(VecModel::from(Vec::<
+            SharedString,
+        >::new(
+        )))));
 
     window.global::<HomeState>().set_loading(true);
     window.global::<LibraryState>().set_loading(false);
@@ -498,6 +504,7 @@ fn populate_store_details(window: &slint::Weak<MainWindow>, rom: marina_romm::Ro
     }
     let mut artifacts = Vec::new();
     artifact_tree.flatten(0, &mut artifacts);
+    let tags = item.tags.clone();
     let details = PreviewDetailsData {
         title: SharedString::from(item.title),
         summary: SharedString::from(item.summary.unwrap_or_default()),
@@ -520,6 +527,7 @@ fn populate_store_details(window: &slint::Weak<MainWindow>, rom: marina_romm::Ro
             return;
         }
         window.global::<StoreState>().set_details(details);
+        window.global::<StoreState>().set_tags(string_model(tags));
         window
             .global::<StoreState>()
             .set_preview_image(Image::default());
@@ -786,6 +794,15 @@ fn preview_details(item: marina_core::LibraryItem) -> PreviewDetailsData {
         regions: SharedString::from(item.regions.join(", ")),
         tags: SharedString::from(item.tags.join(", ")),
     }
+}
+
+fn string_model(values: Vec<String>) -> ModelRc<SharedString> {
+    ModelRc::from(std::rc::Rc::new(VecModel::from(
+        values
+            .into_iter()
+            .map(SharedString::from)
+            .collect::<Vec<_>>(),
+    )))
 }
 
 fn platform_asset_path(root: &std::path::Path, slug: &str) -> Option<String> {

@@ -24,6 +24,7 @@ export component PageRouter inherits Rectangle {
     if ShellState.page == ShellPage.game-details: GameDetailsView {
         game: GameState.selected-game;
         details: GameState.details;
+        tags: GameState.tags;
         loading: GameState.details-loading;
         focus-request: ShellState.content-focus-request;
         back => { ShellState.back-requested(); }
@@ -96,6 +97,7 @@ export component PageRouter inherits Rectangle {
         loading <=> LibraryState.loading;
         platform-query(slug) => { LibraryState.platform-query(slug); }
         game-selected(id, index) => { LibraryState.game-selected(id, index); }
+        game-opened(id, index) => { LibraryState.game-opened(id, index); }
         focus-header => { root.focus-header(); }
     }
 
@@ -103,6 +105,7 @@ export component PageRouter inherits Rectangle {
         platforms: StoreState.platforms;
         games: StoreState.games;
         details: StoreState.details;
+        tags: StoreState.tags;
         preview-image: StoreState.preview-image;
         artifacts: StoreState.artifacts;
         selected-artifacts <=> StoreState.selected-artifacts;
