@@ -210,22 +210,6 @@ export component Shelf inherits Rectangle {
                 }
             }
 
-            if root.content-width > flick.width: Rectangle {
-                x: 4px;
-                y: parent.height - 8px;
-                width: parent.width - 8px;
-                height: 6px;
-                background: transparent;
-
-                Rectangle {
-                    y: 0;
-                    height: parent.height;
-                    width: max(24px, flick.width * flick.width / root.content-width);
-                    x: -flick.viewport-x * flick.width / root.content-width;
-                    background: Tokens.color-border-hairline-strong;
-                    border-radius: 3px;
-                }
-            }
         }
     }
 }

@@ -93,7 +93,7 @@ export component PageRouter inherits Rectangle {
         selected-game-index <=> LibraryState.selected-game-index;
         focus-request: ShellState.content-focus-request;
         game-list-scroll-y <=> LibraryState.game-list-scroll-y;
-        initial-loading: HomeState.loading;
+        initial-loading: LibraryState.loading;
         loading <=> LibraryState.loading;
         platform-query(slug) => { LibraryState.platform-query(slug); }
         game-selected(id, index) => { LibraryState.game-selected(id, index); }
@@ -115,7 +115,6 @@ export component PageRouter inherits Rectangle {
         selected-game-index <=> StoreState.selected-game-index;
         selected-artifact-index <=> StoreState.selected-artifact-index;
         game-list-scroll-y <=> StoreState.game-list-scroll-y;
-        search-query <=> ShellState.search-query;
         loading <=> StoreState.loading;
         details-loading <=> StoreState.details-loading;
         install-status <=> StoreState.install-status;

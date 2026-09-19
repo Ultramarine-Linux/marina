@@ -303,11 +303,21 @@ pub(crate) fn install(
     let library_refresh_state = library_state.clone();
     let library_refresh_window = window.as_weak();
     window.global::<LibraryState>().on_entered(move || {
+        let loading_window = library_refresh_window.clone();
+        let _ = loading_window.upgrade_in_event_loop(|window| {
+            let library = window.global::<LibraryState>();
+            if library.get_platforms().row_count() == 0 {
+                library.set_loading(true);
+            }
+        });
         let Some(state) = library_refresh_state
             .lock()
             .ok()
             .and_then(|state| state.clone())
         else {
+            let _ = loading_window.upgrade_in_event_loop(|window| {
+                window.global::<LibraryState>().set_loading(false);
+            });
             return;
         };
         let window = library_refresh_window.clone();
@@ -318,85 +328,131 @@ pub(crate) fn install(
             if let Err(error) = marina_apps::sync(&state.library, discovered_apps).await {
                 error!(%error, "library Apps rescan failed");
             }
-            let metadata = match load_games(&state.library, state.config.romm_url.as_deref()).await
-            {
-                Ok((metadata, _)) => metadata,
-                Err(error) => {
-                    error!(%error, "library game metadata refresh failed");
-                    return;
-                }
-            };
+
             let platforms = match state.library.platforms().await {
                 Ok(platforms) => platforms,
                 Err(error) => {
                     error!(%error, "library platform refresh failed");
+                    let _ = window.upgrade_in_event_loop(|window| {
+                        window.global::<LibraryState>().set_loading(false);
+                    });
                     return;
                 }
             };
-            let mut platform_names = platforms
+            let platform_names = platforms
                 .into_iter()
                 .map(|platform| (platform.slug, platform.name))
                 .collect::<BTreeMap<_, _>>();
-            for game in metadata {
-                if game.platform.is_empty() {
-                    continue;
-                }
-                // A newly added game may precede an explicit platform record.
-                // Its stable platform slug is still sufficient to browse it.
-                platform_names
-                    .entry(game.platform.clone())
-                    .or_insert(game.platform);
-            }
 
-            let mut platform_counts = BTreeMap::<String, usize>::new();
-            for slug in platform_names.keys() {
-                let count = match state.library.count(SearchQuery::new().platform(slug)).await {
-                    Ok(count) => count,
-                    Err(error) => {
-                        error!(%error, platform = %slug, "library platform count refresh failed");
-                        return;
-                    }
-                };
-                platform_counts.insert(slug.clone(), count);
-            }
-
-            let icon_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("ui/assets/platforms/systematic");
-            let mut cards = Vec::new();
-            for (slug, name) in platform_names {
-                let game_count = platform_counts.get(&slug).copied().unwrap_or_default();
-                let icon = match platform_asset_path(&icon_root, &slug) {
-                    Some(path) => image::load_path_scaled(path, "platform-icon", 256).await,
-                    None => None,
-                };
-                cards.push(PlatformCardMetadata {
-                    icon_path: None,
-                    icon,
-                    slug,
-                    name,
-                    game_count: format!(
-                        "{} {}",
-                        game_count,
-                        if game_count == 1 { "game" } else { "games" }
-                    ),
-                });
-            }
+            let initial_platforms = platform_names
+                .iter()
+                .map(|(slug, name)| (slug.clone(), name.clone()))
+                .collect::<Vec<_>>();
             let _ = window.upgrade_in_event_loop(move |window| {
-                let cards = cards
+                let initial_cards = initial_platforms
                     .into_iter()
-                    .map(|platform| PlatformCardData {
-                        slug: SharedString::from(platform.slug),
-                        name: SharedString::from(platform.name),
-                        game_count: SharedString::from(platform.game_count),
-                        icon: platform
-                            .icon
-                            .map(|decoded| image::into_slint_image(decoded).0)
-                            .unwrap_or_default(),
+                    .map(|(slug, name)| PlatformCardData {
+                        slug: SharedString::from(slug),
+                        name: SharedString::from(name),
+                        game_count: SharedString::from("Loading…"),
+                        icon: Default::default(),
                     })
                     .collect::<Vec<_>>();
-                window
-                    .global::<LibraryState>()
-                    .set_platforms(ModelRc::from(std::rc::Rc::new(VecModel::from(cards))));
+                let library = window.global::<LibraryState>();
+                if library.get_platforms().row_count() == 0 {
+                    library.set_platforms(ModelRc::from(std::rc::Rc::new(VecModel::from(
+                        initial_cards,
+                    ))));
+                }
+                library.set_loading(false);
+            });
+
+            let result: Result<Vec<PlatformCardMetadata>, String> = async {
+                let platform_names = platform_names.clone();
+                let mut platform_counts = BTreeMap::<String, usize>::new();
+                for slug in platform_names.keys() {
+                    let count = state
+                        .library
+                        .count(SearchQuery::new().platform(slug))
+                        .await
+                        .map_err(|error| format!("{slug}: {error}"))?;
+                    platform_counts.insert(slug.clone(), count);
+                }
+
+                let mut cards = Vec::new();
+                for (slug, name) in platform_names {
+                    let game_count = platform_counts.get(&slug).copied().unwrap_or_default();
+                    cards.push(PlatformCardMetadata {
+                        icon_path: None,
+                        icon: None,
+                        slug,
+                        name,
+                        game_count: format!(
+                            "{} {}",
+                            game_count,
+                            if game_count == 1 { "game" } else { "games" }
+                        ),
+                    });
+                }
+                Ok(cards)
+            }
+            .await;
+
+            if let Err(error) = &result {
+                error!(%error, "library platform refresh failed");
+            }
+            let _ = window.upgrade_in_event_loop(move |window| {
+                if let Ok(cards) = result {
+                    let icon_slugs = cards
+                        .iter()
+                        .map(|platform| platform.slug.clone())
+                        .collect::<Vec<_>>();
+                    let cards = cards
+                        .into_iter()
+                        .map(|platform| PlatformCardData {
+                            slug: SharedString::from(platform.slug),
+                            name: SharedString::from(platform.name),
+                            game_count: SharedString::from(platform.game_count),
+                            icon: Default::default(),
+                        })
+                        .collect::<Vec<_>>();
+                    let model = std::rc::Rc::new(VecModel::from(cards));
+                    window
+                        .global::<LibraryState>()
+                        .set_platforms(ModelRc::from(model.clone()));
+                    window.global::<LibraryState>().set_loading(false);
+
+                    for (index, slug) in icon_slugs.into_iter().enumerate() {
+                        let icon_window = window.as_weak();
+                        tokio::spawn(async move {
+                            let Some(path) = platform_asset_path(
+                                &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                                    .join("ui/assets/platforms/systematic"),
+                                &slug,
+                            ) else {
+                                return;
+                            };
+                            let Some(decoded) =
+                                image::load_path_scaled(path, "platform-icon", 256).await
+                            else {
+                                return;
+                            };
+                            let _ = icon_window.upgrade_in_event_loop(move |window| {
+                                let model = window.global::<LibraryState>().get_platforms();
+                                if let Some(model) =
+                                    model.as_any().downcast_ref::<VecModel<PlatformCardData>>()
+                                {
+                                    if let Some(mut platform) = model.row_data(index) {
+                                        platform.icon = image::into_slint_image(decoded).0;
+                                        model.set_row_data(index, platform);
+                                    }
+                                }
+                            });
+                        });
+                    }
+                } else {
+                    window.global::<LibraryState>().set_loading(false);
+                }
             });
         });
     });

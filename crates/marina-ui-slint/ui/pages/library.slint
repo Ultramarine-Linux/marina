@@ -1,7 +1,8 @@
 import { ListView } from "std-widgets.slint";
 import { Tokens } from "../slintcn/theme/tokens.slint";
-import { Input } from "../slintcn/components/input.slint";
+
 import { Skeleton } from "../slintcn/components/skeleton.slint";
+import { Empty } from "../slintcn/components/empty.slint";
 import { Text as Typography } from "../slintcn/components/text.slint";
 import { TextVariant, TextTone } from "../slintcn/components/text.slint";
 import { PlatformCardData } from "../components/platform-card.slint";
@@ -28,7 +29,7 @@ export component LibraryPage inherits Rectangle {
     in property <[GameCardData]> games;
     in property <PreviewDetailsData> details;
     in-out property <int> page: 0;
-    in-out property <string> search-query;
+
     in-out property <string> selected-platform;
     in-out property <string> selected-platform-name;
     in-out property <int> selected-platform-index: 0;
@@ -136,49 +137,6 @@ export component LibraryPage inherits Rectangle {
     if root.page == 0: VerticalLayout {
         spacing: Tokens.spacing-lg;
 
-        HorizontalLayout {
-            height: 38px;
-            padding-left: Tokens.spacing-2xl;
-            padding-right: Tokens.spacing-2xl;
-            spacing: Tokens.spacing-sm;
-
-            Typography {
-                text: "Platforms";
-                variant: TextVariant.headline;
-                vertical-alignment: center;
-            }
-
-            Rectangle {
-                width: 36px;
-                height: 24px;
-                y: (parent.height - self.height) / 2;
-                background: Tokens.color-surface-2;
-                border-radius: Tokens.radius-sm;
-
-                Typography {
-                    text: root.platforms.length;
-                    variant: TextVariant.caption;
-                    tone: TextTone.muted;
-                    width: parent.width;
-                    height: parent.height;
-                    horizontal-alignment: center;
-                    vertical-alignment: center;
-                }
-            }
-
-            Rectangle { horizontal-stretch: 1; }
-
-            Input {
-                width: 260px;
-                text <=> root.search-query;
-                placeholder: "Search platforms...";
-            }
-        }
-
-        Rectangle {
-            height: 1px;
-            background: Tokens.color-border-hairline;
-        }
 
         if root.initial-loading: HorizontalLayout {
             padding-left: Tokens.spacing-2xl;
@@ -192,7 +150,14 @@ export component LibraryPage inherits Rectangle {
             }
         }
 
-        if !root.initial-loading: ListView {
+        if !root.initial-loading && root.platforms.length == 0: Empty {
+            width: parent.width;
+            vertical-stretch: 1;
+            title: "No platforms found";
+            description: "Your library does not contain any platforms yet.";
+            action-label: "";
+        }
+        if !root.initial-loading && root.platforms.length > 0: ListView {
             width: parent.width;
             vertical-stretch: 1;
             viewport-y <=> root.platform-list-scroll-y;
@@ -286,7 +251,14 @@ export component LibraryPage inherits Rectangle {
             }
         }
 
-        if !root.loading: PlatformGameList {
+        if !root.loading && root.games.length == 0: Empty {
+            width: parent.width;
+            vertical-stretch: 1;
+            title: "No games found";
+            description: "This platform does not contain any games yet.";
+            action-label: "";
+        }
+        if !root.loading && root.games.length > 0: PlatformGameList {
             games: root.games;
             details: root.details;
             details-loading <=> root.details-loading;

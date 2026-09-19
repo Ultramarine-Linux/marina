@@ -400,19 +400,11 @@ async fn main() -> Result<(), slint::PlatformError> {
                 .join("ui/assets/platforms/systematic");
             let mut platform_cards = Vec::with_capacity(platform_metadata.len());
             for platform in platform_metadata {
-                let game_count = metadata
-                    .iter()
-                    .filter(|game| game.platform.eq_ignore_ascii_case(&platform.name))
-                    .count();
                 let icon_path = platform_asset_path(&icon_root, &platform.slug);
                 platform_cards.push(PlatformCardMetadata {
                     slug: platform.slug,
                     name: platform.name,
-                    game_count: format!(
-                        "{} {}",
-                        game_count,
-                        if game_count == 1 { "game" } else { "games" }
-                    ),
+                    game_count: "Loading…".to_owned(),
                     icon_path,
                     icon: None,
                 });
@@ -424,6 +416,12 @@ async fn main() -> Result<(), slint::PlatformError> {
                     platform.icon_path.clone().map(|path| (index, path))
                 })
                 .collect::<Vec<_>>();
+            let count_jobs = platform_cards
+                .iter()
+                .enumerate()
+                .map(|(index, platform)| (index, platform.slug.clone()))
+                .collect::<Vec<_>>();
+
             let icon_window = weak_window.clone();
             let _ = weak_window.upgrade_in_event_loop(move |window| {
                 let platforms: Vec<PlatformCardData> = platform_cards
@@ -459,6 +457,26 @@ async fn main() -> Result<(), slint::PlatformError> {
                             platforms.set_row_data(index, platform);
                         }
                     });
+                });
+            }
+            for (index, slug) in count_jobs {
+                let Ok(count) = state
+                    .library
+                    .count(SearchQuery::new().platform(&slug))
+                    .await
+                else {
+                    continue;
+                };
+                let _ = weak_window.upgrade_in_event_loop(move |window| {
+                    let platforms = window.global::<LibraryState>().get_platforms();
+                    if let Some(mut platform) = platforms.row_data(index) {
+                        platform.game_count = SharedString::from(format!(
+                            "{} {}",
+                            count,
+                            if count == 1 { "game" } else { "games" }
+                        ));
+                        platforms.set_row_data(index, platform);
+                    }
                 });
             }
         });
