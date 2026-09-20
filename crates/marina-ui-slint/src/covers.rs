@@ -59,6 +59,12 @@ pub struct ViewportLoader {
     played_sources: Arc<Mutex<Vec<CoverSource>>>,
     loading: Arc<Mutex<HashSet<(u64, Page, Shelf, usize)>>>,
     resident: Arc<Mutex<HashSet<(Page, Shelf, usize)>>>,
+    /// Indexes whose load failed — or had no source at all — in this
+    /// generation. Consulted alongside `resident` so failures are not
+    /// retried on every viewport update (notably every scroll frame, when
+    /// `update` runs per frame and each attempt spawns a doomed task).
+    /// Cleared by `reset()`, so replaced sources get a fresh attempt.
+    failed: Arc<Mutex<HashSet<(u64, Page, Shelf, usize)>>>,
     visible: Arc<Mutex<HashMap<(Page, Shelf), f32>>>,
     generation: Arc<AtomicU64>,
     last_viewport: HashMap<Shelf, (f32, f32, f32)>,
@@ -72,6 +78,7 @@ impl ViewportLoader {
             played_sources: Arc::new(Mutex::new(Vec::new())),
             loading: Arc::new(Mutex::new(HashSet::new())),
             resident: Arc::new(Mutex::new(HashSet::new())),
+            failed: Arc::new(Mutex::new(HashSet::new())),
             visible: Arc::new(Mutex::new(HashMap::new())),
             generation: Arc::new(AtomicU64::new(0)),
             last_viewport: HashMap::new(),
@@ -103,6 +110,10 @@ impl ViewportLoader {
         self.resident
             .lock()
             .expect("cover resident state poisoned")
+            .clear();
+        self.failed
+            .lock()
+            .expect("cover failed state poisoned")
             .clear();
     }
 
@@ -219,6 +230,7 @@ impl ViewportLoader {
         let key_shelf = shelf;
         let resident = self.resident.clone();
         let loading = self.loading.clone();
+        let failed = self.failed.clone();
         for index in 0..games.row_count() {
             if !wanted.contains(&index) {
                 let was_resident = resident
@@ -235,25 +247,50 @@ impl ViewportLoader {
             }
         }
         for index in wanted {
+            let key = (generation, key_page, key_shelf, index);
             if resident
                 .lock()
                 .expect("cover resident state poisoned")
                 .contains(&(key_page, key_shelf, index))
+                || failed
+                    .lock()
+                    .expect("cover failed state poisoned")
+                    .contains(&key)
                 || !loading
                     .lock()
                     .expect("cover loading state poisoned")
-                    .insert((generation, key_page, key_shelf, index))
+                    .insert(key)
             {
                 continue;
             }
-            let Some(source) = sources.get(index).cloned() else {
-                warn!(?key_page, ?key_shelf, index, "cover source index missing");
-                continue;
-            };
             let title = games
                 .row_data(index)
                 .map(|game| game.title.to_string())
                 .unwrap_or_else(|| "<missing>".to_owned());
+            let Some(source) = sources.get(index).cloned() else {
+                loading
+                    .lock()
+                    .expect("cover loading state poisoned")
+                    .remove(&key);
+                failed
+                    .lock()
+                    .expect("cover failed state poisoned")
+                    .insert(key);
+                warn!(?key_page, ?key_shelf, index, %title, "cover source index missing");
+                continue;
+            };
+            if source.is_empty() {
+                loading
+                    .lock()
+                    .expect("cover loading state poisoned")
+                    .remove(&key);
+                failed
+                    .lock()
+                    .expect("cover failed state poisoned")
+                    .insert(key);
+                debug!(?key_page, ?key_shelf, index, %title, "no cover source; skipping load");
+                continue;
+            }
             debug!(
                 ?key_page,
                 ?key_shelf,
@@ -269,6 +306,7 @@ impl ViewportLoader {
             let visible = self.visible.clone();
             let resident = resident.clone();
             let loading = loading.clone();
+            let failed = failed.clone();
             tokio::spawn(async move {
                 let decoded = image_loader::load_scaled(
                     &image_loader::ImageSource::from(&source),
@@ -295,6 +333,10 @@ impl ViewportLoader {
                     return;
                 }
                 let Some(decoded) = decoded else {
+                    failed
+                        .lock()
+                        .expect("cover failed state poisoned")
+                        .insert((generation, key_page, key_shelf, index));
                     warn!(?key_page, ?key_shelf, index, %title, "cover decode failed");
                     return;
                 };
