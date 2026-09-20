@@ -1,11 +1,9 @@
 import { Tokens } from "../slintcn/theme/tokens.slint";
-import { Button, ButtonVariant, ButtonSize } from "../slintcn/components/button.slint";
+
 import { Avatar } from "../slintcn/components/avatar.slint";
 import { NavigationMenu, NavigationItem } from "../slintcn/components/navigation-menu.slint";
 import { Text as Typography } from "../slintcn/components/text.slint";
 import { TextVariant, TextTone } from "../slintcn/components/text.slint";
-import { LucideIcon } from "../slintcn/components/lucide-icon.slint";
-import { IconSet } from "@lucide/lucide.slint";
 import { ShellPage } from "../pages/route.slint";
 
 export global ShellState {
@@ -44,7 +42,7 @@ export component AppShell inherits Rectangle {
             height: Tokens.spacing-2xl + Tokens.density-button-default + Tokens.spacing-2xl;
 
             // Allocate three equal regions so each chrome element can anchor
-            // independently: profile left, navigation center, settings right.
+            // independently: profile left, navigation center, spacer right.
             Rectangle {
                 x: Tokens.spacing-2xl;
                 y: Tokens.spacing-2xl;
@@ -109,40 +107,16 @@ export component AppShell inherits Rectangle {
                                 root.navigate(index);
                             }
                             focus-content => { root.focus-content(); }
-                            focus-settings => { settings-button.focus(); }
                         }
                     }
 
+                    // Empty spacer balancing the profile region so the
+                    // navigation stays centered.
                     Rectangle {
                         min-width: 0px;
                         preferred-width: 0px;
                         horizontal-stretch: 1;
                         height: parent.height;
-
-                        settings-button := Button {
-                            x: parent.width - Tokens.density-button-default;
-                            y: 0px;
-                            width: Tokens.density-button-default;
-                            height: Tokens.density-button-default;
-                            variant: ButtonVariant.ghost;
-                            size: ButtonSize.icon;
-                            text: "";
-                            directional-navigation: true;
-                            navigation-requested(direction) => {
-                                if (direction == "left" || direction == "up") {
-                                    navigation.focus();
-                                } else if (direction == "down") {
-                                    root.focus-content();
-                                }
-                            }
-                            LucideIcon {
-                                x: (parent.width - self.width) / 2;
-                                y: (parent.height - self.height) / 2;
-                                icon: IconSet.Settings;
-                                size: Tokens.typography-title-size;
-                            }
-                            // Settings screen will be wired here later.
-                        }
                     }
                 }
             }
@@ -152,5 +126,7 @@ export component AppShell inherits Rectangle {
             vertical-stretch: 1;
             @children
         }
+
+
     }
 }

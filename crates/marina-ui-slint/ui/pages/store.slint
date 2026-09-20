@@ -1,8 +1,9 @@
 import { ListView } from "std-widgets.slint";
 import { Tokens } from "../slintcn/theme/tokens.slint";
 import { Button, ButtonVariant, ButtonSize } from "../slintcn/components/button.slint";
-import { Input } from "../slintcn/components/input.slint";
+
 import { Skeleton } from "../slintcn/components/skeleton.slint";
+import { Empty } from "../slintcn/components/empty.slint";
 import { Text as Typography } from "../slintcn/components/text.slint";
 import { TextVariant, TextTone } from "../slintcn/components/text.slint";
 import { ScrollArea } from "../slintcn/components/scroll-area.slint";
@@ -30,6 +31,7 @@ export global StoreState {
     in-out property <[PlatformCardData]> platforms;
     in-out property <[GameCardData]> games;
     in-out property <PreviewDetailsData> details;
+    in-out property <[string]> tags;
     in-out property <image> preview-image;
     in-out property <[StoreArtifact]> artifacts;
     in-out property <[bool]> selected-artifacts;
@@ -54,13 +56,14 @@ export component StorePage inherits Rectangle {
     in property <[PlatformCardData]> platforms;
     in property <[GameCardData]> games;
     in property <PreviewDetailsData> details;
+    in property <[string]> tags: [];
     in property <image> preview-image;
     in property <[StoreArtifact]> artifacts;
     in-out property <[bool]> selected-artifacts;
     in-out property <int> page: 0;
     in-out property <int> selected-game-index: 0;
     in-out property <int> selected-artifact-index: 0;
-    in-out property <string> search-query;
+
     in-out property <string> selected-platform;
     in-out property <string> selected-platform-name;
     in-out property <int> selected-platform-index: 0;
@@ -181,16 +184,7 @@ export component StorePage inherits Rectangle {
 
     if root.page == 0: VerticalLayout {
         spacing: Tokens.spacing-lg;
-        HorizontalLayout {
-            height: 38px;
-            padding-left: Tokens.spacing-2xl;
-            padding-right: Tokens.spacing-2xl;
-            spacing: Tokens.spacing-sm;
-            Typography { text: "Store"; variant: TextVariant.headline; vertical-alignment: center; }
-            Rectangle { horizontal-stretch: 1; }
-            Input { width: 260px; text <=> root.search-query; placeholder: "Search platforms..."; }
-        }
-        Rectangle { height: 1px; background: Tokens.color-border-hairline; }
+
         if root.loading: HorizontalLayout {
             padding-left: Tokens.spacing-2xl;
             padding-right: Tokens.spacing-2xl;
@@ -198,7 +192,14 @@ export component StorePage inherits Rectangle {
             vertical-stretch: 1;
             for _ in 5: Skeleton { width: (parent.width - 4 * Tokens.spacing-md) / 5; height: 158px; radius: Tokens.radius-lg; }
         }
-        if !root.loading: ListView {
+        if !root.loading && root.platforms.length == 0: Empty {
+            width: parent.width;
+            vertical-stretch: 1;
+            title: "Store unavailable";
+            description: "No store backends are enabled.";
+            action-label: "";
+        }
+        if !root.loading && root.platforms.length > 0: ListView {
             viewport-y <=> root.platform-list-scroll-y;
             for platform[i] in root.platforms: Rectangle {
                 width: parent.width;
@@ -280,7 +281,14 @@ export component StorePage inherits Rectangle {
         }
         Rectangle { height: 1px; background: Tokens.color-border-hairline; }
         if root.loading: Skeleton { vertical-stretch: 1; radius: Tokens.radius-md; }
-        if !root.loading: PlatformGameList {
+        if !root.loading && root.games.length == 0: Empty {
+            width: parent.width;
+            vertical-stretch: 1;
+            title: "No games found";
+            description: "This store platform does not contain any games yet.";
+            action-label: "";
+        }
+        if !root.loading && root.games.length > 0: PlatformGameList {
             games: root.games;
             details: root.details;
             preview-image: root.preview-image;
@@ -298,6 +306,7 @@ export component StorePage inherits Rectangle {
     if root.page == 2: GameDetailsView {
         game: root.games[root.selected-game-index];
         details: root.details;
+        tags: root.tags;
         loading: root.details-loading;
         action-label: "Download";
         back => { root.page = 1; }

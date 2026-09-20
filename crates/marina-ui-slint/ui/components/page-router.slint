@@ -4,6 +4,7 @@ import { HomeState, Shelf, ShelfSkeleton } from "shelf.slint";
 import { LibraryState, LibraryPage } from "../pages/library.slint";
 import { StoreState, StorePage } from "../pages/store.slint";
 import { GameState, GameDetailsView } from "game-details-view.slint";
+import { Tokens } from "../slintcn/theme/tokens.slint";
 
 // Route-only outlet. Each page reads and owns its domain state through its
 // dedicated global; the router only decides which page component is mounted.
@@ -11,32 +12,76 @@ export component PageRouter inherits Rectangle {
     private property <length> shelf-cover-height:
         max(80px, min(200px, root.height * 50% - 64px));
     private property <length> shelf-height: root.shelf-cover-height + 64px;
+    private property <length> chrome-height: Tokens.density-button-default + 2 * Tokens.spacing-2xl;
+    private property <length> footer-height: Tokens.density-button-default + 2 * Tokens.spacing-2xl;
+    private property <length> shelf-title-height: 32px + Tokens.spacing-sm;
+    private property <length> shelf-block-height: root.shelf-title-height + root.shelf-height;
+    private property <length> shelf-main-y:
+        (root.height - root.chrome-height + root.footer-height) / 2 - root.shelf-title-height - root.shelf-height / 2;
+    private property <length> shelf-step: root.shelf-block-height + Tokens.spacing-lg;
     callback focus-header;
 
     if ShellState.page == ShellPage.game-details: GameDetailsView {
         game: GameState.selected-game;
         details: GameState.details;
+        tags: GameState.tags;
         loading: GameState.details-loading;
         focus-request: ShellState.content-focus-request;
         back => { ShellState.back-requested(); }
         action-requested => { GameState.play-requested(GameState.selected-game.id); }
     }
 
-    if ShellState.page == ShellPage.home && HomeState.loading: ShelfSkeleton {
-        content-height: root.shelf-height;
-        cover-height: root.shelf-cover-height;
-    }
+    if ShellState.page == ShellPage.home: Rectangle {
+        clip: true;
 
-    if ShellState.page == ShellPage.home && !HomeState.loading: Shelf {
-        title: "Recently added";
-        games: HomeState.games;
-        content-height: root.shelf-height;
-        cover-height: root.shelf-cover-height;
-        selected-index <=> HomeState.selected-game-index;
-        focus-request: ShellState.content-focus-request;
-        viewport-changed(x, width, cover-height) => { HomeState.viewport-changed(x, width, cover-height); }
-        game-opened(id) => { HomeState.game-opened(id); }
-        focus-header => { root.focus-header(); }
+        if HomeState.loading: ShelfSkeleton {
+            width: parent.width;
+            height: root.shelf-block-height;
+            y: root.shelf-main-y;
+            content-height: root.shelf-height;
+            cover-height: root.shelf-cover-height;
+        }
+
+        if !HomeState.loading && HomeState.played-games.length > 0: Shelf {
+            width: parent.width;
+            height: root.shelf-block-height;
+            y: root.shelf-main-y - HomeState.active-shelf * root.shelf-step;
+            title: "Recently played";
+            games: HomeState.played-games;
+            content-height: root.shelf-height;
+            cover-height: root.shelf-cover-height;
+            active: HomeState.active-shelf == 0;
+            selected-index <=> HomeState.selected-played-index;
+            focus-request: ShellState.content-focus-request;
+            game-opened(id) => { HomeState.game-opened(id); }
+            focus-up => { root.focus-header(); }
+            focus-down => { HomeState.active-shelf = 1; }
+        }
+
+        if !HomeState.loading: Shelf {
+            width: parent.width;
+            height: root.shelf-block-height;
+            y: HomeState.played-games.length == 0
+                ? root.shelf-main-y
+                : root.shelf-main-y + (1 - HomeState.active-shelf) * root.shelf-step;
+            title: "Recently added";
+            games: HomeState.games;
+            content-height: root.shelf-height;
+            cover-height: root.shelf-cover-height;
+            active: HomeState.played-games.length == 0 || HomeState.active-shelf == 1;
+            selected-index <=> HomeState.selected-game-index;
+            focus-request: ShellState.content-focus-request;
+            viewport-changed(x, width, cover-height) => { HomeState.viewport-changed(x, width, cover-height); }
+            game-opened(id) => { HomeState.game-opened(id); }
+            focus-up => {
+                if (HomeState.played-games.length > 0) {
+                    HomeState.active-shelf = 0;
+                } else {
+                    root.focus-header();
+                }
+            }
+            focus-down => { }
+        }
     }
 
     if ShellState.page == ShellPage.library: LibraryPage {
@@ -48,10 +93,11 @@ export component PageRouter inherits Rectangle {
         selected-game-index <=> LibraryState.selected-game-index;
         focus-request: ShellState.content-focus-request;
         game-list-scroll-y <=> LibraryState.game-list-scroll-y;
-        initial-loading: HomeState.loading;
+        initial-loading: LibraryState.loading;
         loading <=> LibraryState.loading;
         platform-query(slug) => { LibraryState.platform-query(slug); }
         game-selected(id, index) => { LibraryState.game-selected(id, index); }
+        game-opened(id, index) => { LibraryState.game-opened(id, index); }
         focus-header => { root.focus-header(); }
     }
 
@@ -59,6 +105,7 @@ export component PageRouter inherits Rectangle {
         platforms: StoreState.platforms;
         games: StoreState.games;
         details: StoreState.details;
+        tags: StoreState.tags;
         preview-image: StoreState.preview-image;
         artifacts: StoreState.artifacts;
         selected-artifacts <=> StoreState.selected-artifacts;
@@ -68,7 +115,6 @@ export component PageRouter inherits Rectangle {
         selected-game-index <=> StoreState.selected-game-index;
         selected-artifact-index <=> StoreState.selected-artifact-index;
         game-list-scroll-y <=> StoreState.game-list-scroll-y;
-        search-query <=> ShellState.search-query;
         loading <=> StoreState.loading;
         details-loading <=> StoreState.details-loading;
         install-status <=> StoreState.install-status;

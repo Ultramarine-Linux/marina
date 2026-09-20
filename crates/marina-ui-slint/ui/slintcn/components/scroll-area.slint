@@ -8,6 +8,7 @@ export component ScrollArea inherits Rectangle {
     in property <length> content-height;
     in property <int> focus-request: 0;
     in property <length> scroll-step: 80px;
+    callback focus-content;
 
     clip: true;
     background: transparent;
@@ -24,13 +25,21 @@ export component ScrollArea inherits Rectangle {
         width: 0px;
         height: 0px;
         key-pressed(event) => {
+            if (event.text == Key.LeftArrow || event.text == "ScrollLeft") {
+                root.focus-content();
+                return accept;
+            }
             if (event.text == Key.DownArrow || event.text == Key.PageDown) {
                 flick.viewport-y = max(flick.height - root.content-height,
                     flick.viewport-y - root.scroll-step);
                 return accept;
             }
             if (event.text == Key.UpArrow || event.text == Key.PageUp) {
-                flick.viewport-y = min(0px, flick.viewport-y + root.scroll-step);
+                if (flick.viewport-y >= 0px) {
+                    root.focus-content();
+                } else {
+                    flick.viewport-y = min(0px, flick.viewport-y + root.scroll-step);
+                }
                 return accept;
             }
             return reject;

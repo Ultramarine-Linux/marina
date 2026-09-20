@@ -15,7 +15,6 @@ export component NavigationMenu inherits Rectangle {
     callback navigate(int);
     // Moves keyboard focus from the persistent navigation into the active page.
     callback focus-content;
-    callback focus-settings;
 
     background: transparent;
     preferred-width:  row.preferred-width;
@@ -33,9 +32,7 @@ export component NavigationMenu inherits Rectangle {
             }
             if (event.text == Key.RightArrow) {
                 if (root.items.length > 0) {
-                    if (root.active == root.items.length - 1) {
-                        root.focus-settings();
-                    } else {
+                    if (root.active < root.items.length - 1) {
                         root.active += 1;
                         root.navigate(root.active);
                     }

@@ -1,0 +1,54 @@
+import { Tokens } from "../slintcn/theme/tokens.slint";
+import { Button, ButtonVariant, ButtonSize } from "../slintcn/components/button.slint";
+import { Text as Typography } from "../slintcn/components/text.slint";
+import { TextVariant } from "../slintcn/components/text.slint";
+import { LucideIcon } from "../slintcn/components/lucide-icon.slint";
+import { IconSet } from "@lucide/lucide.slint";
+
+// Compact, reusable title row for routed pages with a back action.
+export component PageHeader inherits Rectangle {
+    in property <string> title;
+    in property <int> focus-request: 0;
+    callback back;
+
+    height: 33px;
+    changed focus-request => { back-button.focus(); }
+
+    VerticalLayout {
+        spacing: 0px;
+
+        HorizontalLayout {
+            height: 32px;
+            padding-left: Tokens.spacing-xl;
+            padding-right: Tokens.spacing-xl;
+            spacing: Tokens.spacing-sm;
+
+            back-button := Button {
+                width: 32px;
+                height: 30px;
+                variant: ButtonVariant.ghost;
+                size: ButtonSize.icon;
+                text: "";
+                LucideIcon {
+                    x: (parent.width - self.width) / 2;
+                    y: (parent.height - self.height) / 2;
+                    icon: IconSet.ArrowLeft;
+                    size: 16px;
+                }
+                clicked => { root.back(); }
+            }
+
+            Typography {
+                text: root.title;
+                variant: TextVariant.title;
+                vertical-alignment: center;
+                overflow: elide;
+            }
+        }
+
+        Rectangle {
+            height: 1px;
+            background: Tokens.color-border-hairline;
+        }
+    }
+}
