@@ -28,6 +28,13 @@ impl From<&crate::covers::CoverSource> for ImageSource {
     }
 }
 
+impl ImageSource {
+    /// No local path, cache entry, or URL: nothing to download.
+    pub fn is_empty(&self) -> bool {
+        self.url.is_none() && self.cache_path.is_none() && self.local_path.is_none()
+    }
+}
+
 pub struct DecodedImage {
     pub pixels: Vec<u8>,
     pub width: u32,

@@ -47,6 +47,17 @@ pub(crate) fn install(
                 return;
             };
             let window = detail_window.clone();
+            // Clear the pane first: the previous game's details must not
+            // linger while the new fetch is in flight.
+            let _ = window.upgrade_in_event_loop(|window| {
+                window
+                    .global::<GameState>()
+                    .set_details(crate::empty_preview_details());
+                window
+                    .global::<GameState>()
+                    .set_tags(crate::string_model(Vec::new()));
+                window.global::<GameState>().set_details_loading(true);
+            });
             tokio::spawn(async move {
                 match state.library.get(&item_id).await {
                     Ok(Some(item)) => {
@@ -134,6 +145,12 @@ pub(crate) fn install(
             }
             window.global::<GameState>().set_selected_game(game);
             window.global::<GameState>().set_details_loading(true);
+            window
+                .global::<GameState>()
+                .set_details(crate::empty_preview_details());
+            window
+                .global::<GameState>()
+                .set_tags(crate::string_model(Vec::new()));
 
             // Defer the route change until the list click callback has unwound.
             let route_window = window.as_weak();
@@ -159,6 +176,12 @@ pub(crate) fn install(
         };
         window.global::<GameState>().set_selected_game(game);
         window.global::<GameState>().set_details_loading(true);
+        window
+            .global::<GameState>()
+            .set_details(crate::empty_preview_details());
+        window
+            .global::<GameState>()
+            .set_tags(crate::string_model(Vec::new()));
 
         // Changing routes synchronously from the card's click callback deletes
         // the callback's parent item while Slint is still dispatching the
@@ -384,7 +407,6 @@ pub(crate) fn install(
                     let game_count = platform_counts.get(&slug).copied().unwrap_or_default();
                     cards.push(PlatformCardMetadata {
                         icon_path: None,
-                        icon: None,
                         slug,
                         name,
                         game_count: format!(

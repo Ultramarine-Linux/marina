@@ -455,8 +455,9 @@ fn apply_home_metadata(
 
 async fn reconcile_stores(state: app::AppStateHandle) {
     // Runs for every configured backend; each one syncs into its own
-    // `<backend>.db` cache file. RomM import-on-startup stays opt-in, other
-    // backends sync unconditionally once configured.
+    // `<backend>.db` cache file — never into the main library database.
+    // RomM import-on-startup stays opt-in, other backends sync
+    // unconditionally once configured.
     for backend in state.stores.values().cloned() {
         if backend.id() == "romm" && !state.config.import_romm_on_startup {
             info!("RomM startup catalog import disabled by config");
@@ -520,7 +521,6 @@ async fn hydrate_startup_platforms(state: app::AppStateHandle, window: slint::We
         .into_iter()
         .map(|platform| PlatformCardMetadata {
             icon_path: platform_asset_path(&icon_root, &platform.slug),
-            icon: None,
             slug: platform.slug,
             name: platform.name,
             game_count: "Loading…".to_owned(),
@@ -649,9 +649,9 @@ fn populate_store_details(window: &slint::Weak<MainWindow>, rom: marina_romm::Ro
         }
         window.global::<StoreState>().set_details(details);
         window.global::<StoreState>().set_tags(string_model(tags));
-        window
-            .global::<StoreState>()
-            .set_preview_image(Image::default());
+        // Note: no preview reset here. The selection handler already unloaded
+        // the pane; this runs twice per selection (cached, then fresh) and a
+        // second clear would flicker the just-loaded preview.
         window
             .global::<StoreState>()
             .set_artifacts(ModelRc::from(std::rc::Rc::new(VecModel::from(artifacts))));
@@ -661,77 +661,55 @@ fn populate_store_details(window: &slint::Weak<MainWindow>, rom: marina_romm::Ro
         window.global::<StoreState>().set_details_loading(false);
     });
 
+    // One download per selection: the preview shows the first screenshot,
+    // falling back to the cover, and the list row reuses the same image.
+    // Decided up front from the API record — never fetch both.
+    let preview_source = [&screenshot_source, &cover_source]
+        .into_iter()
+        .find(|source| !source.is_empty())
+        .cloned();
+
     let preview_window = window.clone();
     let preview_rom_id = rom_id.clone();
-    tokio::spawn(async move {
-        let Some(bytes) = image::load(
-            &image::source_for(
-                None,
-                screenshot_source
-                    .local_path
-                    .as_deref()
-                    .and_then(|path| path.to_str()),
-                None,
-            ),
-            "store-screenshot",
-        )
-        .await
-        else {
-            return;
-        };
-        let decoded = bytes;
-        let _ = preview_window.upgrade_in_event_loop(move |window| {
-            let games = window.global::<StoreState>().get_games();
-            let selected_index = window
-                .global::<StoreState>()
-                .get_selected_game_index()
-                .max(0) as usize;
-            if games
-                .row_data(selected_index)
-                .is_none_or(|game| game.id.as_str() != preview_rom_id)
-            {
-                return;
-            }
-            let (image, _) = image::into_slint_image(decoded);
-            window.global::<StoreState>().set_preview_image(image);
-        });
-    });
-
-    let cover_window = window.clone();
-    tokio::spawn(async move {
-        let Some(bytes) = image::load(
-            &image::source_for(
-                None,
-                cover_source
-                    .local_path
-                    .as_deref()
-                    .and_then(|path| path.to_str()),
-                None,
-            ),
-            "store-cover",
-        )
-        .await
-        else {
-            return;
-        };
-        let decoded = bytes;
-        let _ = cover_window.upgrade_in_event_loop(move |window| {
-            let games = window.global::<StoreState>().get_games();
-            let Some(index) = (0..games.row_count()).find(|&index| {
-                games
-                    .row_data(index)
-                    .is_some_and(|game| game.id.as_str() == rom_id)
-            }) else {
+    let row_rom_id = rom_id.clone();
+    if let Some(preview_source) = preview_source {
+        tokio::spawn(async move {
+            let Some(decoded) =
+                image::load(&image::ImageSource::from(&preview_source), "store-preview").await
+            else {
                 return;
             };
-            if let Some(mut game) = games.row_data(index) {
+            let _ = preview_window.upgrade_in_event_loop(move |window| {
+                let games = window.global::<StoreState>().get_games();
+                let selected_index = window
+                    .global::<StoreState>()
+                    .get_selected_game_index()
+                    .max(0) as usize;
+                if games
+                    .row_data(selected_index)
+                    .is_none_or(|game| game.id.as_str() != preview_rom_id)
+                {
+                    return;
+                }
                 let (image, ratio) = image::into_slint_image(decoded);
-                game.cover = image;
-                game.cover_ratio = ratio;
-                games.set_row_data(index, game);
-            }
+                window
+                    .global::<StoreState>()
+                    .set_preview_image(image.clone());
+                let Some(index) = (0..games.row_count()).find(|&index| {
+                    games
+                        .row_data(index)
+                        .is_some_and(|game| game.id.as_str() == row_rom_id)
+                }) else {
+                    return;
+                };
+                if let Some(mut game) = games.row_data(index) {
+                    game.cover = image;
+                    game.cover_ratio = ratio;
+                    games.set_row_data(index, game);
+                }
+            });
         });
-    });
+    }
 }
 
 #[derive(Default)]
@@ -812,7 +790,6 @@ struct PlatformCardMetadata {
     name: String,
     game_count: String,
     icon_path: Option<String>,
-    icon: Option<image::DecodedImage>,
 }
 
 #[derive(Serialize)]
@@ -891,7 +868,7 @@ fn game_cards(metadata: Vec<shelf::GameMetadata>) -> Vec<GameCardData> {
         .collect()
 }
 
-fn empty_preview_details() -> PreviewDetailsData {
+pub(crate) fn empty_preview_details() -> PreviewDetailsData {
     PreviewDetailsData {
         title: SharedString::default(),
         summary: SharedString::default(),

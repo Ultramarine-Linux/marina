@@ -1,13 +1,21 @@
 //! [`marina_store::StoreBackend`] implementation for RomM.
 
+use std::{collections::HashMap, sync::Mutex};
+
 use async_trait::async_trait;
 use marina_store::{StoreBackend, StoreEntry, StoreError, StorePlatform, StoreQuery};
 
 use crate::{Auth, Client, PlatformQuery, RomQuery};
 
+#[derive(Debug, Default)]
+struct PlatformCache {
+    by_slug: HashMap<String, i64>,
+}
+
 #[derive(Clone, Debug)]
 pub struct RommStore {
     client: Client,
+    platforms: std::sync::Arc<Mutex<PlatformCache>>,
 }
 
 impl RommStore {
@@ -17,7 +25,10 @@ impl RommStore {
             Some(token) => client.with_auth(Auth::Bearer(token.to_owned())),
             None => client,
         };
-        Self { client }
+        Self {
+            client,
+            platforms: std::sync::Arc::new(Mutex::new(PlatformCache::default())),
+        }
     }
 
     pub fn client(&self) -> &Client {
@@ -29,15 +40,33 @@ impl RommStore {
     }
 
     async fn platform_id_for_slug(&self, slug: &str) -> Result<Option<i64>, StoreError> {
+        if let Some(id) = self
+            .platforms
+            .lock()
+            .expect("romm platform cache poisoned")
+            .by_slug
+            .get(slug)
+            .copied()
+        {
+            return Ok(Some(id));
+        }
         let platforms = self
             .client
             .list_platforms(&PlatformQuery::default())
             .await
             .map_err(StoreError::backend)?;
-        Ok(platforms
+        let id = platforms
             .into_iter()
             .find(|platform| platform.fs_slug == slug)
-            .map(|platform| platform.id))
+            .map(|platform| platform.id);
+        if let Some(id) = id {
+            self.platforms
+                .lock()
+                .expect("romm platform cache poisoned")
+                .by_slug
+                .insert(slug.to_owned(), id);
+        }
+        Ok(id)
     }
 }
 
