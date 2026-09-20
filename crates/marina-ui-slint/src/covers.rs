@@ -15,7 +15,7 @@ use marina_library::{
     read::LibraryRead,
 };
 use slint::{ComponentHandle, Image, Model, ModelRc};
-use tracing::{debug, warn};
+use tracing::{debug, trace, warn};
 
 use crate::{GameCardData, HomeState, MainWindow, image as image_loader};
 
@@ -200,7 +200,7 @@ impl ViewportLoader {
             .unwrap_or(0);
         let wanted = (first..last).collect::<HashSet<_>>();
         let generation = self.generation.load(Ordering::Relaxed);
-        debug!(
+        trace!(
             ?page,
             ?shelf,
             scroll_x,
