@@ -115,6 +115,18 @@ impl LibraryItem {
     }
 }
 
+/// Persisted per-game activity, stored in its own table so rescans and
+/// metadata writes never touch it.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct GameActivity {
+    pub library_item_id: LibraryItemId,
+    /// Last launch as epoch milliseconds.
+    pub last_played_at_ms: i64,
+    pub play_count: u64,
+    /// Accumulated foreground play time, for future playtime tracking.
+    pub total_play_seconds: u64,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Default)]
 pub struct LibraryItemFile {
     /// Provider-specific artifact identity, such as a RomM file ID.

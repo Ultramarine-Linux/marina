@@ -30,25 +30,7 @@ pub(crate) fn record_played(
     item: &marina_core::LibraryItem,
     base_url: Option<&str>,
 ) {
-    let local_cover = item
-        .assets
-        .iter()
-        .find(|asset| matches!(asset.kind, LibraryAssetKind::CoverSmall))
-        .or_else(|| {
-            item.assets
-                .iter()
-                .find(|asset| matches!(asset.kind, LibraryAssetKind::CoverLarge))
-        })
-        .and_then(|asset| asset.local_path.clone());
-    let entry = PlayedEntry {
-        id: item.id.to_string(),
-        title: item.title.clone(),
-        platform: item
-            .platform_slug
-            .clone()
-            .unwrap_or_else(|| "Unknown".into()),
-        source: covers::source_for(item.cover.as_deref(), local_cover.as_deref(), base_url),
-    };
+    let entry = played_entry(item, base_url);
 
     {
         let mut entries = store.lock().expect("played store poisoned");
@@ -85,6 +67,73 @@ pub(crate) fn record_played(
     });
 
     spawn_cover_decode(window, source, played_id);
+}
+
+fn played_entry(item: &marina_core::LibraryItem, base_url: Option<&str>) -> PlayedEntry {
+    let local_cover = item
+        .assets
+        .iter()
+        .find(|asset| matches!(asset.kind, LibraryAssetKind::CoverSmall))
+        .or_else(|| {
+            item.assets
+                .iter()
+                .find(|asset| matches!(asset.kind, LibraryAssetKind::CoverLarge))
+        })
+        .and_then(|asset| asset.local_path.clone());
+    PlayedEntry {
+        id: item.id.to_string(),
+        title: item.title.clone(),
+        platform: item
+            .platform_slug
+            .clone()
+            .unwrap_or_else(|| "Unknown".into()),
+        source: covers::source_for(item.cover.as_deref(), local_cover.as_deref(), base_url),
+    }
+}
+
+/// Fills the in-memory played store from persisted activity so the
+/// recently-played shelf survives restarts, then publishes it if the window
+/// is already up.
+pub(crate) async fn hydrate_played(
+    state: app::AppStateHandle,
+    window: slint::Weak<MainWindow>,
+    store: PlayedStore,
+) {
+    let items = state
+        .library
+        .recently_played_items(MAX_PLAYED)
+        .unwrap_or_default();
+    if items.is_empty() {
+        return;
+    }
+    {
+        let mut entries = store.lock().expect("played store poisoned");
+        entries.clear();
+        entries.extend(
+            items
+                .iter()
+                .map(|item| played_entry(item, state.config.romm_url.as_deref())),
+        );
+    }
+    let window = window.clone();
+    let store = store.clone();
+    let _ = window.upgrade_in_event_loop(move |window| {
+        publish_played(&window, &store);
+    });
+}
+
+fn publish_played(window: &MainWindow, store: &PlayedStore) {
+    let cards = snapshot_cards(store);
+    with_played_model(window, |model| model.set_vec(cards));
+    let entries: Vec<(String, covers::CoverSource)> = store
+        .lock()
+        .expect("played store poisoned")
+        .iter()
+        .map(|entry| (entry.id.clone(), entry.source.clone()))
+        .collect();
+    for (id, source) in entries {
+        spawn_cover_decode(&window.as_weak(), source, id);
+    }
 }
 
 fn spawn_cover_decode(
@@ -162,17 +211,7 @@ pub(crate) fn install(
 
     window.global::<HomeState>().on_entered(move || {
         if let Some(window) = home_window.upgrade() {
-            let cards = snapshot_cards(&played_store);
-            with_played_model(&window, |model| model.set_vec(cards));
-            let entries: Vec<(String, covers::CoverSource)> = played_store
-                .lock()
-                .expect("played store poisoned")
-                .iter()
-                .map(|entry| (entry.id.clone(), entry.source.clone()))
-                .collect();
-            for (id, source) in entries {
-                spawn_cover_decode(&home_window, source, id);
-            }
+            publish_played(&window, &played_store);
         }
         let Some(state) = home_state.lock().ok().and_then(|state| state.clone()) else {
             return;

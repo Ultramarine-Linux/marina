@@ -202,6 +202,8 @@ async fn main() -> Result<(), slint::PlatformError> {
 
     let weak_window = window.as_weak();
     let state_store = library_state.clone();
+    let played_hydration = played_store.clone();
+    let played_window = weak_window.clone();
     let startup_sources = loader_sources.clone();
     let startup_home_sources = home_source_store.clone();
     let cached_home_ready = Arc::new(Notify::new());
@@ -215,6 +217,14 @@ async fn main() -> Result<(), slint::PlatformError> {
                 }
             };
             *state_store.lock().expect("library state lock poisoned") = Some(state.clone());
+
+            // Restore persisted play activity into the recently-played shelf
+            // alongside the other independent hydration phases.
+            tokio::spawn(ui::pages::home::hydrate_played(
+                state.clone(),
+                played_window.clone(),
+                played_hydration.clone(),
+            ));
 
             // Each phase owns its own work and can publish as soon as it is ready.
             tokio::spawn(hydrate_cached_home(

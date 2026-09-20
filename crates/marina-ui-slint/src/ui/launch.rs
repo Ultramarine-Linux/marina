@@ -45,6 +45,9 @@ pub(crate) fn install(
                             unit = %launched.unit_name,
                             "game launch requested"
                         );
+                        if let Err(error) = state.library.record_play(&item.id) {
+                            error!(%error, game_id = %id, "failed to persist play activity");
+                        }
                         home::record_played(
                             &played_store,
                             &played_window,

@@ -1,7 +1,7 @@
 use chrono::{DateTime, FixedOffset, Utc};
 use marina_core::{
-    ItemKind, LibraryAsset, LibraryAssetKind, LibraryCard, LibraryItem, LibraryItemFile,
-    LibraryItemId, Platform,
+    GameActivity, ItemKind, LibraryAsset, LibraryAssetKind, LibraryCard, LibraryItem,
+    LibraryItemFile, LibraryItemId, Platform,
 };
 use marina_library::{
     error::LibraryError,
@@ -188,7 +188,7 @@ impl SqliteLibrary {
             }
         }
         let c = Connection::open(path)?;
-        c.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; CREATE TABLE IF NOT EXISTS platforms(slug TEXT PRIMARY KEY,name TEXT NOT NULL); CREATE TABLE IF NOT EXISTS library_items(id TEXT PRIMARY KEY,title TEXT NOT NULL,kind TEXT NOT NULL DEFAULT 'game',platform_slug TEXT,local_path TEXT,json TEXT NOT NULL,last_updated INTEGER NOT NULL DEFAULT 0,regions_json TEXT NOT NULL DEFAULT '[]',cover TEXT,cover_small_local_path TEXT,cover_large_local_path TEXT, UNIQUE(platform_slug,local_path)); CREATE TABLE IF NOT EXISTS library_item_files(library_item_id TEXT NOT NULL,provider_id TEXT,local_path TEXT NOT NULL,name TEXT NOT NULL,size_bytes INTEGER,PRIMARY KEY(library_item_id,local_path),UNIQUE(provider_id)); DROP TABLE IF EXISTS remote_rom_cache; CREATE INDEX IF NOT EXISTS idx_items_title ON library_items(title); CREATE INDEX IF NOT EXISTS idx_items_platform ON library_items(platform_slug); CREATE INDEX IF NOT EXISTS idx_items_path ON library_items(local_path); CREATE INDEX IF NOT EXISTS idx_item_files_provider ON library_item_files(provider_id);")?;
+        c.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; CREATE TABLE IF NOT EXISTS platforms(slug TEXT PRIMARY KEY,name TEXT NOT NULL); CREATE TABLE IF NOT EXISTS library_items(id TEXT PRIMARY KEY,title TEXT NOT NULL,kind TEXT NOT NULL DEFAULT 'game',platform_slug TEXT,local_path TEXT,json TEXT NOT NULL,last_updated INTEGER NOT NULL DEFAULT 0,regions_json TEXT NOT NULL DEFAULT '[]',cover TEXT,cover_small_local_path TEXT,cover_large_local_path TEXT, UNIQUE(platform_slug,local_path)); CREATE TABLE IF NOT EXISTS library_item_files(library_item_id TEXT NOT NULL,provider_id TEXT,local_path TEXT NOT NULL,name TEXT NOT NULL,size_bytes INTEGER,PRIMARY KEY(library_item_id,local_path),UNIQUE(provider_id)); CREATE TABLE IF NOT EXISTS game_activity(library_item_id TEXT PRIMARY KEY,last_played_at_ms INTEGER NOT NULL DEFAULT 0,play_count INTEGER NOT NULL DEFAULT 0,total_play_seconds INTEGER NOT NULL DEFAULT 0); CREATE INDEX IF NOT EXISTS idx_activity_recent ON game_activity(last_played_at_ms DESC); DROP TABLE IF EXISTS remote_rom_cache; CREATE INDEX IF NOT EXISTS idx_items_title ON library_items(title); CREATE INDEX IF NOT EXISTS idx_items_platform ON library_items(platform_slug); CREATE INDEX IF NOT EXISTS idx_items_path ON library_items(local_path); CREATE INDEX IF NOT EXISTS idx_item_files_provider ON library_item_files(provider_id);")?;
         let has_last_updated = c
             .prepare("PRAGMA table_info(library_items)")?
             .query_map([], |row| row.get::<_, String>(1))?
@@ -247,6 +247,71 @@ impl SqliteLibrary {
     }
     pub fn in_memory() -> Result<Self, rusqlite::Error> {
         Self::open(":memory:")
+    }
+
+    /// Records a launch: bumps `play_count`, stamps `last_played_at_ms`.
+    /// Activity lives in its own table so rescans and metadata writes can
+    /// never clobber it.
+    pub fn record_play(&self, id: &LibraryItemId) -> Result<GameActivity, LibraryError> {
+        let now_ms = Utc::now().timestamp_millis();
+        let id = id.to_string();
+        self.conn.lock().unwrap().execute(
+            "INSERT INTO game_activity(library_item_id,last_played_at_ms,play_count) VALUES(?,?,1)
+             ON CONFLICT(library_item_id) DO UPDATE SET last_played_at_ms=excluded.last_played_at_ms,
+             play_count=play_count+1",
+            params![id, now_ms],
+        ).map_err(err)?;
+        self.game_activity_by_str(&id).map_err(err)?.ok_or_else(|| {
+            LibraryError::backend(std::io::Error::other("activity row vanished after upsert"))
+        })
+    }
+
+    /// Activity for one item, if it was ever played.
+    pub fn game_activity(&self, id: &LibraryItemId) -> Result<Option<GameActivity>, LibraryError> {
+        self.game_activity_by_str(&id.to_string()).map_err(err)
+    }
+
+    fn game_activity_by_str(&self, id: &str) -> Result<Option<GameActivity>, rusqlite::Error> {
+        let conn = self.conn.lock().unwrap();
+        conn.query_row(
+            "SELECT library_item_id,last_played_at_ms,play_count,total_play_seconds FROM game_activity WHERE library_item_id=?",
+            params![id],
+            |row| {
+                Ok(GameActivity {
+                    library_item_id: LibraryItemId::parse(&row.get::<_, String>(0)?).ok_or_else(
+                        || {
+                            rusqlite::Error::FromSqlConversionFailure(
+                                0,
+                                rusqlite::types::Type::Text,
+                                Box::new(std::io::Error::other("invalid id")),
+                            )
+                        },
+                    )?,
+                    last_played_at_ms: row.get(1)?,
+                    play_count: row.get::<_, i64>(2)? as u64,
+                    total_play_seconds: row.get::<_, i64>(3)? as u64,
+                })
+            },
+        )
+        .optional()
+    }
+
+    /// Full items ordered by most recent launch, for the recently-played shelf.
+    /// Items deleted from the library never appear (inner join).
+    pub fn recently_played_items(&self, limit: usize) -> Result<Vec<LibraryItem>, LibraryError> {
+        let conn = self.conn.lock().unwrap();
+        let mut statement = conn
+            .prepare(
+                "SELECT library_items.json FROM library_items
+                 JOIN game_activity ON game_activity.library_item_id=library_items.id
+                 ORDER BY game_activity.last_played_at_ms DESC LIMIT ?",
+            )
+            .map_err(err)?;
+        statement
+            .query_map(params![limit as i64], Self::item)
+            .map_err(err)?
+            .collect::<Result<_, _>>()
+            .map_err(err)
     }
 
     fn item(row: &rusqlite::Row) -> Result<LibraryItem, rusqlite::Error> {
@@ -518,6 +583,11 @@ impl LibraryWrite for SqliteLibrary {
         )
         .map_err(err)?;
         tx.execute(
+            "DELETE FROM game_activity WHERE library_item_id=?",
+            params![id.to_string()],
+        )
+        .map_err(err)?;
+        tx.execute(
             "DELETE FROM library_items WHERE id=?",
             params![id.to_string()],
         )
@@ -687,5 +757,35 @@ mod tests {
         let counts = db.platform_counts().await.unwrap();
         assert_eq!(counts[0].platform.slug, "snes");
         assert_eq!(counts[0].count, 1);
+    }
+
+    #[tokio::test]
+    async fn activity_tracks_plays_and_orders_recently_played() {
+        let db = SqliteLibrary::in_memory().unwrap();
+        let first = db.add(LibraryItem::new_game("Zelda")).await.unwrap();
+        let second = db.add(LibraryItem::new_game("Metroid")).await.unwrap();
+
+        assert!(db.game_activity(&first.id).unwrap().is_none());
+        assert!(db.recently_played_items(10).unwrap().is_empty());
+
+        db.record_play(&first.id).unwrap();
+        db.record_play(&second.id).unwrap();
+        db.record_play(&first.id).unwrap();
+
+        let activity = db.game_activity(&first.id).unwrap().unwrap();
+        assert_eq!(activity.play_count, 2);
+        assert!(activity.last_played_at_ms > 0);
+
+        let recent = db.recently_played_items(10).unwrap();
+        assert_eq!(recent.len(), 2);
+        assert_eq!(recent[0].id, first.id);
+        assert_eq!(recent[1].id, second.id);
+
+        // Removing an item drops its activity row too.
+        db.remove(&first.id).await.unwrap();
+        assert!(db.game_activity(&first.id).unwrap().is_none());
+        let recent = db.recently_played_items(10).unwrap();
+        assert_eq!(recent.len(), 1);
+        assert_eq!(recent[0].id, second.id);
     }
 }
