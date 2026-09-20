@@ -159,6 +159,9 @@ pub(crate) fn install(
                 window
                     .global::<ShellState>()
                     .set_page(ShellPage::GameDetails);
+                // Publish again now that the route matches: the title crumb
+                // only appends on the details route.
+                crate::ui::nav::publish(&window);
             });
         });
 
@@ -168,11 +171,18 @@ pub(crate) fn install(
         let Some(window) = open_window.upgrade() else {
             return;
         };
-        let games = window.global::<HomeState>().get_games();
-        let Some(game) = (0..games.row_count())
-            .filter_map(|index| games.row_data(index))
-            .find(|game| game.id == id)
+        // Both home shelves forward here, but they are backed by different
+        // models (recently-added vs recently-played): the pressed card may
+        // live in either one.
+        let home = window.global::<HomeState>();
+        let find_game = |model: ModelRc<GameCardData>| {
+            (0..model.row_count())
+                .filter_map(move |index| model.row_data(index))
+                .find(|game| game.id == id)
+        };
+        let Some(game) = find_game(home.get_games()).or_else(|| find_game(home.get_played_games()))
         else {
+            warn!(game_id = %id, "home game-opened for a card in neither home model");
             return;
         };
         window.global::<GameState>().set_selected_game(game);
@@ -194,6 +204,9 @@ pub(crate) fn install(
             window
                 .global::<ShellState>()
                 .set_page(ShellPage::GameDetails);
+            // Publish again now that the route matches: the title crumb
+            // only appends on the details route.
+            crate::ui::nav::publish(&window);
         });
 
         let state = open_state

@@ -27,7 +27,6 @@ export component PageRouter inherits Rectangle {
         tags: GameState.tags;
         loading: GameState.details-loading;
         focus-request: ShellState.content-focus-request;
-        back => { ShellState.back-requested(); }
         action-requested => { GameState.play-requested(GameState.selected-game.id); }
     }
 
@@ -96,7 +95,6 @@ export component PageRouter inherits Rectangle {
         details-loading <=> GameState.details-loading;
         page <=> LibraryState.page;
         selected-platform <=> LibraryState.selected-platform;
-        selected-platform-name <=> LibraryState.selected-platform-name;
         selected-platform-index <=> LibraryState.selected-platform-index;
         selected-game-index <=> LibraryState.selected-game-index;
         focus-request: ShellState.content-focus-request;
@@ -119,7 +117,6 @@ export component PageRouter inherits Rectangle {
         selected-artifacts <=> StoreState.selected-artifacts;
         page <=> StoreState.page;
         selected-platform <=> StoreState.selected-platform;
-        selected-platform-name <=> StoreState.selected-platform-name;
         selected-platform-index <=> StoreState.selected-platform-index;
         focus-request: ShellState.content-focus-request;
         selected-game-index <=> StoreState.selected-game-index;

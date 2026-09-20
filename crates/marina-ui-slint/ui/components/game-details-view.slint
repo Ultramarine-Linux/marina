@@ -5,7 +5,7 @@ import { ScrollArea } from "../slintcn/components/scroll-area.slint";
 import { Text as Typography } from "../slintcn/components/text.slint";
 import { TextVariant, TextTone } from "../slintcn/components/text.slint";
 import { Badge, BadgeSize, BadgeVariant } from "../slintcn/components/badge.slint";
-import { PageHeader } from "page-header.slint";
+import { CrumbHeader } from "crumb-header.slint";
 import { GameCardData } from "card.slint";
 import { PreviewDetailsData } from "preview-details.slint";
 import { ShellState } from "app-shell.slint";
@@ -26,26 +26,36 @@ export component GameDetailsView inherits Rectangle {
     in property <string> action-label: "Play";
     in property <int> focus-request: 0;
     private property <int> scroll-focus-request: 0;
-    private property <int> header-focus-request: 0;
     private property <length> scroll-content-height:
         max(root.height, details-content.preferred-height + Tokens.spacing-2xl);
-    callback back;
     callback action-requested;
 
     background: transparent;
     forward-focus: action-button;
-    init => { action-button.focus(); }
-    changed focus-request => { action-button.focus(); }
+    // All focus moves defer past mount settling: `focus-request` can already
+    // be nonzero on remount, and a synchronous grab inside setup can run
+    // within an accessibility tree rebuild and panic the backend. A timer
+    // always lands on a clean stack.
+    init => { focus-defer-timer.start(); }
+    changed focus-request => {
+        focus-defer-timer.stop();
+        focus-defer-timer.start();
+    }
+
+    focus-defer-timer := Timer {
+        interval: 50ms;
+        triggered => {
+            self.stop();
+            action-button.focus();
+        }
+    }
 
     VerticalLayout {
         spacing: Tokens.spacing-md;
-        PageHeader {
-            title: root.loading
-                ? root.game.title
-                : (root.details.title != "" ? root.details.title : root.game.title);
-            focus-request: root.header-focus-request;
+        // The trail already ends in the game title; a title row would
+        // duplicate it (and the content below shows the title anyway).
+        CrumbHeader {
             crumbs: ShellState.breadcrumbs;
-            back => { root.back(); }
             crumb-navigate(index) => { ShellState.crumb-navigate(index); }
         }
 
@@ -89,9 +99,9 @@ export component GameDetailsView inherits Rectangle {
                             text: root.action-label;
                             directional-navigation: true;
                             navigation-requested(direction) => {
-                                if (direction == "up" || direction == "left") {
-                                    root.header-focus-request += 1;
-                                } else if (direction == "down") {
+                                // Nothing focusable sits above the action;
+                                // Up/Left intentionally keep focus here.
+                                if (direction == "down") {
                                     root.scroll-focus-request += 1;
                                 }
                             }

@@ -88,8 +88,17 @@ export component Shelf inherits Rectangle {
     changed height => { root.report-viewport(); }
     changed viewport-height => { root.report-viewport(); }
     forward-focus: shelf-focus;
-    changed active => { if (root.active) { shelf-focus.focus(); } }
-    changed focus-request => { if (root.active) { shelf-focus.focus(); } }
+    // All focus moves defer past mount settling: `active`/`focus-request`
+    // can already be set on remount, and a synchronous grab inside setup can
+    // run within an accessibility tree rebuild and panic the backend.
+    changed active => {
+        focus-defer-timer.stop();
+        focus-defer-timer.start();
+    }
+    changed focus-request => {
+        focus-defer-timer.stop();
+        focus-defer-timer.start();
+    }
     scroll-into-view(x, w) => {
         if (x + flick.viewport-x < Tokens.spacing-2xl) {
             flick.viewport-x = max(flick.width - root.content-width, Tokens.spacing-2xl - x);
@@ -98,8 +107,19 @@ export component Shelf inherits Rectangle {
         }
     }
 
+    focus-defer-timer := Timer {
+        interval: 50ms;
+        triggered => {
+            self.stop();
+            if (root.active) { shelf-focus.focus(); }
+        }
+    }
+
     shelf-focus := FocusScope {
-        init => { if (root.active) { shelf-focus.focus(); } }
+        // Deferred past mount settling like every other mount-time grab: a
+        // synchronous focus in `init` can run inside an accessibility tree
+        // rebuild and panic the backend. A timer lands on a clean stack.
+        init => { focus-defer-timer.start(); }
         width: 0px;
         height: 0px;
         key-pressed(event) => {

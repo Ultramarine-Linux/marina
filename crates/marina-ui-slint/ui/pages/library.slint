@@ -9,7 +9,7 @@ import { PlatformCardData } from "../components/platform-card.slint";
 import { GameCardData } from "../components/card.slint";
 import { PlatformGameList } from "../components/platform-game-list.slint";
 import { PreviewDetailsData } from "../components/preview-details.slint";
-import { PageHeader } from "../components/page-header.slint";
+import { CrumbHeader } from "../components/crumb-header.slint";
 import { ShellState } from "../components/app-shell.slint";
 
 export global LibraryState {
@@ -23,7 +23,6 @@ export global LibraryState {
     // platform survives the page component being destroyed on route changes.
     in-out property <int> page: 0;
     in-out property <string> selected-platform;
-    in-out property <string> selected-platform-name;
     callback entered;
     callback platform-query(string);
     callback game-selected(string, int);
@@ -37,12 +36,10 @@ export component LibraryPage inherits Rectangle {
     in-out property <int> page: 0;
 
     in-out property <string> selected-platform;
-    in-out property <string> selected-platform-name;
     in-out property <int> selected-platform-index: 0;
     in-out property <int> selected-game-index: 0;
     in property <int> focus-request: 0;
     private property <length> platform-list-scroll-y: 0px;
-    private property <int> header-focus-request: 0;
     in-out property <length> game-list-scroll-y: 0px;
 
     in property <bool> initial-loading: false;
@@ -56,7 +53,22 @@ export component LibraryPage inherits Rectangle {
 
     background: transparent;
     forward-focus: page-focus;
-    changed focus-request => { page-focus.focus(); }
+    // Focus moves land on a defer timer, never synchronously: on remount
+    // `focus-request` can already be nonzero, and a synchronous grab would
+    // run inside component setup — fatal if an accessibility tree rebuild
+    // holds its adapter borrow at the time. A timer always lands clean.
+    changed focus-request => {
+        focus-defer-timer.stop();
+        focus-defer-timer.start();
+    }
+
+    focus-defer-timer := Timer {
+        interval: 50ms;
+        triggered => {
+            self.stop();
+            page-focus.focus();
+        }
+    }
 
     function select-platform(index: int) {
         if (root.platforms.length <= 0) { return; }
@@ -73,7 +85,6 @@ export component LibraryPage inherits Rectangle {
         if (root.platforms.length <= 0) { return; }
         root.select-platform(index);
         root.selected-platform = root.platforms[root.selected-platform-index].slug;
-        root.selected-platform-name = root.platforms[root.selected-platform-index].name;
         root.selected-game-index = 0;
         root.game-list-scroll-y = 0px;
         root.page = 1;
@@ -143,6 +154,10 @@ export component LibraryPage inherits Rectangle {
     if root.page == 0: VerticalLayout {
         spacing: Tokens.spacing-lg;
 
+        CrumbHeader {
+            crumbs: ShellState.breadcrumbs;
+            crumb-navigate(index) => { ShellState.crumb-navigate(index); }
+        }
 
         if root.initial-loading: HorizontalLayout {
             padding-left: Tokens.spacing-2xl;
@@ -234,11 +249,9 @@ export component LibraryPage inherits Rectangle {
     if root.page == 1: VerticalLayout {
         spacing: Tokens.spacing-lg;
 
-        PageHeader {
-            title: root.selected-platform-name;
-            focus-request: root.header-focus-request;
+        // The trail already names the platform; a title row would duplicate it.
+        CrumbHeader {
             crumbs: ShellState.breadcrumbs;
-            back => { ShellState.back-requested(); }
             crumb-navigate(index) => { ShellState.crumb-navigate(index); }
         }
 
@@ -275,7 +288,9 @@ export component LibraryPage inherits Rectangle {
             keyboard-active: page-focus.has-focus;
             selected(id, index) => { root.game-selected(id, index); }
             activate-requested => { root.activate-selected-game(); }
-            focus-header => { root.header-focus-request += 1; }
+            // No focusable header content remains above the list; Up at the
+            // top hands focus back to the page scope instead of stranding it.
+            focus-header => { page-focus.focus(); }
             vertical-stretch: 1;
         }
 

@@ -33,8 +33,19 @@ export component Sheet inherits Rectangle {
     background: transparent;
     // Grab focus on mount-open so Esc reaches the scope below; the invoker
     // restores focus on close. (Toggle-open while mounted is the consumer's
-    // job: two competing focus grabs have no defined order.)
-    init => { if (root.open) { root.focus(); } }
+    // job: two competing focus grabs have no defined order.) Deferred past
+    // mount settling: a synchronous grab in `init` can run inside an
+    // accessibility tree rebuild, whose adapter borrow is already held, and
+    // panic the backend. A timer always lands on a clean stack.
+    init => { mount-focus-timer.start(); }
+
+    mount-focus-timer := Timer {
+        interval: 50ms;
+        triggered => {
+            self.stop();
+            if (root.open) { root.focus(); }
+        }
+    }
 
     property <bool> is-horizontal:
         side == SheetSide.left || side == SheetSide.right;

@@ -344,7 +344,6 @@ fn restore_library_games(window: &MainWindow, slug: &str) {
     library.set_selected_platform_index(index);
     if let Some(platform) = library.get_platforms().row_data(index.max(0) as usize) {
         library.set_selected_platform(platform.slug);
-        library.set_selected_platform_name(platform.name);
     }
     library.set_page(1);
     // Reload through the normal query path (also re-pushes nothing: the
@@ -371,7 +370,6 @@ fn restore_store_games(window: &MainWindow, slug: &str) {
     store.set_selected_platform_index(index);
     if let Some(platform) = store.get_platforms().row_data(index.max(0) as usize) {
         store.set_selected_platform(platform.slug);
-        store.set_selected_platform_name(platform.name);
     }
     store.set_page(1);
     *suppress_push().lock().expect("breadcrumb lock poisoned") = true;

@@ -1,0 +1,25 @@
+import { Tokens } from "../slintcn/theme/tokens.slint";
+import { Breadcrumb, BreadcrumbItem } from "../slintcn/components/breadcrumb.slint";
+
+// Breadcrumb-only header for routed views where the trail already names the
+// current location, so a separate title row would duplicate it. Back
+// navigation stays available through the clickable parent crumbs (plus
+// Escape/controller back); there is no back button to focus.
+export component CrumbHeader inherits Rectangle {
+    in property <[BreadcrumbItem]> crumbs;
+    callback crumb-navigate(int);
+
+    VerticalLayout {
+        spacing: 0px;
+
+        Breadcrumb {
+            items: root.crumbs;
+            navigate(index) => { root.crumb-navigate(index); }
+        }
+
+        Rectangle {
+            height: 1px;
+            background: Tokens.color-border-hairline;
+        }
+    }
+}

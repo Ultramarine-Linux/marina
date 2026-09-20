@@ -20,6 +20,7 @@ import { PreviewDetailsData } from "../components/preview-details.slint";
 import { GameDetailsView } from "../components/game-details-view.slint";
 import { LucideIcon } from "../slintcn/components/lucide-icon.slint";
 import { IconSet } from "@lucide/lucide.slint";
+import { CrumbHeader } from "../components/crumb-header.slint";
 
 export struct StoreArtifact {
     path: string,
@@ -71,7 +72,6 @@ export component StorePage inherits Rectangle {
     in-out property <int> selected-artifact-index: 0;
 
     in-out property <string> selected-platform;
-    in-out property <string> selected-platform-name;
     in-out property <int> selected-platform-index: 0;
     in property <int> focus-request: 0;
     private property <length> platform-list-scroll-y: 0px;
@@ -91,17 +91,27 @@ export component StorePage inherits Rectangle {
 
     background: transparent;
     forward-focus: page-focus;
-    changed focus-request => { page-focus.focus(); }
+    changed focus-request => { root.restore-focus(); }
     private property <int> details-focus-request: 0;
     // Overlays steal focus on open; hand it back when they close so
     // controller input is never stranded. Closes over the details view
-    // return there, otherwise to the page scope.
-    function restore-focus() {
-        if (root.page == 2) {
-            root.details-focus-request += 1;
-        } else {
-            page-focus.focus();
+    // return there, otherwise to the page scope. Deferred like every other
+    // focus move: these `changed` arms can fire during remount setup, where
+    // a synchronous grab risks the accessibility adapter borrow.
+    restore-focus-timer := Timer {
+        interval: 50ms;
+        triggered => {
+            self.stop();
+            if (root.page == 2) {
+                root.details-focus-request += 1;
+            } else {
+                page-focus.focus();
+            }
         }
+    }
+    function restore-focus() {
+        restore-focus-timer.stop();
+        restore-focus-timer.start();
     }
     changed artifact-sheet-open => {
         if (root.artifact-sheet-open) {
@@ -133,7 +143,6 @@ export component StorePage inherits Rectangle {
     function open-platform(index: int) {        if (root.platforms.length <= 0) { return; }
         root.select-platform(index);
         root.selected-platform = root.platforms[root.selected-platform-index].slug;
-        root.selected-platform-name = root.platforms[root.selected-platform-index].name;
         root.selected-game-index = 0;
         root.game-list-scroll-y = 0px;
         root.page = 1;
@@ -214,6 +223,11 @@ export component StorePage inherits Rectangle {
     if root.page == 0: VerticalLayout {
         spacing: Tokens.spacing-lg;
 
+        CrumbHeader {
+            crumbs: ShellState.breadcrumbs;
+            crumb-navigate(index) => { ShellState.crumb-navigate(index); }
+        }
+
         if root.loading: HorizontalLayout {
             padding-left: Tokens.spacing-2xl;
             padding-right: Tokens.spacing-2xl;
@@ -287,28 +301,12 @@ export component StorePage inherits Rectangle {
 
     if root.page == 1: VerticalLayout {
         spacing: Tokens.spacing-lg;
-        HorizontalLayout {
-            height: 38px;
-            padding-left: Tokens.spacing-2xl;
-            padding-right: Tokens.spacing-2xl;
-            spacing: Tokens.spacing-md;
-            Button {
-                width: 36px;
-                height: 36px;
-                variant: ButtonVariant.ghost;
-                size: ButtonSize.icon;
-                text: "";
-                LucideIcon {
-                    x: (parent.width - self.width) / 2;
-                    y: (parent.height - self.height) / 2;
-                    icon: IconSet.ArrowLeft;
-                    size: 18px;
-                }
-                clicked => { root.page = 0; }
-            }
-            Typography { text: root.selected-platform-name; variant: TextVariant.headline; vertical-alignment: center; }
+        // The trail already names the platform; the old inline back/title
+        // row duplicated it (and bypassed the breadcrumb stack on back).
+        CrumbHeader {
+            crumbs: ShellState.breadcrumbs;
+            crumb-navigate(index) => { ShellState.crumb-navigate(index); }
         }
-        Rectangle { height: 1px; background: Tokens.color-border-hairline; }
         if root.loading: Skeleton { vertical-stretch: 1; radius: Tokens.radius-md; }
         if !root.loading && root.games.length == 0: Empty {
             width: parent.width;
@@ -339,7 +337,6 @@ export component StorePage inherits Rectangle {
         loading: root.details-loading;
         action-label: "Download";
         focus-request: root.details-focus-request;
-        back => { ShellState.back-requested(); }
         action-requested => { root.artifact-sheet-open = true; }
     }
 
