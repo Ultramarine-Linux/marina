@@ -14,12 +14,11 @@
 
 use std::sync::{Mutex, OnceLock};
 
-use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
-
 use crate::{
     BreadcrumbItem, GameState, HomeState, LibraryState, MainWindow, ShellPage, ShellState,
     StoreState,
 };
+use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 
 const MAX_CRUMBS: usize = 25;
 
@@ -219,6 +218,30 @@ fn pop() -> Option<Crumb> {
         stack.pop();
         stack.last().cloned()
     })
+}
+
+/// Dismisses the topmost open overlay on any tab, topmost-first, before
+/// page navigation runs. Returns true when Back is consumed.
+/// Overlay open-state stays page-local; this inventory only *reads* it, so
+/// a missed close can never wedge navigation. New overlays (launch options,
+/// entry editing, …) register an arm here instead of growing tab-specific
+/// helpers.
+pub(crate) fn dismiss_overlay(window: &MainWindow) -> bool {
+    match window.global::<ShellState>().get_page() {
+        ShellPage::Store => {
+            let store = window.global::<StoreState>();
+            if store.get_artifact_sheet_open() {
+                store.set_artifact_sheet_open(false);
+                return true;
+            }
+            if !store.get_install_status().is_empty() {
+                store.set_install_status(SharedString::default());
+                return true;
+            }
+            false
+        }
+        _ => false,
+    }
 }
 
 /// Single entry point for every back action: header buttons, Escape, and the

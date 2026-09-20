@@ -32,6 +32,10 @@ impl LaunchRequest {
         let (executable, arguments) = if let Some(mut command) = command {
             let executable = PathBuf::from(command.remove(0));
             (executable, command)
+        } else if let Some(file) = item.files.first() {
+            // Installed/scanned games point local_path at the containing
+            // directory; the executable is the recorded file entry.
+            (PathBuf::from(&file.path), Vec::new())
         } else {
             (PathBuf::from(item.local_path.as_deref()?), Vec::new())
         };
@@ -281,6 +285,23 @@ mod tests {
         assert_eq!(request.application_id, item.id.to_string());
         assert!(request.arguments.is_empty());
         assert!(request.working_directory.is_none());
+    }
+
+    #[test]
+    fn request_prefers_file_entries_over_the_game_directory() {
+        let mut item = LibraryItem::new_game("Example");
+        item.local_path = Some("/games/example".into());
+        item.files.push(marina_core::LibraryItemFile {
+            provider_id: Some("romm:file:7".into()),
+            name: "example.zip".into(),
+            path: "/games/example/example.zip".into(),
+            size_bytes: Some(42),
+        });
+        let request = LaunchRequest::from_item(&item).expect("file entry");
+        assert_eq!(
+            request.executable,
+            PathBuf::from("/games/example/example.zip")
+        );
     }
 
     #[test]

@@ -130,6 +130,14 @@ pub async fn install(
             size_bytes: Some(expected),
         });
     }
+    debug!(
+        title = %title,
+        files = ?installed_files
+            .iter()
+            .map(|file| format!("{} ({} bytes)", file.path, file.size_bytes.unwrap_or(0)))
+            .collect::<Vec<_>>(),
+        "installed game files written"
+    );
 
     let rom_id = request.rom.id;
     let mut item: LibraryItem = request.rom.into();
@@ -186,15 +194,15 @@ pub async fn install(
         existing.updated_at = item.updated_at;
         existing.assets = item.assets;
         existing.provider_ids.extend(item.provider_ids);
-        let mut files = existing.files;
-        for file in item.files {
-            let duplicate = files.iter().any(|current| {
-                current.provider_id == file.provider_id || current.path == file.path
-            });
-            if !duplicate {
-                files.push(file);
-            }
-        }
+        // Merge file records by path: freshly installed files replace stale
+        // rows (e.g. untagged scanner entries) so provider identities are
+        // recorded; previously installed files for other paths are kept.
+        let mut files: Vec<marina_core::LibraryItemFile> = existing
+            .files
+            .into_iter()
+            .filter(|current| !item.files.iter().any(|file| file.path == current.path))
+            .collect();
+        files.extend(item.files);
         existing.files = files;
         existing
             .provider_ids

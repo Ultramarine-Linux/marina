@@ -31,6 +31,10 @@ export component Sheet inherits Rectangle {
     callback dismissed();
 
     background: transparent;
+    // Grab focus on mount-open so Esc reaches the scope below; the invoker
+    // restores focus on close. (Toggle-open while mounted is the consumer's
+    // job: two competing focus grabs have no defined order.)
+    init => { if (root.open) { root.focus(); } }
 
     property <bool> is-horizontal:
         side == SheetSide.left || side == SheetSide.right;

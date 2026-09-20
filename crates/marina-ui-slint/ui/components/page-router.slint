@@ -94,6 +94,9 @@ export component PageRouter inherits Rectangle {
         games: LibraryState.games;
         details: GameState.details;
         details-loading <=> GameState.details-loading;
+        page <=> LibraryState.page;
+        selected-platform <=> LibraryState.selected-platform;
+        selected-platform-name <=> LibraryState.selected-platform-name;
         selected-platform-index <=> LibraryState.selected-platform-index;
         selected-game-index <=> LibraryState.selected-game-index;
         focus-request: ShellState.content-focus-request;
@@ -115,6 +118,8 @@ export component PageRouter inherits Rectangle {
         artifacts: StoreState.artifacts;
         selected-artifacts <=> StoreState.selected-artifacts;
         page <=> StoreState.page;
+        selected-platform <=> StoreState.selected-platform;
+        selected-platform-name <=> StoreState.selected-platform-name;
         selected-platform-index <=> StoreState.selected-platform-index;
         focus-request: ShellState.content-focus-request;
         selected-game-index <=> StoreState.selected-game-index;
@@ -124,6 +129,7 @@ export component PageRouter inherits Rectangle {
         details-loading <=> StoreState.details-loading;
         install-status <=> StoreState.install-status;
         install-progress <=> StoreState.install-progress;
+        artifact-sheet-open <=> StoreState.artifact-sheet-open;
         platform-query(slug) => { StoreState.platform-query(slug); }
         game-selected(id, index) => { StoreState.game-selected(id, index); }
         artifact-selected(index) => { StoreState.artifact-selected(index); }

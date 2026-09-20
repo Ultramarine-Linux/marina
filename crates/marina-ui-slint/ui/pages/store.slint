@@ -9,6 +9,7 @@ import { TextVariant, TextTone } from "../slintcn/components/text.slint";
 import { ScrollArea } from "../slintcn/components/scroll-area.slint";
 import { Sheet, SheetSide } from "../slintcn/components/sheet.slint";
 import { Checkbox } from "../slintcn/components/checkbox.slint";
+import { FocusRing } from "../slintcn/components/focus-ring.slint";
 import { Card, CardPadding, CardRadius } from "../slintcn/components/card.slint";
 import { Badge, BadgeSize, BadgeVariant } from "../slintcn/components/badge.slint";
 import { PlatformCardData } from "../components/platform-card.slint";
@@ -47,6 +48,8 @@ export global StoreState {
     in-out property <bool> details-loading: false;
     in-out property <string> install-status;
     in-out property <float> install-progress: 0;
+    // Sheet/modal visibility lives here so Rust back-handling can dismiss.
+    in-out property <bool> artifact-sheet-open;
     callback entered;
     callback search(string);
     callback platform-query(string);
@@ -67,8 +70,8 @@ export component StorePage inherits Rectangle {
     in-out property <int> selected-game-index: 0;
     in-out property <int> selected-artifact-index: 0;
 
-    in-out property <string> selected-platform <=> StoreState.selected-platform;
-    in-out property <string> selected-platform-name <=> StoreState.selected-platform-name;
+    in-out property <string> selected-platform;
+    in-out property <string> selected-platform-name;
     in-out property <int> selected-platform-index: 0;
     in property <int> focus-request: 0;
     private property <length> platform-list-scroll-y: 0px;
@@ -89,6 +92,32 @@ export component StorePage inherits Rectangle {
     background: transparent;
     forward-focus: page-focus;
     changed focus-request => { page-focus.focus(); }
+    private property <int> details-focus-request: 0;
+    // Overlays steal focus on open; hand it back when they close so
+    // controller input is never stranded. Closes over the details view
+    // return there, otherwise to the page scope.
+    function restore-focus() {
+        if (root.page == 2) {
+            root.details-focus-request += 1;
+        } else {
+            page-focus.focus();
+        }
+    }
+    changed artifact-sheet-open => {
+        if (root.artifact-sheet-open) {
+            root.selected-artifact-index = 0;
+        } else {
+            root.restore-focus();
+        }
+    }
+    changed install-status => { if (root.install-status == "") { root.restore-focus(); } }
+
+    function download-selected() {
+        if (root.artifacts.length > 0) {
+            root.install-requested(root.games[root.selected-game-index].id, root.selected-artifacts);
+            root.artifact-sheet-open = false;
+        }
+    }
 
     function select-platform(index: int) {
         if (root.platforms.length <= 0) { return; }
@@ -101,8 +130,7 @@ export component StorePage inherits Rectangle {
         }
     }
 
-    function open-platform(index: int) {
-        if (root.platforms.length <= 0) { return; }
+    function open-platform(index: int) {        if (root.platforms.length <= 0) { return; }
         root.select-platform(index);
         root.selected-platform = root.platforms[root.selected-platform-index].slug;
         root.selected-platform-name = root.platforms[root.selected-platform-index].name;
@@ -310,33 +338,27 @@ export component StorePage inherits Rectangle {
         tags: root.tags;
         loading: root.details-loading;
         action-label: "Download";
+        focus-request: root.details-focus-request;
         back => { ShellState.back-requested(); }
         action-requested => { root.artifact-sheet-open = true; }
     }
 
 
-    if root.install-status != "": Rectangle {
-        background: #00000088;
-        TouchArea { clicked => { root.install-status = ""; } }
+    // Install progress/result rides the shared Sheet: scrim, focus grab,
+    // backdrop + Back dismissal come for free. Mounted while status text
+    // is set; clearing it (dismissed, backdrop, Back) unmounts.
+    if root.install-status != "": Sheet {
+        open: true;
+        side: SheetSide.bottom;
+        panel-extent: 220px;
+        title: "Install";
+        description: root.install-status;
+        dismissed() => { root.install-status = ""; }
         Rectangle {
-            width: 420px;
-            height: 150px;
-            x: (parent.width - self.width) / 2;
-            y: (parent.height - self.height) / 2;
-            background: Tokens.color-surface-1;
-            border-radius: Tokens.radius-md;
-            VerticalLayout {
-                padding: Tokens.spacing-lg;
-                spacing: Tokens.spacing-md;
-                Typography { text: "Install"; variant: TextVariant.headline; }
-                Typography { text: root.install-status; variant: TextVariant.body-sm; wrap: word-wrap; }
-                Rectangle {
-                    height: 5px;
-                    background: Tokens.color-accent;
-                    width: (parent.width - 2 * Tokens.spacing-lg) * root.install-progress;
-                    border-radius: 3px;
-                }
-            }
+            height: 5px;
+            background: Tokens.color-accent;
+            width: parent.width * root.install-progress;
+            border-radius: 3px;
         }
     }
 
@@ -347,10 +369,79 @@ export component StorePage inherits Rectangle {
         title: "Download artifacts";
         description: root.games[root.selected-game-index].title;
         dismiss-on-backdrop: root.install-status == "";
-        VerticalLayout {
+        artifact-nav := FocusScope {
+            width: 0px;
+            height: 0px;
+            // Deferred past mount settling: init-order between the sheet and
+            // its body is undefined, so a timer wins deterministically over
+            // the sheet's own mount focus grab.
+            init => { nav-focus-timer.start(); }
+            key-pressed(event) => {
+                // Virtual cursor spans every list row plus the Download
+                // button past the end, so focus never leaves this scope:
+                // arrows move, Accept activates, Esc closes.
+                if (event.text == Key.UpArrow) {
+                    sheet-body.row-cursor = max(0, sheet-body.row-cursor - 1);
+                    sheet-body.sync-file-index();
+                    if (sheet-body.row-cursor * 64px < -sheet-body.list-scroll) {
+                        sheet-body.list-scroll = -sheet-body.row-cursor * 64px;
+                    }
+                    return accept;
+                }
+                if (event.text == Key.DownArrow) {
+                    sheet-body.row-cursor = min(root.artifacts.length, sheet-body.row-cursor + 1);
+                    sheet-body.sync-file-index();
+                    // The Download button sits below the list and needs no
+                    // scrolling; moving onto it must not shift rows.
+                    if (sheet-body.row-cursor < root.artifacts.length && sheet-body.list-height > 0px && (sheet-body.row-cursor + 1) * 64px > -sheet-body.list-scroll + sheet-body.list-height) {
+                        sheet-body.list-scroll = sheet-body.list-height - (sheet-body.row-cursor + 1) * 64px;
+                    }
+                    return accept;
+                }
+                if (event.text == "\n" || event.text == " ") {
+                    if (sheet-body.row-cursor >= root.artifacts.length) {
+                        root.download-selected();
+                    } else if (!root.artifacts[sheet-body.row-cursor].is-directory) {
+                        root.selected-artifacts[root.artifacts[sheet-body.row-cursor].file-index] = !root.selected-artifacts[root.artifacts[sheet-body.row-cursor].file-index];
+                        root.artifact-selected(root.selected-artifact-index);
+                    }
+                    return accept;
+                }
+                if (event.text == "\u{1b}") {
+                    root.artifact-sheet-open = false;
+                    return accept;
+                }
+                return reject;
+            }
+        }
+        nav-focus-timer := Timer {
+            interval: 50ms;
+            triggered => {
+                self.stop();
+                artifact-nav.focus();
+            }
+        }
+        sheet-body := VerticalLayout {
             vertical-stretch: 1;
             padding: Tokens.spacing-lg;
             spacing: Tokens.spacing-md;
+            // Row cursor over every list row; == artifacts.length means the
+            // Download button below. Rows are a uniform 64px so offsets are
+            // exact without prefix sums.
+            property <int> row-cursor: 0;
+            property <length> list-scroll: 0px;
+            // Reported by the list itself: elements inside conditionals
+            // aren't referenceable from outside them.
+            property <length> list-height: 0px;
+
+            function row-top(row: int) -> length { return row * 64px; }
+
+            function sync-file-index() {
+                if (row-cursor < root.artifacts.length && !root.artifacts[row-cursor].is-directory) {
+                    root.selected-artifact-index = root.artifacts[row-cursor].file-index;
+                    root.artifact-selected(root.selected-artifact-index);
+                }
+            }
             Card {
                 vertical-stretch: 1;
                 background: Tokens.color-background;
@@ -370,9 +461,17 @@ export component StorePage inherits Rectangle {
                 if root.artifacts.length > 0: ListView {
                     width: parent.width;
                     height: parent.height;
-                    for artifact in root.artifacts: Rectangle {
+                    viewport-y <=> sheet-body.list-scroll;
+                    // changed alone misses the initial value, leaving
+                    // list-height 0 and scrolling every row out of view.
+                    init => { sheet-body.list-height = self.height; }
+                    changed height => { sheet-body.list-height = self.height; }
+                    for artifact[i] in root.artifacts: Rectangle {
                         width: parent.width;
-                        height: artifact.is-directory ? 36px : 64px;
+                        height: 64px;
+                        border-radius: Tokens.radius-sm;
+                        border-width: artifact-nav.has-focus && i == sheet-body.row-cursor ? Tokens.focus-ring-width : 0px;
+                        border-color: Tokens.color-ring-muted;
 
                         if artifact.is-directory: LucideIcon {
                             x: Tokens.spacing-md + artifact.depth * Tokens.spacing-lg;
@@ -440,13 +539,17 @@ export component StorePage inherits Rectangle {
                     }
                 }
             }
-            Button {
-                text: "Download selected";
-                clicked => {
-                    if (root.artifacts.length > 0) {
-                        root.install-requested(root.games[root.selected-game-index].id, root.selected-artifacts);
-                        root.artifact-sheet-open = false;
-                    }
+            Rectangle {
+                width: dl-btn.width;
+                height: dl-btn.height;
+                x: (parent.width - self.width) / 2;
+                dl-btn := Button {
+                    text: "Download selected";
+                    clicked => { root.download-selected(); }
+                }
+                if artifact-nav.has-focus && sheet-body.row-cursor >= root.artifacts.length: FocusRing {
+                    host-width: parent.width;
+                    host-height: parent.height;
                 }
             }
         }

@@ -34,10 +34,10 @@ export component LibraryPage inherits Rectangle {
     in property <[PlatformCardData]> platforms;
     in property <[GameCardData]> games;
     in property <PreviewDetailsData> details;
-    in-out property <int> page <=> LibraryState.page;
+    in-out property <int> page: 0;
 
-    in-out property <string> selected-platform <=> LibraryState.selected-platform;
-    in-out property <string> selected-platform-name <=> LibraryState.selected-platform-name;
+    in-out property <string> selected-platform;
+    in-out property <string> selected-platform-name;
     in-out property <int> selected-platform-index: 0;
     in-out property <int> selected-game-index: 0;
     in property <int> focus-request: 0;

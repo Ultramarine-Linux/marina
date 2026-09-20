@@ -83,6 +83,7 @@ pub(crate) fn dispatch_controller_action(window: &MainWindow, event: InputEvent)
             return;
         }
         InputAction::Menu => return,
+        InputAction::Back if nav::dismiss_overlay(&window) => return,
         InputAction::ScrollUp
         | InputAction::ScrollDown
         | InputAction::ScrollLeft

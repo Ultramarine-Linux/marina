@@ -15,8 +15,8 @@ use tracing::{error, info};
 
 use super::library as shelf;
 use crate::{
-    GameCardData, LibraryState, MainWindow, PlatformCardData, PreviewDetailsData, StoreArtifact,
-    StoreState, ToastQueue, ToastVariant, game_cards, platform_asset_path,
+    GameCardData, HomeState, LibraryState, MainWindow, PlatformCardData, PreviewDetailsData,
+    StoreArtifact, StoreState, ToastQueue, ToastVariant, game_cards, platform_asset_path,
 };
 use crate::{app, image};
 
@@ -210,7 +210,13 @@ pub(crate) fn install(
                                     .global::<StoreState>()
                                     .set_install_status(SharedString::from("Installed"));
                                 window.global::<StoreState>().set_install_progress(1.0);
+                                // Refresh every stale consumer now: the
+                                // library tab reloads platforms/counts, and
+                                // the home shelf reloads recently-added, so
+                                // the game is already there when switching
+                                // tabs instead of needing a revisit.
                                 window.global::<LibraryState>().invoke_entered();
+                                window.global::<HomeState>().invoke_entered();
                             });
                         }
                         Err(error) => {
@@ -220,6 +226,10 @@ pub(crate) fn install(
                                     .global::<StoreState>()
                                     .set_install_status(SharedString::from("Installed; library refresh failed"));
                                 window.global::<StoreState>().set_install_progress(1.0);
+                                // The save itself succeeded: still refresh both
+                                // consumers so the game appears everywhere.
+                                window.global::<LibraryState>().invoke_entered();
+                                window.global::<HomeState>().invoke_entered();
                             });
                         }
                     }
