@@ -12,20 +12,12 @@ use marina_library::{
 use rusqlite::{Connection, OptionalExtension, ToSql, params, params_from_iter};
 use serde::{Deserialize, Serialize};
 use std::{path::Path, sync::Mutex};
-use tracing::debug;
 
 #[derive(Debug)]
 pub struct SqliteLibrary {
     conn: Mutex<Connection>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
-pub struct RemoteCatalogRow {
-    pub provider: String,
-    pub rom_id: String,
-    pub title: String,
-    pub platform_slug: String,
-}
 #[derive(Debug, Serialize, Deserialize)]
 struct Stored {
     id: String,
@@ -196,7 +188,7 @@ impl SqliteLibrary {
             }
         }
         let c = Connection::open(path)?;
-        c.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; CREATE TABLE IF NOT EXISTS platforms(slug TEXT PRIMARY KEY,name TEXT NOT NULL); CREATE TABLE IF NOT EXISTS library_items(id TEXT PRIMARY KEY,title TEXT NOT NULL,kind TEXT NOT NULL DEFAULT 'game',platform_slug TEXT,local_path TEXT,json TEXT NOT NULL,last_updated INTEGER NOT NULL DEFAULT 0,regions_json TEXT NOT NULL DEFAULT '[]',cover TEXT,cover_small_local_path TEXT,cover_large_local_path TEXT, UNIQUE(platform_slug,local_path)); CREATE TABLE IF NOT EXISTS library_item_files(library_item_id TEXT NOT NULL,provider_id TEXT,local_path TEXT NOT NULL,name TEXT NOT NULL,size_bytes INTEGER,PRIMARY KEY(library_item_id,local_path),UNIQUE(provider_id)); CREATE TABLE IF NOT EXISTS remote_rom_cache(provider TEXT NOT NULL,rom_id TEXT NOT NULL,title TEXT NOT NULL,platform_slug TEXT NOT NULL,json TEXT NOT NULL,PRIMARY KEY(provider,rom_id)); CREATE INDEX IF NOT EXISTS idx_remote_rom_title ON remote_rom_cache(provider,title); CREATE INDEX IF NOT EXISTS idx_remote_rom_platform ON remote_rom_cache(provider,platform_slug); CREATE INDEX IF NOT EXISTS idx_items_title ON library_items(title); CREATE INDEX IF NOT EXISTS idx_items_platform ON library_items(platform_slug); CREATE INDEX IF NOT EXISTS idx_items_path ON library_items(local_path); CREATE INDEX IF NOT EXISTS idx_item_files_provider ON library_item_files(provider_id);")?;
+        c.execute_batch("PRAGMA journal_mode=WAL; PRAGMA synchronous=NORMAL; CREATE TABLE IF NOT EXISTS platforms(slug TEXT PRIMARY KEY,name TEXT NOT NULL); CREATE TABLE IF NOT EXISTS library_items(id TEXT PRIMARY KEY,title TEXT NOT NULL,kind TEXT NOT NULL DEFAULT 'game',platform_slug TEXT,local_path TEXT,json TEXT NOT NULL,last_updated INTEGER NOT NULL DEFAULT 0,regions_json TEXT NOT NULL DEFAULT '[]',cover TEXT,cover_small_local_path TEXT,cover_large_local_path TEXT, UNIQUE(platform_slug,local_path)); CREATE TABLE IF NOT EXISTS library_item_files(library_item_id TEXT NOT NULL,provider_id TEXT,local_path TEXT NOT NULL,name TEXT NOT NULL,size_bytes INTEGER,PRIMARY KEY(library_item_id,local_path),UNIQUE(provider_id)); DROP TABLE IF EXISTS remote_rom_cache; CREATE INDEX IF NOT EXISTS idx_items_title ON library_items(title); CREATE INDEX IF NOT EXISTS idx_items_platform ON library_items(platform_slug); CREATE INDEX IF NOT EXISTS idx_items_path ON library_items(local_path); CREATE INDEX IF NOT EXISTS idx_item_files_provider ON library_item_files(provider_id);")?;
         let has_last_updated = c
             .prepare("PRAGMA table_info(library_items)")?
             .query_map([], |row| row.get::<_, String>(1))?
@@ -257,99 +249,6 @@ impl SqliteLibrary {
         Self::open(":memory:")
     }
 
-    /// Store lightweight provider-owned catalog rows without entering the local library.
-    pub fn upsert_remote_json(
-        &self,
-        provider: &str,
-        rows: &[(String, String, String, String)],
-    ) -> Result<(), rusqlite::Error> {
-        let mut c = self.conn.lock().unwrap();
-        let tx = c.transaction()?;
-        {
-            let mut statement = tx.prepare(
-                "INSERT OR REPLACE INTO remote_rom_cache(provider,rom_id,title,platform_slug,json) VALUES(?,?,?,?,?)",
-            )?;
-            for (rom_id, title, platform_slug, json) in rows {
-                statement.execute(params![provider, rom_id, title, platform_slug, json])?;
-            }
-        }
-        tx.commit()?;
-        debug!(
-            provider,
-            rows = rows.len(),
-            "remote catalog rows committed to SQLite"
-        );
-        Ok(())
-    }
-
-    /// Read a provider catalog page locally. This is deliberately not a LibraryRead method.
-    pub fn remote_json_page(
-        &self,
-        provider: &str,
-        platform_slug: Option<&str>,
-        search: Option<&str>,
-        limit: usize,
-        offset: usize,
-    ) -> Result<Vec<String>, rusqlite::Error> {
-        let c = self.conn.lock().unwrap();
-        let mut statement = c.prepare(
-            "SELECT json FROM remote_rom_cache WHERE provider=?1 AND (?2 IS NULL OR platform_slug=?2) AND (?3 IS NULL OR lower(title) LIKE '%'||lower(?3)||'%') ORDER BY title, rom_id LIMIT ?4 OFFSET ?5",
-        )?;
-        statement
-            .query_map(
-                params![provider, platform_slug, search, limit as i64, offset as i64],
-                |row| row.get(0),
-            )?
-            .collect()
-    }
-
-    pub fn remote_catalog_page(
-        &self,
-        provider: &str,
-        platform_slug: Option<&str>,
-        search: Option<&str>,
-        limit: usize,
-        offset: usize,
-    ) -> Result<Vec<RemoteCatalogRow>, rusqlite::Error> {
-        let c = self.conn.lock().unwrap();
-        let mut statement = c.prepare(
-            "SELECT provider,rom_id,title,platform_slug FROM remote_rom_cache WHERE provider=?1 AND (?2 IS NULL OR platform_slug=?2) AND (?3 IS NULL OR lower(title) LIKE '%'||lower(?3)||'%') ORDER BY title, rom_id LIMIT ?4 OFFSET ?5",
-        )?;
-        statement
-            .query_map(
-                params![provider, platform_slug, search, limit as i64, offset as i64],
-                |row| {
-                    Ok(RemoteCatalogRow {
-                        provider: row.get(0)?,
-                        rom_id: row.get(1)?,
-                        title: row.get(2)?,
-                        platform_slug: row.get(3)?,
-                    })
-                },
-            )?
-            .collect()
-    }
-
-    pub fn remote_json(
-        &self,
-        provider: &str,
-        rom_id: &str,
-    ) -> Result<Option<String>, rusqlite::Error> {
-        let c = self.conn.lock().unwrap();
-        let mut statement =
-            c.prepare("SELECT json FROM remote_rom_cache WHERE provider=?1 AND rom_id=?2")?;
-        let mut rows = statement.query(params![provider, rom_id])?;
-        rows.next()?.map(|row| row.get(0)).transpose()
-    }
-
-    pub fn remote_json_count(&self, provider: &str) -> Result<u64, rusqlite::Error> {
-        let c = self.conn.lock().unwrap();
-        c.query_row(
-            "SELECT COUNT(*) FROM remote_rom_cache WHERE provider=?",
-            params![provider],
-            |row| row.get::<_, u64>(0),
-        )
-    }
     fn item(row: &rusqlite::Row) -> Result<LibraryItem, rusqlite::Error> {
         let s: String = row.get(0)?;
         serde_json::from_str::<Stored>(&s)

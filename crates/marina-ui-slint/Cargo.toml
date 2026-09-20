@@ -26,15 +26,19 @@ image = { version = "0.25", default-features = false, features = ["jpeg", "png",
 
 dirs.workspace = true
 dotenvy.workspace = true
+figment.workspace = true
 marina-apps.workspace = true
 marina-core.workspace = true
 serde.workspace = true
 serde_json.workspace = true
+toml.workspace = true
+toml_edit.workspace = true
 marina-library.workspace = true
 marina-romm.workspace = true
 marina-install.workspace = true
 marina-scanner.workspace = true
 marina-store-sqlite.workspace = true
+marina-store.workspace = true
 marina-input.workspace = true
 marina-runtime.workspace = true
 reqwest.workspace = true

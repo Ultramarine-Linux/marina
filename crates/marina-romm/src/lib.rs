@@ -100,6 +100,7 @@
 mod client;
 mod error;
 mod models;
+mod store;
 
 pub use client::{Auth, Client};
 pub use error::Error;
@@ -109,6 +110,7 @@ pub use models::{
     Heartbeat, Platform, PlatformQuery, PlatformQueryBuilder, Rom, RomPage, RomQuery,
     RomQueryBuilder, SystemInfo,
 };
+pub use store::RommStore;
 
 #[cfg(test)]
 mod tests {

@@ -1,0 +1,23 @@
+# Copy to `marina.toml` (repo root) or
+# `~/.config/marina/config.toml`, or point `$MARINA_CONFIG` at it.
+# Every field can still be overridden by its environment variable.
+
+[store.romm]
+# MARINA_ENABLE_ROMM
+enable = false
+# ROMM_URL
+url = "https://romm.example.com"
+# ROMM_TOKEN
+token = ""
+# MARINA_IMPORT_ROMM_ON_STARTUP
+import_on_startup = false
+
+[library]
+# MARINA_LIBRARY_ROOT
+root = "/var/games/library"
+# MARINA_STORAGE_URI
+storage_uri = "sqlite://marina.db"
+# MARINA_STORE_CACHE_DIR
+store_cache_dir = ""
+# MARINA_SCAN_ON_STARTUP
+scan_on_startup = true

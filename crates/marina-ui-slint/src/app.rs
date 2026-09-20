@@ -2,6 +2,8 @@
 
 use std::sync::Arc;
 
+use marina_romm::RommStore;
+use marina_store::StoreCaches;
 use marina_store_sqlite::SqliteLibrary;
 
 use crate::{config::Config, storage};
@@ -11,6 +13,8 @@ use crate::{config::Config, storage};
 pub(crate) struct AppState {
     pub(crate) config: Config,
     pub(crate) library: SqliteLibrary,
+    pub(crate) store_caches: StoreCaches,
+    pub(crate) romm: Option<RommStore>,
 }
 
 /// A shareable handle to the application's runtime state.
@@ -35,11 +39,21 @@ impl AppState {
         }
         tracing::info!("opening library store");
         let library = storage::connect(&config).await?;
+        let store_caches = storage::connect_store_caches(&config);
+        let romm = config
+            .romm_url
+            .clone()
+            .map(|base_url| RommStore::new(base_url, config.romm_token.as_deref()));
         tracing::info!(
             elapsed_ms = started.elapsed().as_millis() as u64,
             "application state ready"
         );
 
-        Ok(Arc::new(Self { config, library }))
+        Ok(Arc::new(Self {
+            config,
+            library,
+            store_caches,
+            romm,
+        }))
     }
 }

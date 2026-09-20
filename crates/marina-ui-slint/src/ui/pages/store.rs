@@ -1,8 +1,13 @@
-//! Store page event and data coordination.
+//! Store page event and data coordination (backend-agnostic).
+//!
+//! Catalog data flows: [`marina_store::StoreBackend`] -> per-backend
+//! [`marina_store::StoreCache`] file (`<dir>/<backend>.db`) -> UI cards.
+//! The in-memory `Vec<Rom>` is hydrated from cached payload JSON so the
+//! page works offline; network refreshes upsert into the backend's own file.
 
 use std::sync::{Arc, Mutex};
 
-use marina_romm::{PlatformQuery, RomQuery};
+use marina_store::StoreBackend;
 use slint::{ComponentHandle, Image, Model, ModelRc, SharedString, VecModel};
 use tracing::{error, info};
 
@@ -11,7 +16,63 @@ use crate::{
     GameCardData, LibraryState, MainWindow, PlatformCardData, PlatformCardMetadata, StoreState,
     ToastQueue, ToastVariant, game_cards, platform_asset_path,
 };
-use crate::{app, image, romm_auth};
+use crate::{app, image};
+
+fn decode_roms(entries: &[marina_store::StoreEntry]) -> Vec<marina_romm::Rom> {
+    entries
+        .iter()
+        .filter_map(|entry| {
+            entry
+                .payload_json
+                .as_deref()
+                .and_then(|json| serde_json::from_str::<marina_romm::Rom>(json).ok())
+        })
+        .collect()
+}
+
+fn show_roms(
+    window: &slint::Weak<MainWindow>,
+    remote_store: &Arc<Mutex<Vec<marina_romm::Rom>>>,
+    roms: Vec<marina_romm::Rom>,
+) {
+    *remote_store.lock().expect("remote Store state poisoned") = roms.clone();
+    let cards = roms
+        .into_iter()
+        .map(|rom| {
+            (
+                rom.id.to_string(),
+                rom.name.unwrap_or_else(|| rom.files.fs_name.clone()),
+                rom.platform
+                    .platform_display_name
+                    .unwrap_or(rom.platform.platform_fs_slug),
+            )
+        })
+        .collect::<Vec<_>>();
+    let _ = window.upgrade_in_event_loop(move |window| {
+        let cards = cards
+            .into_iter()
+            .map(|(id, title, platform)| GameCardData {
+                id: SharedString::from(id),
+                title: SharedString::from(title),
+                platform: SharedString::from(platform),
+                cover: Image::default(),
+                cover_ratio: 1.0,
+            })
+            .collect::<Vec<_>>();
+        let first_id = cards.first().map(|game| game.id.clone());
+        window
+            .global::<StoreState>()
+            .set_games(ModelRc::from(std::rc::Rc::new(VecModel::from(cards))));
+        window.global::<StoreState>().set_loading(false);
+        if let Some(first_id) = first_id {
+            window.global::<StoreState>().set_selected_game_index(0);
+            window.global::<StoreState>().set_details_loading(true);
+            window
+                .global::<StoreState>()
+                .invoke_game_selected(first_id, 0);
+        }
+    });
+}
 
 pub(crate) fn install(
     window: &MainWindow,
@@ -69,13 +130,12 @@ pub(crate) fn install(
                 )));
             window.global::<StoreState>().set_install_progress(0.0);
         });
+        let Some(backend) = state.romm.clone() else {
+            return;
+        };
         tokio::spawn(async move {
-            let Some(base_url) = state.config.romm_url.clone() else {
-                return;
-            };
-            let client = romm_auth::client(base_url, state.config.romm_token.as_deref());
             let result = marina_install::install(
-                &client,
+                backend.client(),
                 &state.library,
                 marina_install::InstallRequest {
                     rom,
@@ -107,9 +167,6 @@ pub(crate) fn install(
                                     .global::<StoreState>()
                                     .set_install_status(SharedString::from("Installed"));
                                 window.global::<StoreState>().set_install_progress(1.0);
-                                // A newly installed game may introduce a platform,
-                                // so refresh the Library catalog without requiring
-                                // the user to leave and re-enter that tab.
                                 window.global::<LibraryState>().invoke_entered();
                             });
                         }
@@ -149,7 +206,7 @@ pub(crate) fn install(
             .ok()
             .and_then(|state| state.clone());
         let Some(state) = state else { return };
-        let Some(base_url) = state.config.romm_url.clone() else {
+        let Some(backend) = state.romm.clone() else {
             return;
         };
         let window = store_refresh_window.clone();
@@ -157,25 +214,25 @@ pub(crate) fn install(
             window.global::<StoreState>().set_loading(true);
         });
         tokio::spawn(async move {
-            match romm_auth::client(base_url, state.config.romm_token.as_deref())
-                .list_platforms(&PlatformQuery::default())
-                .await
-            {
+            match backend.list_platforms().await {
                 Ok(platforms) => {
                     let icon_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
                         .join("ui/assets/platforms/systematic");
                     let mut cards = Vec::new();
                     for platform in platforms {
-                        let icon = match platform_asset_path(&icon_root, &platform.fs_slug) {
+                        let icon = match platform_asset_path(&icon_root, &platform.slug) {
                             Some(path) => image::load_path_scaled(path, "platform-icon", 256).await,
                             None => None,
                         };
                         cards.push(PlatformCardMetadata {
                             icon_path: None,
                             icon,
-                            slug: platform.fs_slug,
-                            name: platform.display_name,
-                            game_count: platform.rom_count.to_string(),
+                            slug: platform.slug,
+                            name: platform.name,
+                            game_count: platform
+                                .game_count
+                                .map(|count| count.to_string())
+                                .unwrap_or_default(),
                         });
                     }
                     let count = cards.len();
@@ -197,14 +254,14 @@ pub(crate) fn install(
                             .set_platforms(ModelRc::from(std::rc::Rc::new(VecModel::from(cards))));
                         window.global::<StoreState>().set_loading(false);
                         window.global::<ToastQueue>().invoke_show(
-                            SharedString::from(format!("Loaded {count} RomM platforms")),
+                            SharedString::from(format!("Loaded {count} store platforms")),
                             ToastVariant::Success,
                         );
                     });
                 }
                 Err(error) => {
-                    error!(%error, "RomM platform refresh failed");
-                    let message = SharedString::from(format!("RomM refresh failed: {error}"));
+                    error!(%error, "store platform refresh failed");
+                    let message = SharedString::from(format!("Store refresh failed: {error}"));
                     let _ = window.upgrade_in_event_loop(move |window| {
                         window.global::<StoreState>().set_loading(false);
                         window
@@ -223,142 +280,43 @@ pub(crate) fn install(
                 .expect("library state lock poisoned")
                 .clone();
             let Some(state) = state else { return };
-            let Some(base_url) = state.config.romm_url.clone() else {
+            let Some(backend) = state.romm.clone() else {
                 return;
             };
             let query_window = store_query_window.clone();
             let remote_store = store_query_roms.clone();
             tokio::spawn(async move {
-                if let Ok(cached) =
-                    state
-                        .library
-                        .remote_json_page("romm", Some(&slug), None, usize::MAX, 0)
-                {
-                    let cached = cached
-                        .into_iter()
-                        .filter_map(|json| serde_json::from_str::<marina_romm::Rom>(&json).ok())
-                        .collect::<Vec<_>>();
-                    if !cached.is_empty() {
-                        *remote_store.lock().expect("remote Store state poisoned") = cached.clone();
-                        let cards = cached
-                            .into_iter()
-                            .map(|rom| {
-                                (
-                                    rom.id.to_string(),
-                                    rom.name.unwrap_or_else(|| rom.files.fs_name.clone()),
-                                    rom.platform
-                                        .platform_display_name
-                                        .unwrap_or(rom.platform.platform_fs_slug),
-                                )
-                            })
-                            .collect::<Vec<_>>();
-                        let _ = query_window.upgrade_in_event_loop(move |window| {
-                            let cards = cards
-                                .into_iter()
-                                .map(|(id, title, platform)| GameCardData {
-                                    id: SharedString::from(id),
-                                    title: SharedString::from(title),
-                                    platform: SharedString::from(platform),
-                                    cover: Image::default(),
-                                    cover_ratio: 1.0,
-                                })
-                                .collect::<Vec<_>>();
-                            let first_id = cards.first().map(|game| game.id.clone());
-                            window
-                                .global::<StoreState>()
-                                .set_games(ModelRc::from(std::rc::Rc::new(VecModel::from(cards))));
-                            window.global::<StoreState>().set_loading(false);
-                            if let Some(first_id) = first_id {
-                                window.global::<StoreState>().set_selected_game_index(0);
-                                window.global::<StoreState>().set_details_loading(true);
-                                window
-                                    .global::<StoreState>()
-                                    .invoke_game_selected(first_id, 0);
-                            }
-                        });
-                        return;
+                // Cached-first: each backend owns its own `<backend>.db` file.
+                if let Ok(cache) = state.store_caches.cache_for(backend.id()) {
+                    if let Ok(entries) = cache.browse(Some(&slug), None, usize::MAX, 0) {
+                        let cached = decode_roms(&entries);
+                        if !cached.is_empty() {
+                            show_roms(&query_window, &remote_store, cached);
+                            return;
+                        }
                     }
                 }
-                let client = romm_auth::client(base_url, state.config.romm_token.as_deref());
-                let platforms = match client.list_platforms(&PlatformQuery::default()).await {
-                    Ok(platforms) => platforms,
-                    Err(error) => {
-                        error!(%error, "Store platform lookup failed");
-                        return;
-                    }
-                };
-                let Some(platform) = platforms
-                    .into_iter()
-                    .find(|platform| platform.fs_slug == slug.as_str())
-                else {
-                    return;
-                };
-                let query = RomQuery {
-                    platform_ids: vec![platform.id],
-                    limit: Some(100),
-                    offset: Some(0),
-                    ..Default::default()
-                };
-                let page = match client.list_roms(&query).await {
-                    Ok(page) => page,
+                let entries = match backend
+                    .browse(marina_store::StoreQuery {
+                        platform_slug: Some(slug.to_string()),
+                        limit: 100,
+                        offset: 0,
+                        ..Default::default()
+                    })
+                    .await
+                {
+                    Ok(entries) => entries,
                     Err(error) => {
                         error!(%error, "Store game loading failed");
                         return;
                     }
                 };
-                let remote_items = page.items;
-
-                let cache_rows = remote_items
-                    .iter()
-                    .filter_map(|rom| {
-                        Some((
-                            rom.id.to_string(),
-                            rom.name
-                                .clone()
-                                .unwrap_or_else(|| rom.files.fs_name.clone()),
-                            rom.platform.platform_fs_slug.clone(),
-                            serde_json::to_string(rom).ok()?,
-                        ))
-                    })
-                    .collect::<Vec<_>>();
-                if let Err(error) = state.library.upsert_remote_json("romm", &cache_rows) {
-                    error!(%error, "RomM remote catalog cache write failed");
-                }
-                *remote_store.lock().expect("remote Store state poisoned") = remote_items.clone();
-                let cards = remote_items
-                    .into_iter()
-                    .map(|rom| {
-                        (
-                            rom.id.to_string(),
-                            rom.name.unwrap_or_else(|| rom.files.fs_name.clone()),
-                            platform.display_name.clone(),
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                let _ = query_window.upgrade_in_event_loop(move |window| {
-                    let cards = cards
-                        .into_iter()
-                        .map(|(id, title, platform)| GameCardData {
-                            id: SharedString::from(id),
-                            title: SharedString::from(title),
-                            platform: SharedString::from(platform),
-                            cover: Image::default(),
-                            cover_ratio: 1.0,
-                        })
-                        .collect::<Vec<_>>();
-                    let first_id = cards.first().map(|game| game.id.clone());
-                    window
-                        .global::<StoreState>()
-                        .set_games(ModelRc::from(std::rc::Rc::new(VecModel::from(cards))));
-                    window.global::<StoreState>().set_loading(false);
-                    if let Some(first_id) = first_id {
-                        window.global::<StoreState>().set_selected_game_index(0);
-                        window.global::<StoreState>().set_details_loading(true);
-                        window
-                            .global::<StoreState>()
-                            .invoke_game_selected(first_id, 0);
+                if let Ok(cache) = state.store_caches.cache_for(backend.id()) {
+                    if let Err(error) = cache.upsert_entries(&entries) {
+                        error!(%error, "store catalog cache write failed");
                     }
-                });
+                }
+                show_roms(&query_window, &remote_store, decode_roms(&entries));
             });
         });
 
@@ -368,17 +326,11 @@ pub(crate) fn install(
     window
         .global::<StoreState>()
         .on_game_selected(move |id, _index| {
-            let Ok(id) = id.parse::<i32>() else { return };
-            if let Some(window) = detail_window.upgrade() {
-                window
-                    .global::<StoreState>()
-                    .set_preview_image(Image::default());
-            }
             let cached_rom = detail_store
                 .lock()
                 .expect("remote Store state poisoned")
                 .iter()
-                .find(|rom| rom.id == id)
+                .find(|rom| rom.id.to_string() == id.as_str())
                 .cloned();
             let Some(state) = detail_state
                 .lock()
@@ -387,24 +339,35 @@ pub(crate) fn install(
             else {
                 return;
             };
-            let Some(base_url) = state.config.romm_url.clone() else {
+            let Some(backend) = state.romm.clone() else {
                 return;
             };
+            let base_url = backend.base_url().to_owned();
+            if let Some(window) = detail_window.upgrade() {
+                window
+                    .global::<StoreState>()
+                    .set_preview_image(Image::default());
+            }
             if let Some(rom) = cached_rom {
                 crate::populate_store_details(&detail_window, rom, &base_url);
             }
-            let token = state.config.romm_token.clone();
             let detail_roms = detail_store.clone();
             let detail_window = detail_window.clone();
             tokio::spawn(async move {
-                let client = romm_auth::client(base_url.clone(), token.as_deref());
-                match client.get_rom(id).await {
-                    Ok(rom) => {
-                        *detail_roms.lock().expect("remote Store state poisoned") =
-                            vec![rom.clone()];
-                        crate::populate_store_details(&detail_window, rom, &base_url);
+                match backend.get(&id).await {
+                    Ok(Some(entry)) => {
+                        if let Some(json) = entry.payload_json {
+                            if let Ok(rom) = serde_json::from_str::<marina_romm::Rom>(&json) {
+                                *detail_roms.lock().expect("remote Store state poisoned") =
+                                    vec![rom.clone()];
+                                crate::populate_store_details(&detail_window, rom, &base_url);
+                            }
+                        }
                     }
-                    Err(error) => error!(%error, rom_id = id, "RomM game detail hydration failed"),
+                    Ok(None) => {}
+                    Err(error) => {
+                        error!(%error, entry_id = %id, "store game detail hydration failed")
+                    }
                 }
             });
         });
