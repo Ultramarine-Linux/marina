@@ -8,6 +8,7 @@ import { Badge, BadgeSize, BadgeVariant } from "../slintcn/components/badge.slin
 import { PageHeader } from "page-header.slint";
 import { GameCardData } from "card.slint";
 import { PreviewDetailsData } from "preview-details.slint";
+import { ShellState } from "app-shell.slint";
 
 export global GameState {
     in-out property <GameCardData> selected-game;
@@ -43,7 +44,9 @@ export component GameDetailsView inherits Rectangle {
                 ? root.game.title
                 : (root.details.title != "" ? root.details.title : root.game.title);
             focus-request: root.header-focus-request;
+            crumbs: ShellState.breadcrumbs;
             back => { root.back(); }
+            crumb-navigate(index) => { ShellState.crumb-navigate(index); }
         }
 
         ScrollArea {

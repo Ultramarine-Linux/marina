@@ -151,6 +151,7 @@ pub(crate) fn install(
             window
                 .global::<GameState>()
                 .set_tags(crate::string_model(Vec::new()));
+            crate::ui::nav::publish(&window);
 
             // Defer the route change until the list click callback has unwound.
             let route_window = window.as_weak();
@@ -182,6 +183,7 @@ pub(crate) fn install(
         window
             .global::<GameState>()
             .set_tags(crate::string_model(Vec::new()));
+        crate::ui::nav::publish(&window);
 
         // Changing routes synchronously from the card's click callback deletes
         // the callback's parent item while Slint is still dispatching the
@@ -273,6 +275,9 @@ pub(crate) fn install(
     window.global::<LibraryState>().on_platform_query({
         let source_store = source_store.clone();
         move |platform_slug| {
+            if let Some(window) = query_window.upgrade() {
+                crate::ui::nav::drill_library(&window, platform_slug.as_str());
+            }
             let state = query_state
                 .lock()
                 .expect("library state lock poisoned")

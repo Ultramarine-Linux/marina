@@ -13,6 +13,7 @@ import { Card, CardPadding, CardRadius } from "../slintcn/components/card.slint"
 import { Badge, BadgeSize, BadgeVariant } from "../slintcn/components/badge.slint";
 import { PlatformCardData } from "../components/platform-card.slint";
 import { GameCardData } from "../components/card.slint";
+import { ShellState } from "../components/app-shell.slint";
 import { PlatformGameList } from "../components/platform-game-list.slint";
 import { PreviewDetailsData } from "../components/preview-details.slint";
 import { GameDetailsView } from "../components/game-details-view.slint";
@@ -37,6 +38,8 @@ export global StoreState {
     in-out property <[bool]> selected-artifacts;
     in-out property <int> page: 0;
     in-out property <int> selected-platform-index: 0;
+    in-out property <string> selected-platform;
+    in-out property <string> selected-platform-name;
     in-out property <int> selected-game-index: 0;
     in-out property <int> selected-artifact-index: 0;
     in-out property <length> game-list-scroll-y: 0px;
@@ -64,8 +67,8 @@ export component StorePage inherits Rectangle {
     in-out property <int> selected-game-index: 0;
     in-out property <int> selected-artifact-index: 0;
 
-    in-out property <string> selected-platform;
-    in-out property <string> selected-platform-name;
+    in-out property <string> selected-platform <=> StoreState.selected-platform;
+    in-out property <string> selected-platform-name <=> StoreState.selected-platform-name;
     in-out property <int> selected-platform-index: 0;
     in property <int> focus-request: 0;
     private property <length> platform-list-scroll-y: 0px;
@@ -132,12 +135,10 @@ export component StorePage inherits Rectangle {
                     root.artifact-sheet-open = false;
                     return accept;
                 }
-                if (root.page == 2) {
-                    root.page = 1;
-                    return accept;
-                }
-                if (root.page == 1) {
-                    root.page = 0;
+                // Page steps (details → games → platforms) pop the
+                // navigation breadcrumb in Rust.
+                if (root.page == 2 || root.page == 1) {
+                    ShellState.back-requested();
                     return accept;
                 }
             }
@@ -309,7 +310,7 @@ export component StorePage inherits Rectangle {
         tags: root.tags;
         loading: root.details-loading;
         action-label: "Download";
-        back => { root.page = 1; }
+        back => { ShellState.back-requested(); }
         action-requested => { root.artifact-sheet-open = true; }
     }
 

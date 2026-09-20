@@ -4,6 +4,7 @@ import { Avatar } from "../slintcn/components/avatar.slint";
 import { NavigationMenu, NavigationItem } from "../slintcn/components/navigation-menu.slint";
 import { Text as Typography } from "../slintcn/components/text.slint";
 import { TextVariant, TextTone } from "../slintcn/components/text.slint";
+import { BreadcrumbItem } from "../slintcn/components/breadcrumb.slint";
 import { ShellPage } from "../pages/route.slint";
 
 export global ShellState {
@@ -15,8 +16,11 @@ export global ShellState {
     in-out property <string> profile-initials: "U";
     in-out property <image> profile-image;
     in-out property <int> content-focus-request: 0;
+    // Navigation trail; the last item is the current location.
+    in-out property <[BreadcrumbItem]> breadcrumbs;
     callback navigate(int);
     callback back-requested;
+    callback crumb-navigate(int);
 }
 
 // Shared application chrome. Screens are supplied as children and are kept

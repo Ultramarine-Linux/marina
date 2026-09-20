@@ -8,9 +8,8 @@ use slint::{
     platform::{Key, WindowEvent},
 };
 
-use crate::{
-    HomeState, LibraryState, MainWindow, ShellPage, ShellState, StoreState, ToastItem, ToastQueue,
-};
+use crate::ui::nav;
+use crate::{MainWindow, ShellPage, ShellState, StoreState, ToastItem, ToastQueue};
 
 const TOAST_DURATION: Duration = Duration::from_secs(4);
 const TOAST_DISMISS_ANIMATION: Duration = Duration::from_millis(250);
@@ -32,29 +31,8 @@ pub(crate) fn configure_navigation(window: &MainWindow) {
             window.invoke_focus_navigation();
             return;
         }
-        shell.set_active_tab(index);
-
-        match index {
-            0 => {
-                shell.set_page(ShellPage::Home);
-                let home = window.global::<HomeState>();
-                home.set_loading(true);
-                home.invoke_entered();
-            }
-            1 => {
-                shell.set_page(ShellPage::Library);
-                window.global::<LibraryState>().invoke_entered();
-            }
-            _ => {
-                shell.set_page(ShellPage::Store);
-                window.global::<StoreState>().invoke_entered();
-            }
-        }
-
-        window
-            .global::<HomeState>()
-            .invoke_cover_context_changed(index);
-        window.invoke_focus_navigation();
+        nav::push_tab(&window, index);
+        nav::goto_tab(&window, index);
     });
 
     let weak = window.as_weak();
@@ -62,17 +40,18 @@ pub(crate) fn configure_navigation(window: &MainWindow) {
         let Some(window) = weak.upgrade() else {
             return;
         };
-        let shell = window.global::<ShellState>();
-        if shell.get_page() != ShellPage::GameDetails {
-            return;
-        }
-        shell.set_page(match shell.get_active_tab() {
-            0 => ShellPage::Home,
-            1 => ShellPage::Library,
-            _ => ShellPage::Store,
-        });
-        window.invoke_focus_navigation();
+        nav::back(&window);
     });
+
+    let weak = window.as_weak();
+    window
+        .global::<ShellState>()
+        .on_crumb_navigate(move |index| {
+            let Some(window) = weak.upgrade() else {
+                return;
+            };
+            nav::jump(&window, index);
+        });
 }
 
 pub(crate) fn dispatch_controller_action(window: &MainWindow, event: InputEvent) {
@@ -108,7 +87,7 @@ pub(crate) fn dispatch_controller_action(window: &MainWindow, event: InputEvent)
         | InputAction::ScrollDown
         | InputAction::ScrollLeft
         | InputAction::ScrollRight => {}
-        InputAction::Back if window.global::<ShellState>().get_page() == ShellPage::GameDetails => {
+        InputAction::Back if is_back_route(&window) => {
             window.global::<ShellState>().invoke_back_requested();
             return;
         }
@@ -145,6 +124,18 @@ pub(crate) fn dispatch_controller_action(window: &MainWindow, event: InputEvent)
     window
         .window()
         .dispatch_event(WindowEvent::KeyPressed { text: key.into() });
+}
+
+/// Back-worthy locations for the semantic Back action: the game-details
+/// route plus inline detail views (e.g. store page 2) whose focus never
+/// reaches a Slint Esc branch. Everything else falls through to the Escape
+/// key event, which list pages handle themselves.
+fn is_back_route(window: &MainWindow) -> bool {
+    let shell = window.global::<ShellState>();
+    if shell.get_page() == ShellPage::GameDetails {
+        return true;
+    }
+    shell.get_page() == ShellPage::Store && window.global::<StoreState>().get_page() == 2
 }
 
 pub(crate) fn configure_toasts(window: &MainWindow) {

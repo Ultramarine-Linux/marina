@@ -10,6 +10,7 @@ import { GameCardData } from "../components/card.slint";
 import { PlatformGameList } from "../components/platform-game-list.slint";
 import { PreviewDetailsData } from "../components/preview-details.slint";
 import { PageHeader } from "../components/page-header.slint";
+import { ShellState } from "../components/app-shell.slint";
 
 export global LibraryState {
     in-out property <[PlatformCardData]> platforms;
@@ -18,6 +19,11 @@ export global LibraryState {
     in-out property <int> selected-platform-index: 0;
     in-out property <int> selected-game-index: 0;
     in-out property <length> game-list-scroll-y: 0px;
+    // Sub-page state lives here (not in LibraryPage) so drilling into a
+    // platform survives the page component being destroyed on route changes.
+    in-out property <int> page: 0;
+    in-out property <string> selected-platform;
+    in-out property <string> selected-platform-name;
     callback entered;
     callback platform-query(string);
     callback game-selected(string, int);
@@ -28,10 +34,10 @@ export component LibraryPage inherits Rectangle {
     in property <[PlatformCardData]> platforms;
     in property <[GameCardData]> games;
     in property <PreviewDetailsData> details;
-    in-out property <int> page: 0;
+    in-out property <int> page <=> LibraryState.page;
 
-    in-out property <string> selected-platform;
-    in-out property <string> selected-platform-name;
+    in-out property <string> selected-platform <=> LibraryState.selected-platform;
+    in-out property <string> selected-platform-name <=> LibraryState.selected-platform-name;
     in-out property <int> selected-platform-index: 0;
     in-out property <int> selected-game-index: 0;
     in property <int> focus-request: 0;
@@ -100,7 +106,7 @@ export component LibraryPage inherits Rectangle {
         height: 0px;
         key-pressed(event) => {
             if (event.text == "\u{1b}" && root.page == 1) {
-                root.page = 0;
+                ShellState.back-requested();
                 return accept;
             }
 
@@ -231,7 +237,9 @@ export component LibraryPage inherits Rectangle {
         PageHeader {
             title: root.selected-platform-name;
             focus-request: root.header-focus-request;
-            back => { root.page = 0; }
+            crumbs: ShellState.breadcrumbs;
+            back => { ShellState.back-requested(); }
+            crumb-navigate(index) => { ShellState.crumb-navigate(index); }
         }
 
         if root.loading: Rectangle {

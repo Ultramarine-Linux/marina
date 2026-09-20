@@ -339,6 +339,9 @@ pub(crate) fn install(
     window
         .global::<StoreState>()
         .on_platform_query(move |slug| {
+            if let Some(window) = store_query_window.upgrade() {
+                crate::ui::nav::drill_store(&window, slug.as_str());
+            }
             let state = store_query_state
                 .lock()
                 .expect("library state lock poisoned")

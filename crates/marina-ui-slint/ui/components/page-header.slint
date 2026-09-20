@@ -4,18 +4,26 @@ import { Text as Typography } from "../slintcn/components/text.slint";
 import { TextVariant } from "../slintcn/components/text.slint";
 import { LucideIcon } from "../slintcn/components/lucide-icon.slint";
 import { IconSet } from "@lucide/lucide.slint";
+import { Breadcrumb, BreadcrumbItem } from "../slintcn/components/breadcrumb.slint";
 
 // Compact, reusable title row for routed pages with a back action.
 export component PageHeader inherits Rectangle {
     in property <string> title;
     in property <int> focus-request: 0;
+    in property <[BreadcrumbItem]> crumbs;
     callback back;
+    callback crumb-navigate(int);
 
-    height: 33px;
+    height: 53px;
     changed focus-request => { back-button.focus(); }
 
     VerticalLayout {
         spacing: 0px;
+
+        Breadcrumb {
+            items: root.crumbs;
+            navigate(index) => { root.crumb-navigate(index); }
+        }
 
         HorizontalLayout {
             height: 32px;
