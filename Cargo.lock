@@ -3356,6 +3356,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "marina-config-derive"
+version = "0.1.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.119",
+]
+
+[[package]]
 name = "marina-core"
 version = "0.1.0"
 dependencies = [
@@ -3416,7 +3425,9 @@ dependencies = [
 name = "marina-runtime"
 version = "0.1.0"
 dependencies = [
+ "marina-config-derive",
  "marina-core",
+ "serde",
  "serde_json",
  "thiserror 2.0.20",
  "tokio",
@@ -3486,6 +3497,7 @@ dependencies = [
  "image",
  "lucide-slint",
  "marina-apps",
+ "marina-config-derive",
  "marina-core",
  "marina-input",
  "marina-library",

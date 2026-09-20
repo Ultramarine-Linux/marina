@@ -1,8 +1,15 @@
 //! Runtime services for launching and supervising games.
 
-use std::{path::PathBuf, process::Stdio};
+use std::{
+    collections::HashMap,
+    io,
+    path::{Path, PathBuf},
+    process::Stdio,
+};
 
-use marina_core::{LibraryItem, Platform};
+use marina_config_derive::ConfigTemplate;
+use marina_core::LibraryItem;
+use serde::Deserialize;
 use thiserror::Error;
 use tokio::process::Command;
 use tracing::{debug, info, warn};
@@ -10,6 +17,191 @@ use ulid::Ulid;
 
 const SYSTEMD_RUN: &str = "systemd-run";
 const APP_SLICE: &str = "graphical-apps.slice";
+
+/// Default RetroArch frontend binary, resolved via `PATH`.
+pub const DEFAULT_RETROARCH_BINARY: &str = "retroarch";
+/// Default directory scanned for libretro cores (`*_libretro.so`).
+pub const DEFAULT_CORES_DIR: &str = "/var/games/retroarch/cores";
+
+fn default_retroarch_binary() -> PathBuf {
+    PathBuf::from(DEFAULT_RETROARCH_BINARY)
+}
+
+fn default_cores_dir() -> PathBuf {
+    PathBuf::from(DEFAULT_CORES_DIR)
+}
+
+/// Frontend-level RetroArch configuration.
+#[derive(Clone, Debug, Deserialize, ConfigTemplate)]
+pub struct RetroArchConfig {
+    /// RetroArch frontend binary, resolved via `PATH` when relative.
+    #[serde(default = "default_retroarch_binary")]
+    #[template(env = "MARINA_RETROARCH_BINARY")]
+    pub binary: PathBuf,
+    /// Directory scanned for libretro cores (`*_libretro.so`).
+    #[serde(default = "default_cores_dir")]
+    #[template(env = "MARINA_RETROARCH_CORES_DIR")]
+    pub cores_dir: PathBuf,
+    /// Extra frontend flags inserted before `-L <core> <rom>`,
+    /// e.g. `["-f", "--verbose"]`.
+    #[serde(default)]
+    pub extra_args: Vec<String>,
+}
+
+impl Default for RetroArchConfig {
+    fn default() -> Self {
+        Self {
+            binary: default_retroarch_binary(),
+            cores_dir: default_cores_dir(),
+            extra_args: Vec::new(),
+        }
+    }
+}
+
+/// Per-platform RetroArch settings.
+#[derive(Clone, Debug, Default, Deserialize, ConfigTemplate)]
+pub struct RetroArchPlatformConfig {
+    /// Core for this platform: either a bare file name resolved against the
+    /// `[retroarch] cores_dir` or a full path to the core.
+    #[serde(default)]
+    #[template(example = "mgba_libretro.so")]
+    pub core: Option<PathBuf>,
+}
+
+/// The backend selected for a single platform.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum PlatformBackendKind {
+    #[default]
+    Native,
+    RetroArch,
+}
+
+/// Per-platform runtime configuration. The template renders one commented
+/// `[platform."<slug>"]` example; copy and adapt it per platform.
+#[derive(Clone, Debug, Default, Deserialize, ConfigTemplate)]
+pub struct PlatformRuntimeConfig {
+    /// Backend for this platform: `"native"` or `"retroarch"`. When unset,
+    /// the `"apps"` platform stays native and every other platform infers
+    /// RetroArch. Set `"native"` explicitly to opt a platform back out.
+    #[serde(default)]
+    #[template(example = "retroarch")]
+    pub backend: Option<String>,
+    /// Alias for `backend`, accepted so `platform = "retroarch"` keeps
+    /// working. `backend` wins when both are set.
+    #[serde(default)]
+    #[template(skip)]
+    pub platform: Option<String>,
+    #[serde(default)]
+    #[template(table)]
+    pub retroarch: RetroArchPlatformConfig,
+}
+
+impl PlatformRuntimeConfig {
+    /// Resolves the backend for `platform_slug`. An explicit `backend` (or
+    /// its `platform` alias) always wins. Otherwise a configured core
+    /// implies RetroArch, the `"apps"` platform stays native, and every
+    /// other platform infers RetroArch (which then requires a core).
+    pub fn backend_kind(&self, platform_slug: &str) -> PlatformBackendKind {
+        if let Some(raw) = self.backend.as_deref().or(self.platform.as_deref()) {
+            match raw.trim().to_ascii_lowercase().as_str() {
+                "retroarch" => return PlatformBackendKind::RetroArch,
+                "native" | "" => return PlatformBackendKind::Native,
+                other => {
+                    warn!(backend = %other, "unknown platform backend; falling back to native");
+                    return PlatformBackendKind::Native;
+                }
+            }
+        }
+        if self.retroarch.core.is_some() || platform_slug != "apps" {
+            PlatformBackendKind::RetroArch
+        } else {
+            PlatformBackendKind::Native
+        }
+    }
+
+    /// Convenience constructor for a platform pinned to a RetroArch core.
+    pub fn retroarch(core: impl Into<PathBuf>) -> Self {
+        Self {
+            backend: Some("retroarch".to_owned()),
+            platform: None,
+            retroarch: RetroArchPlatformConfig {
+                core: Some(core.into()),
+            },
+        }
+    }
+}
+
+/// A single libretro core discovered in the cores directory.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RetroArchCore {
+    /// File name, e.g. `"mgba_libretro.so"`.
+    pub name: String,
+    pub path: PathBuf,
+}
+
+/// Scans `cores_dir` for libretro cores (`*_libretro.so`/`.dylib`/`.dll`),
+/// sorted by file name. Used to validate configured cores and to produce
+/// helpful "available cores" errors.
+pub fn discover_cores(cores_dir: &Path) -> io::Result<Vec<RetroArchCore>> {
+    let mut cores = Vec::new();
+    for entry in std::fs::read_dir(cores_dir)? {
+        let entry = entry?;
+        let path = entry.path();
+        if !path.is_file() {
+            continue;
+        }
+        let name = entry.file_name().to_string_lossy().into_owned();
+        if !is_libretro_core(&name) {
+            continue;
+        }
+        debug!(core = %name, path = %path.display(), "discovered libretro core");
+        cores.push(RetroArchCore { name, path });
+    }
+    cores.sort_by(|left, right| left.name.cmp(&right.name));
+    info!(count = cores.len(), dir = %cores_dir.display(), "libretro core scan completed");
+    Ok(cores)
+}
+
+fn is_libretro_core(file_name: &str) -> bool {
+    let lower = file_name.to_ascii_lowercase();
+    lower.contains("_libretro.")
+        && matches!(
+            Path::new(&lower).extension().and_then(|ext| ext.to_str()),
+            Some("so" | "dylib" | "dll")
+        )
+}
+
+/// Resolves a configured core value to a concrete path. Absolute paths (or
+/// values containing a path separator, e.g. `"subdir/core.so"`) are used
+/// as-is; bare file names are joined onto `cores_dir`.
+pub fn resolve_core_path(core: &Path, cores_dir: &Path) -> PathBuf {
+    if core.is_absolute() || core.components().count() > 1 {
+        core.to_owned()
+    } else {
+        cores_dir.join(core)
+    }
+}
+
+/// The ROM content to hand to RetroArch. Unlike [`LaunchRequest::from_item`],
+/// desktop-entry commands are ignored: the first recorded file entry wins,
+/// falling back to `local_path`.
+pub fn rom_path_for_item(item: &LibraryItem) -> Option<PathBuf> {
+    if let Some(file) = item.files.first() {
+        return Some(PathBuf::from(&file.path));
+    }
+    item.local_path.as_deref().map(PathBuf::from)
+}
+
+/// Builds the RetroArch argument vector: extra args first, then
+/// `-L <core> <rom>`.
+pub fn retroarch_argv(extra_args: &[String], core: &str, rom: &Path) -> Vec<String> {
+    let mut args = Vec::with_capacity(extra_args.len() + 3);
+    args.extend(extra_args.iter().cloned());
+    args.push("-L".to_owned());
+    args.push(core.to_owned());
+    args.push(rom.to_string_lossy().into_owned());
+    args
+}
 
 /// A game launch request resolved from a library item.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -72,6 +264,12 @@ pub enum RuntimeBackend {
 pub enum LaunchError {
     #[error("game has no local launch path")]
     MissingLocalPath,
+    #[error(
+        "no RetroArch core configured for platform '{platform}'; set [platform.\"{platform}\"].retroarch.core to a core file name or path"
+    )]
+    MissingCore { platform: String },
+    #[error("RetroArch core not found: {core} ({hint})")]
+    CoreNotFound { core: String, hint: String },
     #[error("failed to invoke systemd-run: {0}")]
     Spawn(#[source] std::io::Error),
     #[error("systemd-run failed with status {status}: {stderr}")]
@@ -84,24 +282,48 @@ pub enum LaunchError {
 #[derive(Clone, Debug, Default)]
 pub struct GameLauncher {
     backend: RuntimeBackend,
+    retroarch: RetroArchConfig,
+    platforms: HashMap<String, PlatformRuntimeConfig>,
 }
 
 impl RuntimeBackend {
-    pub fn for_platform(platform: &Platform) -> Self {
-        let backend = Self::for_platform_slug(&platform.slug);
-        debug!(platform = %platform.slug, ?backend, "selected runtime backend for platform");
-        backend
-    }
-
-    pub fn for_platform_slug(slug: &str) -> Self {
-        let backend = match slug {
-            // XDG desktop entries are already executable application commands.
-            "apps" => Self::Native,
-            // Platform-specific emulator mappings will be added here.
-            _ => Self::Native,
+    /// Resolves the backend for a platform using per-platform configuration.
+    ///
+    /// The `"apps"` platform is native by default; every other platform
+    /// infers RetroArch. A platform pinned to RetroArch without a configured
+    /// core fails with [`LaunchError::MissingCore`] rather than silently
+    /// falling back to a native launch.
+    pub fn for_platform_config(
+        slug: &str,
+        platforms: &HashMap<String, PlatformRuntimeConfig>,
+        retroarch: &RetroArchConfig,
+    ) -> Result<Self, LaunchError> {
+        let default;
+        let config = match platforms.get(slug) {
+            Some(config) => config,
+            None => {
+                default = PlatformRuntimeConfig::default();
+                &default
+            }
         };
-        debug!(platform = %slug, ?backend, "resolved runtime backend slug");
-        backend
+        let backend = match config.backend_kind(slug) {
+            PlatformBackendKind::Native => Self::Native,
+            PlatformBackendKind::RetroArch => {
+                let core = platforms
+                    .get(slug)
+                    .and_then(|config| config.retroarch.core.as_deref())
+                    .ok_or_else(|| LaunchError::MissingCore {
+                        platform: slug.to_owned(),
+                    })?;
+                Self::RetroArch(
+                    resolve_core_path(core, &retroarch.cores_dir)
+                        .to_string_lossy()
+                        .into_owned(),
+                )
+            }
+        };
+        debug!(platform = %slug, ?backend, "resolved runtime backend from platform config");
+        Ok(backend)
     }
 }
 
@@ -111,11 +333,35 @@ impl GameLauncher {
     }
 
     pub fn with_backend(backend: RuntimeBackend) -> Self {
-        Self { backend }
+        Self {
+            backend,
+            ..Self::default()
+        }
+    }
+
+    pub fn with_retroarch_config(mut self, config: RetroArchConfig) -> Self {
+        self.retroarch = config;
+        self
+    }
+
+    pub fn with_platform_configs(
+        mut self,
+        platforms: HashMap<String, PlatformRuntimeConfig>,
+    ) -> Self {
+        self.platforms = platforms;
+        self
     }
 
     pub fn backend(&self) -> &RuntimeBackend {
         &self.backend
+    }
+
+    pub fn retroarch_config(&self) -> &RetroArchConfig {
+        &self.retroarch
+    }
+
+    pub fn platform_configs(&self) -> &HashMap<String, PlatformRuntimeConfig> {
+        &self.platforms
     }
 
     pub async fn launch_item(&self, item: &LibraryItem) -> Result<LaunchedGame, LaunchError> {
@@ -126,22 +372,42 @@ impl GameLauncher {
             configured_backend = ?self.backend,
             "resolving launch backend"
         );
-        let request = LaunchRequest::from_item(item).ok_or_else(|| {
-            warn!(game_id = %item.id, "launch request has no executable path");
-            LaunchError::MissingLocalPath
-        })?;
-        let launcher = if self.backend == RuntimeBackend::Native {
-            Self::with_backend(
-                item.platform_slug
-                    .as_deref()
-                    .map(RuntimeBackend::for_platform_slug)
-                    .unwrap_or(RuntimeBackend::Native),
-            )
+        let backend = if self.backend == RuntimeBackend::Native {
+            match item.platform_slug.as_deref() {
+                Some(slug) => {
+                    RuntimeBackend::for_platform_config(slug, &self.platforms, &self.retroarch)?
+                }
+                None => RuntimeBackend::Native,
+            }
         } else {
-            self.clone()
+            self.backend.clone()
         };
-        debug!(game_id = %item.id, backend = ?launcher.backend, "dispatching launch request");
-        launcher.launch(request).await
+        debug!(game_id = %item.id, backend = ?backend, "dispatching launch request");
+        match backend {
+            RuntimeBackend::Native => {
+                let request = LaunchRequest::from_item(item).ok_or_else(|| {
+                    warn!(game_id = %item.id, "launch request has no executable path");
+                    LaunchError::MissingLocalPath
+                })?;
+                self.launch_native(request).await
+            }
+            RuntimeBackend::RetroArch(core) => {
+                let rom = rom_path_for_item(item).ok_or_else(|| {
+                    warn!(game_id = %item.id, "retroarch launch has no ROM path");
+                    LaunchError::MissingLocalPath
+                })?;
+                let core = resolve_core_path(Path::new(&core), &self.retroarch.cores_dir)
+                    .to_string_lossy()
+                    .into_owned();
+                self.launch_retroarch(item, &core, &rom).await
+            }
+            RuntimeBackend::Runtime(runtime) => {
+                warn!(runtime = %runtime, "runtime backend is not implemented");
+                Err(LaunchError::UnsupportedBackend(format!(
+                    "Runtime({runtime})"
+                )))
+            }
+        }
     }
 
     pub async fn launch(&self, request: LaunchRequest) -> Result<LaunchedGame, LaunchError> {
@@ -162,10 +428,14 @@ impl GameLauncher {
                 )))
             }
             RuntimeBackend::RetroArch(core) => {
-                warn!(core = %core, "RetroArch backend is not implemented");
-                Err(LaunchError::UnsupportedBackend(format!(
-                    "RetroArch({core})"
-                )))
+                let core = resolve_core_path(Path::new(core), &self.retroarch.cores_dir)
+                    .to_string_lossy()
+                    .into_owned();
+                // An explicit RetroArch backend treats the request executable
+                // as ROM content.
+                let item = retroarch_item_for_request(&request);
+                self.launch_retroarch(&item, &core, &request.executable)
+                    .await
             }
         }
     }
@@ -173,36 +443,105 @@ impl GameLauncher {
     async fn launch_native(&self, request: LaunchRequest) -> Result<LaunchedGame, LaunchError> {
         let unit_name = unit_name(&request.application_id);
         info!(unit = %unit_name, slice = APP_SLICE, "starting native transient launch service");
-        let mut command = Command::new(SYSTEMD_RUN);
-        command.args(systemd_run_args(&unit_name));
-        if let Some(working_directory) = &request.working_directory {
-            command.args([
-                "--working-directory",
-                working_directory.to_string_lossy().as_ref(),
-            ]);
-        }
-        let output = command
-            .arg(&request.executable)
-            .args(&request.arguments)
-            .stdin(Stdio::null())
-            .output()
-            .await
-            .map_err(LaunchError::Spawn)?;
+        let args: Vec<String> = request.arguments.iter().cloned().collect();
+        run_transient(
+            &unit_name,
+            &request.executable,
+            &args,
+            request.working_directory.as_deref(),
+            &request.title,
+        )
+        .await
+    }
 
-        if !output.status.success() {
-            warn!(unit = %unit_name, status = ?output.status, "native transient launch service failed");
-            return Err(LaunchError::Systemd {
-                status: output
-                    .status
-                    .code()
-                    .map_or_else(|| "signal".to_owned(), |code| code.to_string()),
-                stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+    async fn launch_retroarch(
+        &self,
+        item: &LibraryItem,
+        core: &str,
+        rom: &Path,
+    ) -> Result<LaunchedGame, LaunchError> {
+        let core_path = Path::new(core);
+        if !core_path.is_file() {
+            let available = discover_cores(&self.retroarch.cores_dir)
+                .unwrap_or_default()
+                .into_iter()
+                .map(|core| core.name)
+                .collect::<Vec<_>>();
+            let hint = if available.is_empty() {
+                format!("no cores found in {}", self.retroarch.cores_dir.display())
+            } else {
+                format!("available: {}", available.join(", "))
+            };
+            warn!(core = %core, rom = %rom.display(), hint = %hint, "retroarch core file is missing");
+            return Err(LaunchError::CoreNotFound {
+                core: core.to_owned(),
+                hint,
             });
         }
-
-        tracing::info!(unit = %unit_name, title = %request.title, path = %request.executable.display(), "launched game");
-        Ok(LaunchedGame { unit_name })
+        let application_id = item
+            .provider_ids
+            .get("xdg.desktop")
+            .cloned()
+            .unwrap_or_else(|| item.id.to_string());
+        let unit_name = unit_name(&application_id);
+        info!(unit = %unit_name, slice = APP_SLICE, core = %core, rom = %rom.display(), "starting retroarch transient launch service");
+        let args = retroarch_argv(&self.retroarch.extra_args, core, rom);
+        run_transient(
+            &unit_name,
+            &self.retroarch.binary,
+            &args,
+            rom.parent(),
+            &item.title,
+        )
+        .await
     }
+}
+
+fn retroarch_item_for_request(request: &LaunchRequest) -> LibraryItem {
+    let mut item = LibraryItem::new_game(request.title.clone());
+    item.provider_ids
+        .insert("xdg.desktop".to_owned(), request.application_id.clone());
+    item
+}
+
+async fn run_transient(
+    unit_name: &str,
+    executable: &Path,
+    arguments: &[String],
+    working_directory: Option<&Path>,
+    title: &str,
+) -> Result<LaunchedGame, LaunchError> {
+    let mut command = Command::new(SYSTEMD_RUN);
+    command.args(systemd_run_args(unit_name));
+    if let Some(working_directory) = working_directory {
+        command.args([
+            "--working-directory",
+            working_directory.to_string_lossy().as_ref(),
+        ]);
+    }
+    let output = command
+        .arg(executable)
+        .args(arguments)
+        .stdin(Stdio::null())
+        .output()
+        .await
+        .map_err(LaunchError::Spawn)?;
+
+    if !output.status.success() {
+        warn!(unit = %unit_name, status = ?output.status, "transient launch service failed");
+        return Err(LaunchError::Systemd {
+            status: output
+                .status
+                .code()
+                .map_or_else(|| "signal".to_owned(), |code| code.to_string()),
+            stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+        });
+    }
+
+    tracing::info!(unit = %unit_name, title = %title, path = %executable.display(), "launched game");
+    Ok(LaunchedGame {
+        unit_name: unit_name.to_owned(),
+    })
 }
 
 fn unit_name(application_id: &str) -> String {
@@ -229,6 +568,25 @@ fn systemd_run_args(unit_name: &str) -> [&str; 8] {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::collections::HashMap;
+
+    fn write_file(dir: &Path, name: &str) -> PathBuf {
+        let path = dir.join(name);
+        std::fs::write(&path, b"fake").unwrap();
+        path
+    }
+
+    fn temp_dir(name: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "marina-runtime-{name}-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+        dir
+    }
 
     #[test]
     fn unit_names_follow_desktop_app_convention() {
@@ -257,14 +615,18 @@ mod tests {
 
     #[test]
     fn platform_backend_defaults_are_explicit() {
+        let platforms = HashMap::new();
+        let retroarch = RetroArchConfig::default();
+        // XDG desktop entries are already executable application commands.
         assert_eq!(
-            RuntimeBackend::for_platform(&Platform::new("apps", "Apps")),
+            RuntimeBackend::for_platform_config("apps", &platforms, &retroarch).unwrap(),
             RuntimeBackend::Native
         );
-        assert_eq!(
-            RuntimeBackend::for_platform_slug("snes"),
-            RuntimeBackend::Native
-        );
+        // Every other platform infers RetroArch, which needs a configured core.
+        assert!(matches!(
+            RuntimeBackend::for_platform_config("snes", &platforms, &retroarch),
+            Err(LaunchError::MissingCore { .. })
+        ));
     }
 
     #[test]
@@ -308,5 +670,305 @@ mod tests {
     fn missing_local_path_is_not_launchable() {
         let item = LibraryItem::new_game("Example");
         assert!(LaunchRequest::from_item(&item).is_none());
+    }
+
+    #[test]
+    fn retroarch_config_has_sane_defaults() {
+        let config = RetroArchConfig::default();
+        assert_eq!(config.binary, PathBuf::from("retroarch"));
+        assert_eq!(
+            config.cores_dir,
+            PathBuf::from("/var/games/retroarch/cores")
+        );
+        assert!(config.extra_args.is_empty());
+    }
+
+    #[test]
+    fn apps_platform_defaults_to_native() {
+        let config = PlatformRuntimeConfig::default();
+        assert_eq!(config.backend_kind("apps"), PlatformBackendKind::Native);
+    }
+
+    #[test]
+    fn unconfigured_platforms_infer_retroarch() {
+        let config = PlatformRuntimeConfig::default();
+        assert_eq!(config.backend_kind("gba"), PlatformBackendKind::RetroArch);
+        assert_eq!(config.backend_kind("snes"), PlatformBackendKind::RetroArch);
+    }
+
+    #[test]
+    fn configured_core_implies_retroarch_without_backend_key() {
+        let config = PlatformRuntimeConfig::retroarch("mgba_libretro.so");
+        // `retroarch()` sets the backend key too; drop it to simulate a
+        // core-only `[platform."gba".retroarch]` table.
+        let config = PlatformRuntimeConfig {
+            backend: None,
+            ..config
+        };
+        assert_eq!(config.backend_kind("gba"), PlatformBackendKind::RetroArch);
+    }
+
+    #[test]
+    fn explicit_native_wins_over_inference() {
+        let config = PlatformRuntimeConfig {
+            backend: Some("native".into()),
+            platform: None,
+            retroarch: RetroArchPlatformConfig {
+                core: Some("mgba_libretro.so".into()),
+            },
+        };
+        assert_eq!(config.backend_kind("gba"), PlatformBackendKind::Native);
+    }
+
+    #[test]
+    fn platform_backend_alias_is_accepted() {
+        let config = PlatformRuntimeConfig {
+            backend: None,
+            platform: Some("retroarch".into()),
+            retroarch: RetroArchPlatformConfig { core: None },
+        };
+        assert_eq!(config.backend_kind("gba"), PlatformBackendKind::RetroArch);
+    }
+
+    #[test]
+    fn unknown_platform_backend_falls_back_to_native() {
+        let config = PlatformRuntimeConfig {
+            backend: Some("dolphin".into()),
+            platform: None,
+            retroarch: RetroArchPlatformConfig { core: None },
+        };
+        assert_eq!(config.backend_kind("gba"), PlatformBackendKind::Native);
+    }
+
+    #[test]
+    fn platform_config_selects_retroarch_with_resolved_core() {
+        let mut platforms = HashMap::new();
+        platforms.insert(
+            "gba".to_owned(),
+            PlatformRuntimeConfig::retroarch("mgba_libretro.so"),
+        );
+        let retroarch = RetroArchConfig::default();
+        assert_eq!(
+            RuntimeBackend::for_platform_config("gba", &platforms, &retroarch).unwrap(),
+            RuntimeBackend::RetroArch("/var/games/retroarch/cores/mgba_libretro.so".into())
+        );
+        // Unconfigured platforms infer RetroArch, so without a core they
+        // fail instead of silently launching natively.
+        assert!(matches!(
+            RuntimeBackend::for_platform_config("snes", &platforms, &retroarch),
+            Err(LaunchError::MissingCore { .. })
+        ));
+    }
+
+    #[test]
+    fn platform_config_absolute_core_is_used_verbatim() {
+        let mut platforms = HashMap::new();
+        platforms.insert(
+            "gba".to_owned(),
+            PlatformRuntimeConfig::retroarch("/opt/cores/mgba_libretro.so"),
+        );
+        let retroarch = RetroArchConfig::default();
+        assert_eq!(
+            RuntimeBackend::for_platform_config("gba", &platforms, &retroarch).unwrap(),
+            RuntimeBackend::RetroArch("/opt/cores/mgba_libretro.so".into())
+        );
+    }
+
+    #[test]
+    fn retroarch_without_core_is_missing_not_native() {
+        let mut platforms = HashMap::new();
+        platforms.insert(
+            "gba".to_owned(),
+            PlatformRuntimeConfig {
+                backend: Some("retroarch".into()),
+                platform: None,
+                retroarch: RetroArchPlatformConfig { core: None },
+            },
+        );
+        let error =
+            RuntimeBackend::for_platform_config("gba", &platforms, &RetroArchConfig::default())
+                .expect_err("missing core must fail");
+        assert!(matches!(error, LaunchError::MissingCore { .. }));
+    }
+
+    #[test]
+    fn core_names_resolve_against_cores_dir() {
+        let cores_dir = Path::new("/var/games/retroarch/cores");
+        assert_eq!(
+            resolve_core_path(Path::new("mgba_libretro.so"), cores_dir),
+            cores_dir.join("mgba_libretro.so")
+        );
+        assert_eq!(
+            resolve_core_path(Path::new("/opt/cores/snes9x_libretro.so"), cores_dir),
+            PathBuf::from("/opt/cores/snes9x_libretro.so")
+        );
+        assert_eq!(
+            resolve_core_path(Path::new("custom/snes9x_libretro.so"), cores_dir),
+            PathBuf::from("custom/snes9x_libretro.so")
+        );
+    }
+
+    #[test]
+    fn core_discovery_lists_libretro_shared_objects() {
+        let dir = temp_dir("cores");
+        write_file(&dir, "mgba_libretro.so");
+        write_file(&dir, "snes9x_libretro.so");
+        write_file(&dir, "retroarch.cfg");
+        write_file(&dir, "README.txt");
+
+        let cores = discover_cores(&dir).unwrap();
+        assert_eq!(
+            cores
+                .iter()
+                .map(|core| core.name.clone())
+                .collect::<Vec<_>>(),
+            vec!["mgba_libretro.so", "snes9x_libretro.so"]
+        );
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn rom_path_prefers_file_entries_and_ignores_desktop_commands() {
+        let mut item = LibraryItem::new_game("Pokemon");
+        item.local_path = Some("/games/gba/Pokemon".into());
+        item.files.push(marina_core::LibraryItemFile {
+            provider_id: None,
+            name: "pokemon.gba".into(),
+            path: "/games/gba/Pokemon/pokemon.gba".into(),
+            size_bytes: Some(42),
+        });
+        item.provider_ids.insert(
+            "xdg.exec".into(),
+            serde_json::to_string(&vec!["/usr/bin/false"]).unwrap(),
+        );
+        assert_eq!(
+            rom_path_for_item(&item),
+            Some(PathBuf::from("/games/gba/Pokemon/pokemon.gba"))
+        );
+    }
+
+    #[test]
+    fn retroarch_argv_orders_flags_core_and_content() {
+        let argv = retroarch_argv(
+            &["-f".to_owned()],
+            "/cores/mgba_libretro.so",
+            Path::new("/games/pokemon.gba"),
+        );
+        assert_eq!(
+            argv,
+            vec!["-f", "-L", "/cores/mgba_libretro.so", "/games/pokemon.gba"]
+        );
+    }
+
+    #[test]
+    fn launcher_carries_runtime_configuration() {
+        let mut platforms = HashMap::new();
+        platforms.insert(
+            "gba".to_owned(),
+            PlatformRuntimeConfig::retroarch("mgba_libretro.so"),
+        );
+        let launcher = GameLauncher::new()
+            .with_retroarch_config(RetroArchConfig {
+                binary: PathBuf::from("/usr/bin/retroarch"),
+                ..RetroArchConfig::default()
+            })
+            .with_platform_configs(platforms);
+        assert_eq!(
+            launcher.retroarch_config().binary,
+            PathBuf::from("/usr/bin/retroarch")
+        );
+        assert!(launcher.platform_configs().contains_key("gba"));
+    }
+
+    #[tokio::test]
+    async fn launch_item_without_core_reports_missing_core() {
+        let mut item = LibraryItem::new_game("Pokemon");
+        item.platform_slug = Some("gba".into());
+        item.local_path = Some("/games/pokemon.gba".into());
+        let mut platforms = HashMap::new();
+        platforms.insert(
+            "gba".to_owned(),
+            PlatformRuntimeConfig {
+                backend: Some("retroarch".into()),
+                platform: None,
+                retroarch: RetroArchPlatformConfig { core: None },
+            },
+        );
+        let launcher = GameLauncher::new().with_platform_configs(platforms);
+        let error = launcher
+            .launch_item(&item)
+            .await
+            .expect_err("missing core must fail before spawning");
+        assert!(matches!(error, LaunchError::MissingCore { .. }));
+    }
+
+    #[tokio::test]
+    async fn launch_item_with_missing_core_file_lists_available_cores() {
+        let cores_dir = temp_dir("missing-core-file");
+        write_file(&cores_dir, "mgba_libretro.so");
+        let mut item = LibraryItem::new_game("Pokemon");
+        item.platform_slug = Some("gba".into());
+        item.local_path = Some("/games/pokemon.gba".into());
+        let mut platforms = HashMap::new();
+        platforms.insert(
+            "gba".to_owned(),
+            PlatformRuntimeConfig::retroarch("snes9x_libretro.so"),
+        );
+        let launcher = GameLauncher::new()
+            .with_retroarch_config(RetroArchConfig {
+                cores_dir: cores_dir.clone(),
+                ..RetroArchConfig::default()
+            })
+            .with_platform_configs(platforms);
+        let error = launcher
+            .launch_item(&item)
+            .await
+            .expect_err("missing core file must fail before spawning");
+        match error {
+            LaunchError::CoreNotFound { core, hint } => {
+                assert!(core.ends_with("snes9x_libretro.so"), "core: {core}");
+                assert!(
+                    hint.contains("mgba_libretro.so"),
+                    "hint should list discovered cores: {hint}"
+                );
+            }
+            other => panic!("unexpected error: {other:?}"),
+        }
+        std::fs::remove_dir_all(&cores_dir).unwrap();
+    }
+
+    #[tokio::test]
+    async fn launch_item_on_unconfigured_platform_infers_retroarch() {
+        let mut item = LibraryItem::new_game("Pokemon");
+        item.platform_slug = Some("gba".into());
+        item.local_path = Some("/games/pokemon.gba".into());
+        let launcher = GameLauncher::new();
+        let error = launcher
+            .launch_item(&item)
+            .await
+            .expect_err("unconfigured platform must not launch natively");
+        assert!(
+            matches!(error, LaunchError::MissingCore { .. }),
+            "unexpected error: {error:?}"
+        );
+    }
+
+    #[test]
+    fn retroarch_template_section_renders_doc_comments() {
+        let mut out = String::new();
+        RetroArchConfig::default().__marina_config_section(&mut out, "retroarch", true);
+        assert!(out.contains("[retroarch]"), "missing header:\n{out}");
+        assert!(
+            out.contains("binary = \"retroarch\""),
+            "missing default value:\n{out}"
+        );
+        assert!(
+            out.contains("Directory scanned for libretro cores"),
+            "missing doc comment:\n{out}"
+        );
+        assert!(
+            out.contains("MARINA_RETROARCH_CORES_DIR"),
+            "missing env note:\n{out}"
+        );
     }
 }

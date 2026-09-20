@@ -17,6 +17,7 @@ members = [
     "crates/marina-test",
     "crates/marina-input",
     "crates/marina-runtime",
+    "crates/marina-config-derive",
     "crates/marina-ui-slint",
 ]
 
@@ -57,6 +58,7 @@ ulid = "1"
 
 # marina
 marina-apps = { path = "crates/marina-apps" }
+marina-config-derive = { path = "crates/marina-config-derive" }
 marina-core = { path = "crates/marina-core" }
 marina-romm = { path = "crates/marina-romm" }
 marina-store = { path = "crates/marina-store" }

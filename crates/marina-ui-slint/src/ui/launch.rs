@@ -21,7 +21,6 @@ pub(crate) fn install(
     let played_store = played_store.clone();
     let played_sources = played_sources.clone();
     let played_window = window.as_weak();
-    let game_launcher = GameLauncher::new();
     window.global::<GameState>().on_play_requested(move |id| {
         let state = play_state
             .lock()
@@ -35,11 +34,15 @@ pub(crate) fn install(
             warn!(game_id = %id, "play requested with invalid library item id");
             return;
         };
-        let game_launcher = game_launcher.clone();
         let played_store = played_store.clone();
         let played_sources = played_sources.clone();
         let played_window = played_window.clone();
         tokio::spawn(async move {
+            // The launcher is built per launch so platform/core config edits
+            // take effect without restarting the shell.
+            let game_launcher = GameLauncher::new()
+                .with_retroarch_config(state.config.retroarch.clone())
+                .with_platform_configs(state.config.platforms.clone());
             match state.library.get(&item_id).await {
                 Ok(Some(item)) => match game_launcher.launch_item(&item).await {
                     Ok(launched) => {
