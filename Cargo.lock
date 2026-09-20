@@ -3378,21 +3378,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "marina-install"
-version = "0.1.0"
-dependencies = [
- "marina-core",
- "marina-library",
- "marina-romm",
- "thiserror 2.0.20",
- "tokio",
- "tracing",
-]
-
-[[package]]
 name = "marina-library"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "base64 0.23.1",
  "chrono",
  "marina-core",
@@ -3410,6 +3399,7 @@ dependencies = [
  "dotenvy",
  "futures-util",
  "marina-core",
+ "marina-library",
  "marina-store",
  "reqwest",
  "serde",
@@ -3447,6 +3437,7 @@ version = "0.1.0"
 dependencies = [
  "async-trait",
  "marina-core",
+ "marina-library",
  "rusqlite",
  "serde",
  "serde_json",
@@ -3458,6 +3449,7 @@ dependencies = [
 name = "marina-store-sqlite"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "chrono",
  "marina-core",
  "marina-library",
@@ -3496,7 +3488,6 @@ dependencies = [
  "marina-apps",
  "marina-core",
  "marina-input",
- "marina-install",
  "marina-library",
  "marina-romm",
  "marina-runtime",

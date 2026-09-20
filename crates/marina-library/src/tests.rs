@@ -11,12 +11,14 @@ use crate::{
 
 pub(crate) struct EmptyLibrary;
 
+#[async_trait::async_trait]
 impl PlatformRead for EmptyLibrary {
     async fn platforms(&self) -> Result<Vec<Platform>, LibraryError> {
         Ok(Vec::new())
     }
 }
 
+#[async_trait::async_trait]
 impl LibraryRead for EmptyLibrary {
     async fn search(&self, _query: SearchQuery) -> Result<Vec<LibraryItem>, LibraryError> {
         Ok(Vec::new())
@@ -43,6 +45,7 @@ impl LibraryRead for EmptyLibrary {
     }
 }
 
+#[async_trait::async_trait]
 impl PlatformWrite for EmptyLibrary {
     async fn add_platform(&self, platform: Platform) -> Result<Platform, LibraryError> {
         Ok(platform)
@@ -57,6 +60,7 @@ impl PlatformWrite for EmptyLibrary {
     }
 }
 
+#[async_trait::async_trait]
 impl LibraryWrite for EmptyLibrary {
     async fn add(&self, item: LibraryItem) -> Result<LibraryItem, LibraryError> {
         Ok(item)

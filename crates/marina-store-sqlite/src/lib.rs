@@ -346,6 +346,7 @@ impl SqliteLibrary {
         Ok(x)
     }
 }
+#[async_trait::async_trait]
 impl PlatformRead for SqliteLibrary {
     async fn platforms(&self) -> Result<Vec<Platform>, LibraryError> {
         let c = self.conn.lock().unwrap();
@@ -363,6 +364,7 @@ impl PlatformRead for SqliteLibrary {
         .map_err(err)
     }
 }
+#[async_trait::async_trait]
 impl LibraryRead for SqliteLibrary {
     async fn search(&self, q: SearchQuery) -> Result<Vec<LibraryItem>, LibraryError> {
         let c = self.conn.lock().unwrap();
@@ -499,6 +501,7 @@ impl LibraryRead for SqliteLibrary {
             .map_err(err)
     }
 }
+#[async_trait::async_trait]
 impl LibraryWrite for SqliteLibrary {
     async fn add(&self, x: LibraryItem) -> Result<LibraryItem, LibraryError> {
         self.save(x)
@@ -522,6 +525,7 @@ impl LibraryWrite for SqliteLibrary {
         tx.commit().map_err(err)
     }
 }
+#[async_trait::async_trait]
 impl PlatformWrite for SqliteLibrary {
     async fn add_platform(&self, p: Platform) -> Result<Platform, LibraryError> {
         self.conn

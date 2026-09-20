@@ -15,7 +15,6 @@ use marina_library::{
     read::{LibraryRead, PlatformRead},
     write::{LibraryWrite, PlatformWrite},
 };
-use marina_store::StoreBackend;
 
 use marina_scanner::scan;
 use serde::Serialize;
@@ -236,7 +235,7 @@ async fn main() -> Result<(), slint::PlatformError> {
                 state.clone(),
                 weak_window.clone(),
             ));
-            tokio::spawn(reconcile_romm(state));
+            tokio::spawn(reconcile_stores(state));
         });
     });
 
@@ -302,13 +301,33 @@ async fn reconcile_local(
                 Ok(true) => match scan(&root) {
                     Ok(items) => {
                         info!(count = items.len(), "local game scan completed");
+                        // The scanner is filesystem presence only: it must never
+                        // overwrite enriched records (e.g. from a store
+                        // install). If an entry for a scanned path already
+                        // exists, the game is there — leave it exactly as is.
+                        // The scanner only adds missing entries and removes
+                        // ones whose files vanished from disk.
+                        let scanned_paths: std::collections::HashSet<String> = items
+                            .iter()
+                            .filter_map(|item| item.local_path.clone())
+                            .collect();
+                        let known_platforms: std::collections::HashSet<String> = state
+                            .library
+                            .platforms()
+                            .await
+                            .unwrap_or_default()
+                            .into_iter()
+                            .map(|platform| platform.slug)
+                            .collect();
                         for item in items {
                             let platform_slug = item.platform_slug.clone();
                             if let Some(slug) = platform_slug.as_deref() {
-                                let _ = state
-                                    .library
-                                    .add_platform(marina_core::Platform::new(slug, slug))
-                                    .await;
+                                if !known_platforms.contains(slug) {
+                                    let _ = state
+                                        .library
+                                        .add_platform(marina_core::Platform::new(slug, slug))
+                                        .await;
+                                }
                             }
                             let existing = state
                                 .library
@@ -324,17 +343,39 @@ async fn reconcile_local(
                                         .into_iter()
                                         .find(|candidate| candidate.local_path == item.local_path)
                                 });
-                            let result = if let Some(mut existing) = existing {
-                                // Scanner data describes filesystem presence only. Preserve
-                                // provider metadata/assets from an enriched installed record.
-                                existing.files = item.files;
-                                state.library.update(existing).await
-                            } else {
-                                state.library.add(item).await
-                            };
-                            if let Err(error) = result {
+                            if existing.is_some() {
+                                continue;
+                            }
+                            if let Err(error) = state.library.add(item).await {
                                 error!(%error, "failed to store scanned local game");
                             }
+                        }
+                        // Prune entries in the scanner's domain whose files no
+                        // longer exist physically. Anything outside
+                        // `<root>/roms` (e.g. XDG apps) is left alone.
+                        let roms_root = root.join("roms");
+                        match state
+                            .library
+                            .search(SearchQuery::new().limit(usize::MAX))
+                            .await
+                        {
+                            Ok(stored) => {
+                                for item in stored {
+                                    let Some(path) = item.local_path.as_deref() else {
+                                        continue;
+                                    };
+                                    if !std::path::Path::new(path).starts_with(&roms_root) {
+                                        continue;
+                                    }
+                                    if !scanned_paths.contains(path) {
+                                        info!(path, "local game files vanished; removing entry");
+                                        if let Err(error) = state.library.remove(&item.id).await {
+                                            error!(%error, path, "failed to remove vanished game");
+                                        }
+                                    }
+                                }
+                            }
+                            Err(error) => error!(%error, "failed to list library for prune"),
                         }
                     }
                     Err(error) => error!(%error, "local game scan failed"),
@@ -393,52 +434,56 @@ fn apply_home_metadata(
     });
 }
 
-async fn reconcile_romm(state: app::AppStateHandle) {
-    if !state.config.import_romm_on_startup {
-        info!("RomM startup catalog import disabled by MARINA_IMPORT_ROMM_ON_STARTUP");
-        return;
-    }
-    let Some(backend) = state.romm.clone() else {
-        return;
-    };
-    let Ok(cache) = state.store_caches.cache_for(backend.id()) else {
-        return;
-    };
+async fn reconcile_stores(state: app::AppStateHandle) {
+    // Runs for every configured backend; each one syncs into its own
+    // `<backend>.db` cache file. RomM import-on-startup stays opt-in, other
+    // backends sync unconditionally once configured.
+    for backend in state.stores.values().cloned() {
+        if backend.id() == "romm" && !state.config.import_romm_on_startup {
+            info!("RomM startup catalog import disabled by config");
+            continue;
+        }
+        let Ok(cache) = state.store_caches.cache_for(backend.id()) else {
+            continue;
+        };
 
-    match backend.list_platforms().await {
-        Ok(platforms) => {
-            for platform in platforms {
-                let mut offset = 0_usize;
-                loop {
-                    let entries = match backend
-                        .browse(marina_store::StoreQuery {
-                            platform_slug: Some(platform.slug.clone()),
-                            limit: 100,
-                            offset,
-                            ..Default::default()
-                        })
-                        .await
-                    {
-                        Ok(entries) => entries,
-                        Err(error) => {
-                            error!(%error, platform = %platform.slug, "RomM catalog sync failed");
+        match backend.list_platforms().await {
+            Ok(platforms) => {
+                for platform in platforms {
+                    let mut offset = 0_usize;
+                    loop {
+                        let entries = match backend
+                            .browse(marina_store::StoreQuery {
+                                platform_slug: Some(platform.slug.clone()),
+                                limit: 100,
+                                offset,
+                                ..Default::default()
+                            })
+                            .await
+                        {
+                            Ok(entries) => entries,
+                            Err(error) => {
+                                error!(%error, backend = backend.id(), platform = %platform.slug, "store catalog sync failed");
+                                break;
+                            }
+                        };
+                        let count = entries.len();
+                        if let Err(error) = cache.upsert_entries(&entries) {
+                            error!(%error, backend = backend.id(), "store catalog cache write failed");
                             break;
                         }
-                    };
-                    let count = entries.len();
-                    if let Err(error) = cache.upsert_entries(&entries) {
-                        error!(%error, "RomM catalog cache write failed");
-                        break;
+                        info!(backend = backend.id(), platform = %platform.slug, offset, rows = count, "store catalog page cached");
+                        if count == 0 || count < 100 {
+                            break;
+                        }
+                        offset += count;
                     }
-                    info!(platform = %platform.slug, offset, rows = count, "RomM catalog page cached");
-                    if count == 0 || count < 100 {
-                        break;
-                    }
-                    offset += count;
                 }
             }
+            Err(error) => {
+                error!(%error, backend = backend.id(), "store catalog platform sync failed")
+            }
         }
-        Err(error) => error!(%error, "RomM catalog platform sync failed"),
     }
 }
 

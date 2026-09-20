@@ -2,10 +2,12 @@
 
 use marina_core::{LibraryItem, LibraryItemId, Platform};
 
+use async_trait::async_trait;
+
 use crate::error::LibraryError;
 
 /// Write access to platform metadata.
-#[allow(async_fn_in_trait)]
+#[async_trait]
 pub trait PlatformWrite {
     async fn add_platform(&self, platform: Platform) -> Result<Platform, LibraryError>;
     async fn update_platform(&self, platform: Platform) -> Result<Platform, LibraryError>;
@@ -13,7 +15,7 @@ pub trait PlatformWrite {
 }
 
 /// Write access to library metadata.
-#[allow(async_fn_in_trait)]
+#[async_trait]
 pub trait LibraryWrite {
     async fn add(&self, item: LibraryItem) -> Result<LibraryItem, LibraryError>;
     async fn update(&self, item: LibraryItem) -> Result<LibraryItem, LibraryError>;

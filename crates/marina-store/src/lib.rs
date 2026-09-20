@@ -5,7 +5,11 @@
 //! are cached in *separate* SQLite files (one per backend) owned by
 //! [`StoreCache`] / [`StoreCaches`].
 
+use std::path::PathBuf;
+
 use async_trait::async_trait;
+use marina_core::LibraryItem;
+use marina_library::Library;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -65,6 +69,17 @@ impl StoreQuery {
     }
 }
 
+/// Request to install a catalog entry into the local library.
+///
+/// `file_ids` are backend-opaque artifact ids (selected in the UI); the
+/// backend resolves them against its own record for the entry.
+#[derive(Clone, Debug)]
+pub struct InstallRequest {
+    pub entry: StoreEntry,
+    pub file_ids: Vec<String>,
+    pub library_root: PathBuf,
+}
+
 /// A pluggable remote store (RomM, etc.).
 #[async_trait]
 pub trait StoreBackend: Send + Sync + std::fmt::Debug {
@@ -74,6 +89,17 @@ pub trait StoreBackend: Send + Sync + std::fmt::Debug {
     async fn list_platforms(&self) -> Result<Vec<StorePlatform>, StoreError>;
     async fn browse(&self, query: StoreQuery) -> Result<Vec<StoreEntry>, StoreError>;
     async fn get(&self, entry_id: &str) -> Result<Option<StoreEntry>, StoreError>;
+    /// Download the selected artifacts into `library_root` (`roms/…` and
+    /// `media/…`), then create or reconcile the library database record.
+    /// Returns the saved [`LibraryItem`].
+    async fn install(
+        &self,
+        library: &(dyn Library + Send + Sync),
+        request: InstallRequest,
+    ) -> Result<LibraryItem, StoreError>;
+    /// Escape hatch for backend-specific operations the trait doesn't cover
+    /// (e.g. resolving cover URLs). Prefer trait methods.
+    fn as_any(&self) -> &dyn std::any::Any;
 }
 
 mod cache;

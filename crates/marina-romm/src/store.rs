@@ -51,6 +51,10 @@ impl StoreBackend for RommStore {
         "RomM"
     }
 
+    fn as_any(&self) -> &dyn std::any::Any {
+        self
+    }
+
     async fn list_platforms(&self) -> Result<Vec<StorePlatform>, StoreError> {
         let platforms = self
             .client
@@ -136,5 +140,23 @@ impl StoreBackend for RommStore {
             ),
             payload_json: serde_json::to_string(&rom).ok(),
         }))
+    }
+
+    async fn install(
+        &self,
+        library: &(dyn marina_library::Library + Send + Sync),
+        request: marina_store::InstallRequest,
+    ) -> Result<marina_core::LibraryItem, StoreError> {
+        let resolved = crate::install::resolve(
+            &self.client,
+            &request.entry,
+            &request.file_ids,
+            request.library_root,
+        )
+        .await
+        .map_err(crate::install::map_error)?;
+        crate::install::install(&self.client, library, resolved)
+            .await
+            .map_err(crate::install::map_error)
     }
 }

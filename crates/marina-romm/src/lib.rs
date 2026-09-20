@@ -99,6 +99,7 @@
 
 mod client;
 mod error;
+pub mod install;
 mod models;
 mod store;
 

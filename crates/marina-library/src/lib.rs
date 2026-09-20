@@ -10,5 +10,20 @@ pub mod query;
 pub mod read;
 pub mod write;
 
+use async_trait::async_trait;
+use read::{LibraryRead, PlatformRead};
+use write::{LibraryWrite, PlatformWrite};
+
+/// A complete library backend: read + write access to items and platforms.
+///
+/// Blanket-implemented for every backend; exists so generic code (e.g. store
+/// installs) can take a single `&(dyn Library + Send + Sync)` instead of
+/// juggling four traits. Native `async fn` traits aren't `dyn`-safe, which
+/// is why the read/write traits use `async_trait`.
+#[async_trait]
+pub trait Library: LibraryRead + LibraryWrite + PlatformRead + PlatformWrite {}
+
+impl<T> Library for T where T: LibraryRead + LibraryWrite + PlatformRead + PlatformWrite {}
+
 #[cfg(test)]
 mod tests;

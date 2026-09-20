@@ -1,17 +1,27 @@
+//! Installing a RomM entry into the local library.
+//!
+//! Downloads the selected ROM files and artwork into `library_root`
+//! (`roms/<platform>/<game>` and `media/<platform>/<game>`), then creates
+//! or reconciles the library database record.
+
 use std::path::PathBuf;
 
 use marina_core::LibraryItem;
-use marina_library::{query::SearchQuery, read::LibraryRead, write::LibraryWrite};
-use marina_romm::{Client, Error as RommError, Rom, RomFile};
+use marina_library::{Library, query::SearchQuery};
+use marina_store::StoreError;
 use thiserror::Error;
 use tracing::debug;
+
+use crate::{Client, Rom, RomFile};
 
 #[derive(Debug, Error)]
 pub enum InstallError {
     #[error(transparent)]
-    Romm(#[from] RommError),
+    Romm(#[from] crate::Error),
     #[error(transparent)]
     Library(#[from] marina_library::error::LibraryError),
+    #[error("entry payload is missing or invalid")]
+    InvalidEntry,
     #[error("invalid RomM file size {0}")]
     InvalidSize(i64),
     #[error("downloaded file size mismatch: expected {expected}, got {actual}")]
@@ -20,22 +30,55 @@ pub enum InstallError {
     Io(#[from] std::io::Error),
 }
 
-#[derive(Clone, Debug)]
-pub struct InstallRequest {
+pub struct ResolvedInstall {
     pub rom: Rom,
     /// Exact RomM artifacts selected for this installation.
     pub files: Vec<RomFile>,
     pub library_root: PathBuf,
 }
 
-pub async fn install<L>(
+/// Resolves an [`InstallRequest`](marina_store::InstallRequest) against this
+/// backend: hydrates the ROM (from the entry payload, refetching when it is
+/// missing) and matches the selected backend-opaque file ids.
+pub async fn resolve(
     client: &Client,
-    library: &L,
-    request: InstallRequest,
-) -> Result<LibraryItem, InstallError>
-where
-    L: LibraryRead + LibraryWrite,
-{
+    entry: &marina_store::StoreEntry,
+    file_ids: &[String],
+    library_root: PathBuf,
+) -> Result<ResolvedInstall, InstallError> {
+    let rom = match entry
+        .payload_json
+        .as_deref()
+        .and_then(|json| serde_json::from_str::<Rom>(json).ok())
+    {
+        Some(rom) => rom,
+        None => {
+            let id = entry
+                .entry_id
+                .parse::<i32>()
+                .map_err(|_| InstallError::InvalidEntry)?;
+            client.get_rom(id).await?
+        }
+    };
+    let files = rom
+        .files
+        .files
+        .iter()
+        .filter(|file| file_ids.iter().any(|id| *id == file.id.to_string()))
+        .cloned()
+        .collect::<Vec<_>>();
+    Ok(ResolvedInstall {
+        rom,
+        files,
+        library_root,
+    })
+}
+
+pub async fn install(
+    client: &Client,
+    library: &(dyn Library + Send + Sync),
+    request: ResolvedInstall,
+) -> Result<LibraryItem, InstallError> {
     let title = request
         .rom
         .name
@@ -164,6 +207,10 @@ where
         debug!(title = %saved.title, local_path = ?saved.local_path, "installed game added to library");
         Ok(saved)
     }
+}
+
+pub(crate) fn map_error(error: InstallError) -> StoreError {
+    StoreError::backend(error)
 }
 
 fn safe_component(value: &str) -> String {

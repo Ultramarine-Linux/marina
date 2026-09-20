@@ -211,12 +211,6 @@ pub struct RomPlatform {
     pub platform_display_name: Option<String>,
 }
 
-impl RomPlatform {
-    async fn get_platform(&self) -> super::Platform {
-        todo!()
-    }
-}
-
 #[derive(Clone, Debug, Deserialize, Serialize, PartialEq)]
 pub struct RomPage {
     pub items: Vec<Rom>,

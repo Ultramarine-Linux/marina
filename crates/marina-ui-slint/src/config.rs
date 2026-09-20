@@ -43,7 +43,7 @@ struct FileConfig {
 #[derive(Clone, Debug, Default, Deserialize)]
 struct StoreSection {
     #[serde(default)]
-    romm: RommSection,
+    romm: RommConfig,
 }
 
 #[derive(Clone, Debug, Default, Deserialize)]
@@ -60,7 +60,7 @@ struct LibrarySection {
 
 /// A single store backend's file configuration.
 #[derive(Clone, Debug, Default, Deserialize)]
-pub struct RommSection {
+pub struct RommConfig {
     #[serde(default)]
     pub enable: Option<bool>,
     #[serde(default)]
@@ -198,16 +198,6 @@ impl Config {
             library_root: file.library.root.clone().or(default_library_root),
         }
     }
-
-    /// Flat view of the RomM backend config for backend construction.
-    pub fn romm_section(&self) -> RommSection {
-        RommSection {
-            enable: Some(self.romm_url.is_some()),
-            url: self.romm_url.clone(),
-            token: self.romm_token.clone(),
-            import_on_startup: Some(self.import_romm_on_startup),
-        }
-    }
 }
 
 fn env_bool(name: &str) -> Option<bool> {
@@ -237,6 +227,8 @@ fn config_candidates() -> Vec<PathBuf> {
 /// whitespace, and key order. Backing for future in-UI settings editing:
 /// parse the config file into a [`toml_edit::Document`], upsert, write
 /// back with `doc.to_string()`.
+/// Not wired into the UI yet; the settings screen will call this.
+#[allow(dead_code)]
 pub fn upsert_toml_value(
     document: &str,
     table_path: &[&str],

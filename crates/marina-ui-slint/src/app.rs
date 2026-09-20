@@ -1,9 +1,9 @@
 //! Application-wide runtime state.
 
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use marina_romm::RommStore;
-use marina_store::StoreCaches;
+use marina_store::{StoreBackend, StoreCaches};
 use marina_store_sqlite::SqliteLibrary;
 
 use crate::{config::Config, storage};
@@ -14,7 +14,10 @@ pub(crate) struct AppState {
     pub(crate) config: Config,
     pub(crate) library: SqliteLibrary,
     pub(crate) store_caches: StoreCaches,
-    pub(crate) romm: Option<RommStore>,
+    /// Pluggable store backends by stable id ("romm", …). Access through
+    /// the [`StoreBackend`] trait; downcast via `as_any` only for
+    /// backend-specific operations the trait doesn't cover.
+    pub(crate) stores: HashMap<String, Arc<dyn StoreBackend>>,
 }
 
 /// A shareable handle to the application's runtime state.
@@ -40,10 +43,11 @@ impl AppState {
         tracing::info!("opening library store");
         let library = storage::connect(&config).await?;
         let store_caches = storage::connect_store_caches(&config);
-        let romm = config
-            .romm_url
-            .clone()
-            .map(|base_url| RommStore::new(base_url, config.romm_token.as_deref()));
+        let mut stores: HashMap<String, Arc<dyn StoreBackend>> = HashMap::new();
+        if let Some(base_url) = config.romm_url.clone() {
+            let backend = RommStore::new(base_url, config.romm_token.as_deref());
+            stores.insert(backend.id().to_owned(), Arc::new(backend));
+        }
         tracing::info!(
             elapsed_ms = started.elapsed().as_millis() as u64,
             "application state ready"
@@ -53,7 +57,7 @@ impl AppState {
             config,
             library,
             store_caches,
-            romm,
+            stores,
         }))
     }
 }

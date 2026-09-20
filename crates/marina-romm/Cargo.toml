@@ -10,6 +10,7 @@ chrono.workspace = true
 dotenvy.workspace = true
 futures-util.workspace = true
 marina-core.workspace = true
+marina-library.workspace = true
 marina-store.workspace = true
 async-trait.workspace = true
 reqwest.workspace = true

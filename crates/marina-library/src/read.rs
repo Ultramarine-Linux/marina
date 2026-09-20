@@ -10,9 +10,10 @@ pub struct PlatformCount {
 }
 
 use crate::{error::LibraryError, query::SearchQuery};
+use async_trait::async_trait;
 
 /// Read-only access to platform metadata.
-#[allow(async_fn_in_trait)]
+#[async_trait]
 pub trait PlatformRead {
     async fn platforms(&self) -> Result<Vec<Platform>, LibraryError>;
 }
@@ -21,7 +22,7 @@ pub trait PlatformRead {
 ///
 /// This trait contains no database-specific types. A backend may implement it using
 /// any storage engine and may perform work asynchronously.
-#[allow(async_fn_in_trait)]
+#[async_trait]
 pub trait LibraryRead: PlatformRead {
     async fn search(&self, query: SearchQuery) -> Result<Vec<LibraryItem>, LibraryError>;
 

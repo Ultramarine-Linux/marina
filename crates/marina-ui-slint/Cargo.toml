@@ -35,7 +35,6 @@ toml.workspace = true
 toml_edit.workspace = true
 marina-library.workspace = true
 marina-romm.workspace = true
-marina-install.workspace = true
 marina-scanner.workspace = true
 marina-store-sqlite.workspace = true
 marina-store.workspace = true

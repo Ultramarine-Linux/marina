@@ -7,7 +7,6 @@
 
 use std::sync::{Arc, Mutex};
 
-use marina_store::StoreBackend;
 use slint::{ComponentHandle, Image, Model, ModelRc, SharedString, VecModel};
 use tracing::{error, info};
 
@@ -110,18 +109,18 @@ pub(crate) fn install(
         else {
             return;
         };
-        let files = rom
+        let file_ids = rom
             .files
             .files
             .iter()
             .zip(selected.iter())
-            .filter_map(|(file, selected)| selected.then_some(file.clone()))
+            .filter_map(|(file, selected)| selected.then_some(file.id.to_string()))
             .collect::<Vec<_>>();
-        if files.is_empty() {
+        if file_ids.is_empty() {
             return;
         }
         let window = install_window.clone();
-        let selected_count = files.len();
+        let selected_count = file_ids.len();
         let _ = window.upgrade_in_event_loop(move |window| {
             window
                 .global::<StoreState>()
@@ -130,20 +129,32 @@ pub(crate) fn install(
                 )));
             window.global::<StoreState>().set_install_progress(0.0);
         });
-        let Some(backend) = state.romm.clone() else {
+        let Some(backend) = state.stores.get("romm").cloned() else {
             return;
         };
+        let entry_id = id.to_string();
         tokio::spawn(async move {
-            let result = marina_install::install(
-                backend.client(),
-                &state.library,
-                marina_install::InstallRequest {
-                    rom,
-                    files,
-                    library_root: root,
-                },
-            )
-            .await;
+            let entry = match backend.get(&entry_id).await {
+                Ok(Some(entry)) => entry,
+                Ok(None) => {
+                    error!(entry_id = %entry_id, "store entry vanished before install");
+                    return;
+                }
+                Err(error) => {
+                    error!(%error, "store entry hydration for install failed");
+                    return;
+                }
+            };
+            let result = backend
+                .install(
+                    &state.library,
+                    marina_store::InstallRequest {
+                        entry,
+                        file_ids,
+                        library_root: root,
+                    },
+                )
+                .await;
             match result {
                 Ok(item) => {
                     let platform = item.platform_slug.clone().unwrap_or_default();
@@ -206,7 +217,7 @@ pub(crate) fn install(
             .ok()
             .and_then(|state| state.clone());
         let Some(state) = state else { return };
-        let Some(backend) = state.romm.clone() else {
+        let Some(backend) = state.stores.get("romm").cloned() else {
             return;
         };
         let window = store_refresh_window.clone();
@@ -280,7 +291,7 @@ pub(crate) fn install(
                 .expect("library state lock poisoned")
                 .clone();
             let Some(state) = state else { return };
-            let Some(backend) = state.romm.clone() else {
+            let Some(backend) = state.stores.get("romm").cloned() else {
                 return;
             };
             let query_window = store_query_window.clone();
@@ -339,10 +350,16 @@ pub(crate) fn install(
             else {
                 return;
             };
-            let Some(backend) = state.romm.clone() else {
+            let Some(backend) = state.stores.get("romm").cloned() else {
                 return;
             };
-            let base_url = backend.base_url().to_owned();
+            // Cover URLs need the backend's native base URL, which the trait
+            // doesn't cover: downcast back to RomM for that one value.
+            // Detail hydration itself (`get`) stays on the trait.
+            let Some(romm) = backend.as_any().downcast_ref::<marina_romm::RommStore>() else {
+                return;
+            };
+            let base_url = romm.base_url().to_owned();
             if let Some(window) = detail_window.upgrade() {
                 window
                     .global::<StoreState>()
