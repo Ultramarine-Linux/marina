@@ -15,7 +15,7 @@ use marina_library::{
     read::{LibraryRead, PlatformRead},
     write::{LibraryWrite, PlatformWrite},
 };
-use marina_romm::{PlatformQuery, RomQuery};
+use marina_store::StoreBackend;
 
 use marina_scanner::scan;
 use serde::Serialize;
@@ -30,7 +30,6 @@ mod cache;
 mod config;
 mod covers;
 mod image;
-mod romm_auth;
 mod storage;
 mod ui;
 
@@ -399,51 +398,40 @@ async fn reconcile_romm(state: app::AppStateHandle) {
         info!("RomM startup catalog import disabled by MARINA_IMPORT_ROMM_ON_STARTUP");
         return;
     }
-    let Some(base_url) = state.config.romm_url.clone() else {
+    let Some(backend) = state.romm.clone() else {
+        return;
+    };
+    let Ok(cache) = state.store_caches.cache_for(backend.id()) else {
         return;
     };
 
-    let client = romm_auth::client(base_url, state.config.romm_token.as_deref());
-    match client.list_platforms(&PlatformQuery::default()).await {
+    match backend.list_platforms().await {
         Ok(platforms) => {
             for platform in platforms {
-                let mut offset = 0_i64;
+                let mut offset = 0_usize;
                 loop {
-                    let query = RomQuery {
-                        platform_ids: vec![platform.id],
-                        limit: Some(100),
-                        offset: Some(offset),
-                        with_files: Some(true),
-                        ..Default::default()
-                    };
-                    let page = match client.list_roms(&query).await {
-                        Ok(page) => page,
+                    let entries = match backend
+                        .browse(marina_store::StoreQuery {
+                            platform_slug: Some(platform.slug.clone()),
+                            limit: 100,
+                            offset,
+                            ..Default::default()
+                        })
+                        .await
+                    {
+                        Ok(entries) => entries,
                         Err(error) => {
-                            error!(%error, platform = %platform.fs_slug, "RomM catalog sync failed");
+                            error!(%error, platform = %platform.slug, "RomM catalog sync failed");
                             break;
                         }
                     };
-                    let rows = page
-                        .items
-                        .iter()
-                        .filter_map(|rom| {
-                            Some((
-                                rom.id.to_string(),
-                                rom.name
-                                    .clone()
-                                    .unwrap_or_else(|| rom.files.fs_name.clone()),
-                                rom.platform.platform_fs_slug.clone(),
-                                serde_json::to_string(rom).ok()?,
-                            ))
-                        })
-                        .collect::<Vec<_>>();
-                    if let Err(error) = state.library.upsert_remote_json("romm", &rows) {
+                    let count = entries.len();
+                    if let Err(error) = cache.upsert_entries(&entries) {
                         error!(%error, "RomM catalog cache write failed");
                         break;
                     }
-                    let count = page.items.len() as i64;
-                    info!(platform = %platform.fs_slug, offset, rows = count, total = ?page.total, "RomM catalog page cached");
-                    if count == 0 || page.total.is_some_and(|total| offset + count >= total) {
+                    info!(platform = %platform.slug, offset, rows = count, "RomM catalog page cached");
+                    if count == 0 || count < 100 {
                         break;
                     }
                     offset += count;

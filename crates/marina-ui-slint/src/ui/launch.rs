@@ -8,8 +8,8 @@ use marina_runtime::GameLauncher;
 use slint::ComponentHandle;
 use tracing::{error, info, warn};
 
-use crate::{GameState, MainWindow, app};
 use crate::ui::pages::home;
+use crate::{GameState, MainWindow, app};
 
 pub(crate) fn install(
     window: &MainWindow,

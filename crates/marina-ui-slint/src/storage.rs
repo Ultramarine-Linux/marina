@@ -23,3 +23,9 @@ pub async fn connect(
     );
     Ok(library)
 }
+
+/// Opens the per-backend store-catalog cache directory (separate from the library).
+/// Each backend gets its own `<backend_id>.db` file inside the directory.
+pub fn connect_store_caches(config: &Config) -> marina_store::StoreCaches {
+    marina_store::StoreCaches::new(config.store_cache_dir.clone())
+}
