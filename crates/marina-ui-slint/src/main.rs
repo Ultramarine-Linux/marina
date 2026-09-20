@@ -153,17 +153,24 @@ async fn main() -> Result<(), slint::PlatformError> {
     window.global::<LibraryState>().set_loading(false);
 
     let library_state: Arc<Mutex<Option<app::AppStateHandle>>> = Arc::new(Mutex::new(None));
-    let (cover_loader, loader_sources) = covers::ViewportLoader::new(&window);
+    let cover_loader = covers::ViewportLoader::new(&window);
+    let loader_sources = cover_loader.borrow().added_sources();
+    let played_sources = cover_loader.borrow().played_sources();
     let home_source_store = Arc::new(Mutex::new(Vec::new()));
     let library_source_store = Arc::new(Mutex::new(Vec::new()));
     let scroll_loader = cover_loader.clone();
-    window
-        .global::<HomeState>()
-        .on_viewport_changed(move |scroll_x, width, cover_height| {
-            scroll_loader
-                .borrow_mut()
-                .update(covers::Page::Home, scroll_x, width, cover_height);
-        });
+    window.global::<HomeState>().on_viewport_changed(
+        move |shelf, scroll_x, width, cover_height, visible| {
+            scroll_loader.borrow_mut().update(
+                covers::Page::Home,
+                covers::Shelf::from_index(shelf),
+                scroll_x,
+                width,
+                cover_height,
+                visible,
+            );
+        },
+    );
     let context_loader = cover_loader.clone();
     let context_loader_sources = loader_sources.clone();
     let context_home_sources = home_source_store.clone();
@@ -196,13 +203,14 @@ async fn main() -> Result<(), slint::PlatformError> {
         });
 
     let played_store = ui::pages::home::new_played_store();
-    ui::launch::install(&window, &library_state, &played_store);
+    ui::launch::install(&window, &library_state, &played_store, &played_sources);
     ui::pages::home::install(&window, &library_state, &home_source_store, &played_store);
     ui::pages::library::install(&window, &library_state, &library_source_store);
 
     let weak_window = window.as_weak();
     let state_store = library_state.clone();
     let played_hydration = played_store.clone();
+    let played_source_hydration = played_sources.clone();
     let played_window = weak_window.clone();
     let startup_sources = loader_sources.clone();
     let startup_home_sources = home_source_store.clone();
@@ -224,6 +232,7 @@ async fn main() -> Result<(), slint::PlatformError> {
                 state.clone(),
                 played_window.clone(),
                 played_hydration.clone(),
+                played_source_hydration.clone(),
             ));
 
             // Each phase owns its own work and can publish as soon as it is ready.

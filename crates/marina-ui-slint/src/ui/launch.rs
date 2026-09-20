@@ -15,9 +15,11 @@ pub(crate) fn install(
     window: &MainWindow,
     library_state: &Arc<Mutex<Option<app::AppStateHandle>>>,
     played_store: &home::PlayedStore,
+    played_sources: &home::PlayedSources,
 ) {
     let play_state = library_state.clone();
     let played_store = played_store.clone();
+    let played_sources = played_sources.clone();
     let played_window = window.as_weak();
     let game_launcher = GameLauncher::new();
     window.global::<GameState>().on_play_requested(move |id| {
@@ -35,6 +37,7 @@ pub(crate) fn install(
         };
         let game_launcher = game_launcher.clone();
         let played_store = played_store.clone();
+        let played_sources = played_sources.clone();
         let played_window = played_window.clone();
         tokio::spawn(async move {
             match state.library.get(&item_id).await {
@@ -50,6 +53,7 @@ pub(crate) fn install(
                         }
                         home::record_played(
                             &played_store,
+                            &played_sources,
                             &played_window,
                             &item,
                             state.config.romm_url.as_deref(),

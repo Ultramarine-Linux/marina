@@ -52,7 +52,10 @@ export component PageRouter inherits Rectangle {
             cover-height: root.shelf-cover-height;
             active: HomeState.active-shelf == 0;
             selected-index <=> HomeState.selected-played-index;
+            shelf-index: 0;
+            viewport-height: root.height;
             focus-request: ShellState.content-focus-request;
+            viewport-changed(shelf, x, width, cover-height, visible) => { HomeState.viewport-changed(shelf, x, width, cover-height, visible); }
             game-opened(id) => { HomeState.game-opened(id); }
             focus-up => { root.focus-header(); }
             focus-down => { HomeState.active-shelf = 1; }
@@ -70,8 +73,10 @@ export component PageRouter inherits Rectangle {
             cover-height: root.shelf-cover-height;
             active: HomeState.played-games.length == 0 || HomeState.active-shelf == 1;
             selected-index <=> HomeState.selected-game-index;
+            shelf-index: 1;
+            viewport-height: root.height;
             focus-request: ShellState.content-focus-request;
-            viewport-changed(x, width, cover-height) => { HomeState.viewport-changed(x, width, cover-height); }
+            viewport-changed(shelf, x, width, cover-height, visible) => { HomeState.viewport-changed(shelf, x, width, cover-height, visible); }
             game-opened(id) => { HomeState.game-opened(id); }
             focus-up => {
                 if (HomeState.played-games.length > 0) {

@@ -12,7 +12,7 @@ export global HomeState {
     in-out property <int> selected-played-index: 0;
     // 0 = recently played, 1 = recently added.
     in-out property <int> active-shelf: 0;
-    callback viewport-changed(length, length, length);
+    callback viewport-changed(int, length, length, length, float);
     callback cover-context-changed(int);
     callback entered;
     callback game-opened(string);
@@ -67,9 +67,13 @@ export component Shelf inherits Rectangle {
     in property <length> cover-height;
     in-out property <int> selected-index: 0;
     in property <int> focus-request: 0;
+    // Shelf identity for the image loader: 0 = recently played, 1 = recently added.
+    in property <int> shelf-index: 1;
+    // Height of the clipped home container; used to derive vertical visibility.
+    in property <length> viewport-height: 0px;
     // Inactive shelves stay on screen below the active one, dimmed.
     in property <bool> active: true;
-    callback viewport-changed(length, length, length);
+    callback viewport-changed(int, length, length, length, float);
     callback game-opened(string);
     callback focus-up;
     callback focus-down;
@@ -79,6 +83,10 @@ export component Shelf inherits Rectangle {
     opacity: root.active ? 1.0 : 0.4;
     animate opacity { duration: 150ms; }
     animate y { duration: 200ms; easing: cubic-bezier(0.33, 1, 0.68, 1); }
+    // Vertical slides (active-shelf flips) and resizes change visibility.
+    changed y => { root.report-viewport(); }
+    changed height => { root.report-viewport(); }
+    changed viewport-height => { root.report-viewport(); }
     forward-focus: shelf-focus;
     changed active => { if (root.active) { shelf-focus.focus(); } }
     changed focus-request => { if (root.active) { shelf-focus.focus(); } }
@@ -134,6 +142,15 @@ export component Shelf inherits Rectangle {
         }
     }
 
+    // Fraction of this shelf vertically inside the home container.
+    // The image loader keeps covers resident only for visible shelves.
+    private property <float> visible-fraction: root.height <= 0px || root.viewport-height <= 0px ? 0 :
+        max(0px, min(root.y + root.height, root.viewport-height) - max(root.y, 0px)) / root.height;
+
+    function report-viewport() {
+        root.viewport-changed(root.shelf-index, flick.viewport-x, flick.width, root.cover-height, root.visible-fraction);
+    }
+
     // The layout's intrinsic width — exact even with per-card widths varying
     // by cover aspect ratio.
     private property <length> content-width: row.preferred-width;
@@ -163,10 +180,10 @@ export component Shelf inherits Rectangle {
                 viewport-height: parent.height;
                 viewport-width: root.content-width;
                 animate viewport-x { duration: 200ms; easing: cubic-bezier(0.33, 1, 0.68, 1); }
-                changed viewport-x => { root.viewport-changed(self.viewport-x, self.width, root.cover-height); }
-                changed width => { root.viewport-changed(self.viewport-x, self.width, root.cover-height); }
-                changed viewport-width => { root.viewport-changed(self.viewport-x, self.width, root.cover-height); }
-                init => { root.viewport-changed(self.viewport-x, self.width, root.cover-height); }
+                changed viewport-x => { root.report-viewport(); }
+                changed width => { root.report-viewport(); }
+                changed viewport-width => { root.report-viewport(); }
+                init => { root.report-viewport(); }
 
                 row := HorizontalLayout {
                     padding-left: Tokens.spacing-2xl;

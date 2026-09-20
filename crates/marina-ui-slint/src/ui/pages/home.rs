@@ -6,7 +6,7 @@ use marina_core::LibraryAssetKind;
 use slint::{ComponentHandle, Model, VecModel};
 
 use super::library as shelf;
-use crate::{GameCardData, HomeState, MainWindow, app, covers, game_cards, image as image_loader};
+use crate::{GameCardData, HomeState, MainWindow, app, covers, game_cards};
 
 #[derive(Clone)]
 pub(crate) struct PlayedEntry {
@@ -18,6 +18,10 @@ pub(crate) struct PlayedEntry {
 
 pub(crate) type PlayedStore = Arc<Mutex<Vec<PlayedEntry>>>;
 
+/// Cover sources for the played shelf, index-aligned with the played model.
+/// Fed to the viewport loader; rebuilt on every played-store mutation.
+pub(crate) type PlayedSources = Arc<Mutex<Vec<covers::CoverSource>>>;
+
 pub(crate) fn new_played_store() -> PlayedStore {
     Arc::new(Mutex::new(Vec::new()))
 }
@@ -26,6 +30,7 @@ const MAX_PLAYED: usize = 20;
 
 pub(crate) fn record_played(
     store: &PlayedStore,
+    played_sources: &PlayedSources,
     window: &slint::Weak<MainWindow>,
     item: &marina_core::LibraryItem,
     base_url: Option<&str>,
@@ -37,10 +42,10 @@ pub(crate) fn record_played(
         entries.retain(|existing| existing.id != entry.id);
         entries.insert(0, entry.clone());
         entries.truncate(MAX_PLAYED);
+        *played_sources.lock().expect("played sources poisoned") =
+            entries.iter().map(|entry| entry.source.clone()).collect();
     }
 
-    let source = entry.source.clone();
-    let played_id = entry.id.clone();
     let _ = window.upgrade_in_event_loop(move |window| {
         with_played_model(&window, |model| {
             if let Some(index) = (0..model.row_count()).find(|&index| {
@@ -65,8 +70,8 @@ pub(crate) fn record_played(
             }
         });
     });
-
-    spawn_cover_decode(window, source, played_id);
+    // Covers load through the viewport loader (played shelf included), which
+    // picks the new row up on the next viewport report or context refresh.
 }
 
 fn played_entry(item: &marina_core::LibraryItem, base_url: Option<&str>) -> PlayedEntry {
@@ -98,6 +103,7 @@ pub(crate) async fn hydrate_played(
     state: app::AppStateHandle,
     window: slint::Weak<MainWindow>,
     store: PlayedStore,
+    played_sources: PlayedSources,
 ) {
     let items = state
         .library
@@ -114,6 +120,8 @@ pub(crate) async fn hydrate_played(
                 .iter()
                 .map(|item| played_entry(item, state.config.romm_url.as_deref())),
         );
+        *played_sources.lock().expect("played sources poisoned") =
+            entries.iter().map(|entry| entry.source.clone()).collect();
     }
     let window = window.clone();
     let store = store.clone();
@@ -125,51 +133,9 @@ pub(crate) async fn hydrate_played(
 fn publish_played(window: &MainWindow, store: &PlayedStore) {
     let cards = snapshot_cards(store);
     with_played_model(window, |model| model.set_vec(cards));
-    let entries: Vec<(String, covers::CoverSource)> = store
-        .lock()
-        .expect("played store poisoned")
-        .iter()
-        .map(|entry| (entry.id.clone(), entry.source.clone()))
-        .collect();
-    for (id, source) in entries {
-        spawn_cover_decode(&window.as_weak(), source, id);
-    }
-}
-
-fn spawn_cover_decode(
-    window: &slint::Weak<MainWindow>,
-    source: covers::CoverSource,
-    played_id: String,
-) {
-    let decode_window = window.clone();
-    tokio::spawn(async move {
-        let Some(decoded) = image_loader::load_scaled(
-            &image_loader::ImageSource::from(&source),
-            "shelf-cover",
-            256,
-        )
-        .await
-        else {
-            return;
-        };
-        let _ = decode_window.upgrade_in_event_loop(move |window| {
-            let (image, ratio) = image_loader::into_slint_image(decoded);
-            with_played_model(&window, |model| {
-                for index in 0..model.row_count() {
-                    if model
-                        .row_data(index)
-                        .is_some_and(|row| row.id == played_id.as_str())
-                    {
-                        let mut row = model.row_data(index).expect("row read above");
-                        row.cover = image.clone();
-                        row.cover_ratio = ratio;
-                        model.set_row_data(index, row);
-                        break;
-                    }
-                }
-            });
-        });
-    });
+    // Covers resolve through the viewport loader like every other shelf;
+    // this refresh replays the last viewport per shelf.
+    window.global::<HomeState>().invoke_cover_context_changed(0);
 }
 
 fn with_played_model(window: &MainWindow, update: impl FnOnce(&VecModel<GameCardData>)) {
