@@ -19,12 +19,12 @@ check:
 
 # Build the graphical application for the handheld target.
 cross-build:
-    CARGO_INCREMENTAL=1 cross build --config 'build.rustc-wrapper=""' --target {{target}} -p {{package}}
+    CARGO_INCREMENTAL=1 cross build --config 'build.rustc-wrapper=""' --target {{target}} -p {{package}} --release
 
 # Upload the cross-compiled binary and user service to the configured handheld.
 deploy: cross-build deploy-service
     ssh {{ssh_opts}} {{deploy_target}} "mkdir -p \"$(dirname '{{deploy_path}}')\""
-    rsync -e "ssh {{ssh_opts}}" --archive --compress --progress --stats "target/{{target}}/debug/{{binary}}" "{{deploy_target}}:{{deploy_path}}"
+    rsync -e "ssh {{ssh_opts}}" --archive --compress --progress --stats "target/{{target}}/release/{{binary}}" "{{deploy_target}}:{{deploy_path}}"
     ssh {{ssh_opts}} {{deploy_target}} "chmod +x '{{deploy_path}}'"
 
 deploy-service:
