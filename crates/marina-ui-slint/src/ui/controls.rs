@@ -95,15 +95,14 @@ pub(crate) fn dispatch_controller_action(window: &MainWindow, event: InputEvent)
         _ => {}
     }
 
-    if matches!(
-        event.action,
-        InputAction::ScrollLeft | InputAction::ScrollRight
-    ) {
-        let text = if event.action == InputAction::ScrollLeft {
-            "ScrollLeft"
-        } else {
-            "ScrollRight"
-        };
+    let scroll_text = match event.action {
+        InputAction::ScrollUp => Some("ScrollUp"),
+        InputAction::ScrollDown => Some("ScrollDown"),
+        InputAction::ScrollLeft => Some("ScrollLeft"),
+        InputAction::ScrollRight => Some("ScrollRight"),
+        _ => None,
+    };
+    if let Some(text) = scroll_text {
         window
             .window()
             .dispatch_event(WindowEvent::KeyPressed { text: text.into() });
@@ -117,9 +116,12 @@ pub(crate) fn dispatch_controller_action(window: &MainWindow, event: InputEvent)
         InputAction::Right => Key::RightArrow,
         InputAction::Accept => Key::Return,
         InputAction::Back => Key::Escape,
-        InputAction::ScrollUp => Key::PageUp,
-        InputAction::ScrollDown => Key::PageDown,
-        InputAction::ScrollLeft | InputAction::ScrollRight => return,
+        InputAction::PageUp => Key::PageUp,
+        InputAction::PageDown => Key::PageDown,
+        InputAction::ScrollUp
+        | InputAction::ScrollDown
+        | InputAction::ScrollLeft
+        | InputAction::ScrollRight => return,
         InputAction::PreviousTab | InputAction::NextTab | InputAction::Menu => return,
     };
     window

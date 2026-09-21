@@ -180,6 +180,26 @@ export component StorePage inherits Rectangle {
                     return accept;
                 }
             }
+            if (event.text == Key.PageUp) {
+                if (root.page == 0) {
+                    root.select-platform(root.selected-platform-index - max(1, Math.floor((root.height - 98px) / 52px)));
+                    return accept;
+                }
+                if (root.page == 1) {
+                    root.select-game(root.selected-game-index - max(1, Math.floor((root.height - 98px) / 42px)));
+                    return accept;
+                }
+            }
+            if (event.text == Key.PageDown) {
+                if (root.page == 0) {
+                    root.select-platform(root.selected-platform-index + max(1, Math.floor((root.height - 98px) / 52px)));
+                    return accept;
+                }
+                if (root.page == 1) {
+                    root.select-game(root.selected-game-index + max(1, Math.floor((root.height - 98px) / 42px)));
+                    return accept;
+                }
+            }
             if (root.page == 0 && event.text == Key.UpArrow) {
                 if (root.selected-platform-index == 0) {
                     root.focus-header();
@@ -378,6 +398,20 @@ export component StorePage inherits Rectangle {
                 // Virtual cursor spans every list row plus the Download
                 // button past the end, so focus never leaves this scope:
                 // arrows move, Accept activates, Esc closes.
+                if (event.text == Key.PageUp) {
+                    sheet-body.row-cursor = max(0, sheet-body.row-cursor - max(1, Math.floor(sheet-body.list-height / 64px)));
+                    sheet-body.sync-file-index();
+                    sheet-body.list-scroll = min(0px, -sheet-body.row-cursor * 64px);
+                    return accept;
+                }
+                if (event.text == Key.PageDown) {
+                    sheet-body.row-cursor = min(root.artifacts.length, sheet-body.row-cursor + max(1, Math.floor(sheet-body.list-height / 64px)));
+                    sheet-body.sync-file-index();
+                    if (sheet-body.row-cursor < root.artifacts.length) {
+                        sheet-body.list-scroll = min(0px, sheet-body.list-height - (sheet-body.row-cursor + 1) * 64px);
+                    }
+                    return accept;
+                }
                 if (event.text == Key.UpArrow) {
                     sheet-body.row-cursor = max(0, sheet-body.row-cursor - 1);
                     sheet-body.sync-file-index();

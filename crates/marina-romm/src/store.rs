@@ -1,11 +1,14 @@
 //! [`marina_store::StoreBackend`] implementation for RomM.
 
-use std::{collections::HashMap, sync::Mutex};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::Mutex,
+};
 
 use async_trait::async_trait;
 use marina_store::{StoreBackend, StoreEntry, StoreError, StorePlatform, StoreQuery};
 
-use crate::{Auth, Client, PlatformQuery, RomQuery};
+use crate::{Auth, Client, PlatformQuery, Rom, RomQuery};
 
 #[derive(Debug, Default)]
 struct PlatformCache {
@@ -37,6 +40,44 @@ impl RommStore {
 
     pub fn base_url(&self) -> &str {
         self.client.base_url()
+    }
+
+    async fn get_with_sibling_files(&self, id: i32) -> Result<Rom, StoreError> {
+        let mut rom = self.client.get_rom(id).await.map_err(StoreError::backend)?;
+        let sibling_ids = rom
+            .siblings
+            .sibling_roms
+            .as_deref()
+            .unwrap_or_default()
+            .iter()
+            .map(|sibling| sibling.id)
+            .filter(|sibling_id| *sibling_id != rom.id)
+            .collect::<Vec<_>>();
+        let mut file_ids = rom
+            .files
+            .files
+            .iter()
+            .map(|file| file.id)
+            .collect::<HashSet<_>>();
+
+        for sibling_id in sibling_ids {
+            match self.client.get_rom(sibling_id).await {
+                Ok(sibling) => {
+                    rom.files.files.extend(
+                        sibling
+                            .files
+                            .files
+                            .into_iter()
+                            .filter(|file| file_ids.insert(file.id)),
+                    );
+                }
+                Err(error) => {
+                    tracing::warn!(rom_id = id, sibling_id, %error, "failed to hydrate RomM sibling");
+                }
+            }
+        }
+
+        Ok(rom)
     }
 
     async fn platform_id_for_slug(&self, slug: &str) -> Result<Option<i64>, StoreError> {
@@ -151,7 +192,7 @@ impl StoreBackend for RommStore {
         let Ok(id) = entry_id.parse::<i32>() else {
             return Ok(None);
         };
-        let rom = self.client.get_rom(id).await.map_err(StoreError::backend)?;
+        let rom = self.get_with_sibling_files(id).await?;
         let title = rom
             .name
             .clone()

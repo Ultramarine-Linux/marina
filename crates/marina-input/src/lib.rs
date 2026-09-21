@@ -23,6 +23,8 @@ pub enum InputAction {
     ScrollDown,
     ScrollLeft,
     ScrollRight,
+    PageUp,
+    PageDown,
     Left,
     Right,
     Accept,
@@ -34,7 +36,10 @@ pub enum InputAction {
 
 impl InputAction {
     fn repeats(self) -> bool {
-        matches!(self, Self::Up | Self::Down | Self::Left | Self::Right)
+        matches!(
+            self,
+            Self::Up | Self::Down | Self::Left | Self::Right | Self::PageUp | Self::PageDown
+        )
     }
 }
 
@@ -380,6 +385,8 @@ fn button_action(button: Button) -> Option<InputAction> {
         Button::East => Some(InputAction::Back),
         Button::LeftTrigger => Some(InputAction::PreviousTab),
         Button::RightTrigger => Some(InputAction::NextTab),
+        Button::LeftTrigger2 => Some(InputAction::PageUp),
+        Button::RightTrigger2 => Some(InputAction::PageDown),
         Button::Start => Some(InputAction::Menu),
         _ => None,
     }
@@ -401,6 +408,26 @@ mod tests {
 
     fn source(input: PhysicalInput) -> InputSource {
         InputSource { gamepad: 0, input }
+    }
+
+    #[test]
+    fn triggers_map_to_tab_and_page_actions() {
+        assert_eq!(
+            button_action(Button::LeftTrigger),
+            Some(InputAction::PreviousTab)
+        );
+        assert_eq!(
+            button_action(Button::RightTrigger),
+            Some(InputAction::NextTab)
+        );
+        assert_eq!(
+            button_action(Button::LeftTrigger2),
+            Some(InputAction::PageUp)
+        );
+        assert_eq!(
+            button_action(Button::RightTrigger2),
+            Some(InputAction::PageDown)
+        );
     }
 
     #[test]
@@ -451,31 +478,38 @@ mod tests {
     }
 
     #[test]
-    fn held_directions_repeat() {
+    fn held_navigation_actions_repeat() {
         let config = InputConfig {
             initial_repeat_delay: Duration::from_millis(10),
             repeat_interval: Duration::from_millis(5),
             ..InputConfig::default()
         };
-        let mut state = SemanticState::new(config);
-        let mut events = Vec::new();
-        let now = Instant::now();
 
-        state.set_source(
-            InputAction::Right,
-            source(PhysicalInput::Button(Button::DPadRight)),
-            true,
-            now,
-            &mut |event| events.push(event),
-        );
-        state.emit_repeats(now + Duration::from_millis(9), &mut |event| {
-            events.push(event)
-        });
-        state.emit_repeats(now + Duration::from_millis(10), &mut |event| {
-            events.push(event)
-        });
+        for (action, button) in [
+            (InputAction::Right, Button::DPadRight),
+            (InputAction::PageDown, Button::RightTrigger2),
+        ] {
+            let mut state = SemanticState::new(config);
+            let mut events = Vec::new();
+            let now = Instant::now();
 
-        assert_eq!(events.len(), 2);
-        assert_eq!(events[1].kind, InputEventKind::Repeated);
+            state.set_source(
+                action,
+                source(PhysicalInput::Button(button)),
+                true,
+                now,
+                &mut |event| events.push(event),
+            );
+            state.emit_repeats(now + Duration::from_millis(9), &mut |event| {
+                events.push(event)
+            });
+            state.emit_repeats(now + Duration::from_millis(10), &mut |event| {
+                events.push(event)
+            });
+
+            assert_eq!(events.len(), 2);
+            assert_eq!(events[1].action, action);
+            assert_eq!(events[1].kind, InputEventKind::Repeated);
+        }
     }
 }

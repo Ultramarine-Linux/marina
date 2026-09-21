@@ -49,6 +49,14 @@ export component PlatformGameList inherits Rectangle {
         height: 0px;
         key-pressed(event) => {
 
+            if (event.text == Key.PageUp) {
+                root.select-index(root.safe-index - max(1, Math.floor(list.height / 42px)));
+                return accept;
+            }
+            if (event.text == Key.PageDown) {
+                root.select-index(root.safe-index + max(1, Math.floor(list.height / 42px)));
+                return accept;
+            }
             if (event.text == Key.UpArrow) {
                 if (root.safe-index == 0) {
                     root.focus-header();

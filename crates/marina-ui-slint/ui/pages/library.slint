@@ -121,6 +121,22 @@ export component LibraryPage inherits Rectangle {
                 return accept;
             }
 
+            if (event.text == Key.PageUp) {
+                if (root.page == 0) {
+                    root.select-platform(root.selected-platform-index - max(1, Math.floor((root.height - 98px) / 52px)));
+                } else {
+                    root.select-game(root.selected-game-index - max(1, Math.floor((root.height - 98px) / 42px)));
+                }
+                return accept;
+            }
+            if (event.text == Key.PageDown) {
+                if (root.page == 0) {
+                    root.select-platform(root.selected-platform-index + max(1, Math.floor((root.height - 98px) / 52px)));
+                } else {
+                    root.select-game(root.selected-game-index + max(1, Math.floor((root.height - 98px) / 42px)));
+                }
+                return accept;
+            }
             if (event.text == Key.UpArrow) {
                 if (root.page == 0 && root.selected-platform-index == 0) {
                     root.focus-header();

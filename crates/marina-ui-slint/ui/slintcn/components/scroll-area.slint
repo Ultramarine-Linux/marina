@@ -29,12 +29,21 @@ export component ScrollArea inherits Rectangle {
                 root.focus-content();
                 return accept;
             }
-            if (event.text == Key.DownArrow || event.text == Key.PageDown) {
+            if (event.text == Key.PageDown) {
+                flick.viewport-y = max(flick.height - root.content-height,
+                    flick.viewport-y - flick.height);
+                return accept;
+            }
+            if (event.text == Key.PageUp) {
+                flick.viewport-y = min(0px, flick.viewport-y + flick.height);
+                return accept;
+            }
+            if (event.text == Key.DownArrow || event.text == "ScrollDown") {
                 flick.viewport-y = max(flick.height - root.content-height,
                     flick.viewport-y - root.scroll-step);
                 return accept;
             }
-            if (event.text == Key.UpArrow || event.text == Key.PageUp) {
+            if (event.text == Key.UpArrow || event.text == "ScrollUp") {
                 if (flick.viewport-y >= 0px) {
                     root.focus-content();
                 } else {

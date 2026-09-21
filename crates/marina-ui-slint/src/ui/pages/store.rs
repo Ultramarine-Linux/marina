@@ -114,8 +114,16 @@ fn entry_card(entry: &marina_store::StoreEntry) -> CardParts {
 
 /// Builds UI cards. Must run on the event-loop thread: GameCardData holds
 /// a Slint image and is not Send, so only plain tuples cross threads.
-fn cards_from(parts: Vec<CardParts>) -> Vec<GameCardData> {
+fn deduplicate_card_parts(parts: Vec<CardParts>) -> Vec<CardParts> {
+    let mut seen = std::collections::HashSet::new();
     parts
+        .into_iter()
+        .filter(|(_, title, _)| seen.insert(title.trim().to_lowercase()))
+        .collect()
+}
+
+fn cards_from(parts: Vec<CardParts>) -> Vec<GameCardData> {
+    deduplicate_card_parts(parts)
         .into_iter()
         .map(|(id, title, platform)| GameCardData {
             id: SharedString::from(id),
@@ -711,4 +719,24 @@ pub(crate) fn install(
             });
             register_selection_task(&task_session, generation, task.abort_handle());
         });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{CardParts, deduplicate_card_parts};
+
+    #[test]
+    fn duplicate_titles_are_grouped_case_insensitively() {
+        let cards: Vec<CardParts> = vec![
+            ("1".into(), "Final Fight 3".into(), "SNES".into()),
+            ("2".into(), " final fight 3 ".into(), "SNES".into()),
+            ("3".into(), "Final Fight 2".into(), "SNES".into()),
+        ];
+
+        let grouped = deduplicate_card_parts(cards);
+
+        assert_eq!(grouped.len(), 2);
+        assert_eq!(grouped[0].0, "1");
+        assert_eq!(grouped[1].0, "3");
+    }
 }
