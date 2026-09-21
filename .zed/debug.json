@@ -15,7 +15,7 @@
       "SLINT_MCP_PORT": "9315",
       "SLINT_EMIT_DEBUG_INFO": "1",
       "SLINT_LIVE_PREVIEW": "1",
-      "SLINT_BACKEND": "winit-skia",
+      "SLINT_BACKEND": "winit-femtovg",
       "MARINA_IMPORT_ROMM_ON_STARTUP": "false"
     },
     "sourceLanguages": ["rust"],

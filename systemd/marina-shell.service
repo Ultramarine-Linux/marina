@@ -10,10 +10,14 @@ Type=simple
 
 # 640x360 logical pixels render at 1280x720 physical pixels.
 Environment=SLINT_SCALE_FACTOR=2.0
-# Select Skia's default surface: OpenGL/OpenGL ES first, with Skia's
-# automatic software-surface fallback when GL initialization fails.
-Environment=SLINT_BACKEND=winit-skia
+# FemtoVG uses the handheld's EGL/OpenGL ES stack and matches the renderer
+# expected by the planned layer-shika Wayland shell integration.
+Environment=SLINT_BACKEND=winit-femtovg
 Environment=RUST_LOG=debug
+# Image decoding uses blocking workers. Bound glibc's per-thread arenas so
+# released decode buffers do not leave one multi-megabyte arena per worker.
+Environment=MALLOC_ARENA_MAX=2
+Environment=MALLOC_TRIM_THRESHOLD_=131072
 ExecStart=/opt/marina/marina-ui-slint
 Restart=on-failure
 RestartSec=2s

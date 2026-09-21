@@ -1,8 +1,9 @@
 //! Universal asynchronous image loading and decoding.
 
-use std::{path::PathBuf, sync::OnceLock};
+use std::{path::PathBuf, sync::OnceLock, time::Duration};
 
 use slint::{Image, SharedPixelBuffer};
+use tokio::sync::Semaphore;
 use tracing::{debug, warn};
 
 use crate::cache;
@@ -10,6 +11,42 @@ use crate::cache;
 const MAX_IMAGE_BYTES: usize = 16 * 1024 * 1024;
 const MAX_IMAGE_DIMENSION: u32 = 4096;
 const MAX_IMAGE_PIXELS: u64 = 16_777_216;
+
+/// Maximum edge length for artwork shown in preview and detail panes.
+pub const PREVIEW_MAX_DIMENSION: u32 = 1024;
+const MAX_CONCURRENT_IMAGE_DECODES: usize = 2;
+const ALLOCATOR_TRIM_DELAY: Duration = Duration::from_millis(250);
+
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+unsafe extern "C" {
+    fn malloc_trim(pad: usize) -> i32;
+}
+
+/// Requests allocator reclamation after page-owned images have left the Slint
+/// object tree. Repeated exits debounce to one trim after navigation settles.
+pub fn schedule_allocator_trim() {
+    thread_local! {
+        static TIMER: slint::Timer = slint::Timer::default();
+    }
+    TIMER.with(|timer| {
+        timer.start(
+            slint::TimerMode::SingleShot,
+            ALLOCATOR_TRIM_DELAY,
+            trim_allocator,
+        );
+    });
+}
+
+#[cfg(all(target_os = "linux", target_env = "gnu"))]
+fn trim_allocator() {
+    // SAFETY: malloc_trim is process-global and thread-safe in glibc. This is
+    // called on the event loop after image owners have been released.
+    let released = unsafe { malloc_trim(0) };
+    debug!(released, "trimmed allocator after image unload");
+}
+
+#[cfg(not(all(target_os = "linux", target_env = "gnu")))]
+fn trim_allocator() {}
 
 #[derive(Clone, Debug)]
 pub struct ImageSource {
@@ -54,10 +91,6 @@ pub fn source_for(
     }
 }
 
-pub async fn load(source: &ImageSource, purpose: &'static str) -> Option<DecodedImage> {
-    load_scaled(source, purpose, MAX_IMAGE_DIMENSION).await
-}
-
 pub async fn load_scaled(
     source: &ImageSource,
     purpose: &'static str,
@@ -72,10 +105,20 @@ pub async fn load_scaled(
     );
     let bytes = load_bytes(source).await?;
     let byte_count = bytes.len();
-    let decoded = tokio::task::spawn_blocking(move || decode_rgba(&bytes, max_dimension))
+    static DECODE_LIMITER: OnceLock<std::sync::Arc<Semaphore>> = OnceLock::new();
+    let permit = DECODE_LIMITER
+        .get_or_init(|| std::sync::Arc::new(Semaphore::new(MAX_CONCURRENT_IMAGE_DECODES)))
+        .clone()
+        .acquire_owned()
         .await
-        .ok()
-        .flatten();
+        .ok()?;
+    let decoded = tokio::task::spawn_blocking(move || {
+        let _permit = permit;
+        decode_rgba(&bytes, max_dimension)
+    })
+    .await
+    .ok()
+    .flatten();
     match &decoded {
         Some(image) => debug!(
             purpose,

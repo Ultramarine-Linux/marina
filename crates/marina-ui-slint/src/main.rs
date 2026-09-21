@@ -2,7 +2,7 @@ use std::{
     collections::BTreeMap,
     sync::{
         Arc, Mutex,
-        atomic::{AtomicBool, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
     },
     time::Duration,
 };
@@ -36,7 +36,10 @@ use ui::pages::library as shelf;
 
 const CONTROLLER_STARTUP_DELAY: Duration = Duration::from_secs(1);
 
-#[tokio::main]
+// Marina is I/O-bound, and image decoding has its own bounded blocking pool.
+// Keeping the async pool small avoids one glibc allocation arena per CPU core
+// being warmed by short-lived image buffers on high-core-count handhelds.
+#[tokio::main(worker_threads = 2)]
 async fn main() -> Result<(), slint::PlatformError> {
     tracing_subscriber::fmt()
         .with_env_filter(EnvFilter::from_default_env())
@@ -159,7 +162,6 @@ async fn main() -> Result<(), slint::PlatformError> {
     let loader_sources = cover_loader.borrow().added_sources();
     let played_sources = cover_loader.borrow().played_sources();
     let home_source_store = Arc::new(Mutex::new(Vec::new()));
-    let library_source_store = Arc::new(Mutex::new(Vec::new()));
     let scroll_loader = cover_loader.clone();
     window.global::<HomeState>().on_viewport_changed(
         move |shelf, scroll_x, width, cover_height, visible| {
@@ -176,38 +178,30 @@ async fn main() -> Result<(), slint::PlatformError> {
     let context_loader = cover_loader.clone();
     let context_loader_sources = loader_sources.clone();
     let context_home_sources = home_source_store.clone();
-    let context_library_sources = library_source_store.clone();
     window
         .global::<HomeState>()
         .on_cover_context_changed(move |active_tab| {
             let mut loader = context_loader.borrow_mut();
-            loader.reset();
-            if active_tab == 2 {
+            if active_tab != 0 {
+                loader.suspend(covers::Page::Home);
                 return;
             }
-            let sources = if active_tab == 1 {
-                context_library_sources
-                    .lock()
-                    .expect("library cover source state poisoned")
-                    .clone()
-            } else {
-                context_home_sources
-                    .lock()
-                    .expect("home cover source state poisoned")
-                    .clone()
-            };
+            // Refresh is idempotent: it preserves resident and in-flight
+            // covers, avoiding duplicate decode waves when model and route
+            // notifications arrive during the same Home entry.
             *context_loader_sources
                 .lock()
-                .expect("cover source state poisoned") = sources;
-            if active_tab == 0 {
-                loader.refresh(covers::Page::Home);
-            }
+                .expect("cover source state poisoned") = context_home_sources
+                .lock()
+                .expect("home cover source state poisoned")
+                .clone();
+            loader.refresh(covers::Page::Home);
         });
 
     let played_store = ui::pages::home::new_played_store();
     ui::launch::install(&window, &library_state, &played_store, &played_sources);
     ui::pages::home::install(&window, &library_state, &home_source_store, &played_store);
-    ui::pages::library::install(&window, &library_state, &library_source_store);
+    ui::pages::library::install(&window, &library_state);
 
     let weak_window = window.as_weak();
     let state_store = library_state.clone();
@@ -440,11 +434,16 @@ fn apply_home_metadata(
     loader_sources: &CoverSourceStore,
     home_sources: &CoverSourceStore,
 ) {
-    *loader_sources.lock().expect("cover source state poisoned") = cover_sources.clone();
-    *home_sources
-        .lock()
-        .expect("home cover source state poisoned") = cover_sources;
+    let loader_sources = loader_sources.clone();
+    let home_sources = home_sources.clone();
     let _ = window.upgrade_in_event_loop(move |window| {
+        if window.global::<ShellState>().get_page() != ShellPage::Home {
+            return;
+        }
+        *loader_sources.lock().expect("cover source state poisoned") = cover_sources.clone();
+        *home_sources
+            .lock()
+            .expect("home cover source state poisoned") = cover_sources;
         window
             .global::<HomeState>()
             .set_games(ModelRc::from(std::rc::Rc::new(VecModel::from(game_cards(
@@ -593,7 +592,14 @@ async fn hydrate_startup_platforms(state: app::AppStateHandle, window: slint::We
     }
 }
 
-fn populate_store_details(window: &slint::Weak<MainWindow>, rom: marina_romm::Rom, base_url: &str) {
+fn populate_store_details(
+    window: &slint::Weak<MainWindow>,
+    rom: marina_romm::Rom,
+    base_url: &str,
+    generation_guard: Arc<AtomicU64>,
+    generation: u64,
+    load_preview: bool,
+) -> Option<tokio::task::AbortHandle> {
     let rom_id = rom.id.to_string();
     let cover_source = covers::source_for(rom.cover_path().as_deref(), None, Some(base_url));
     let screenshot = rom
@@ -614,7 +620,6 @@ fn populate_store_details(window: &slint::Weak<MainWindow>, rom: marina_romm::Ro
                 .map(|screenshot| screenshot.download_path.clone())
         });
     let screenshot_source = covers::source_for(screenshot.as_deref(), None, Some(base_url));
-    let item: marina_core::LibraryItem = rom.clone().into();
     let rom_prefix = rom.files.full_path.trim_end_matches('/').to_owned();
     let artifact_count = rom.files.files.len();
     let mut artifact_tree = ArtifactTree::default();
@@ -627,6 +632,7 @@ fn populate_store_details(window: &slint::Weak<MainWindow>, rom: marina_romm::Ro
     }
     let mut artifacts = Vec::new();
     artifact_tree.flatten(0, &mut artifacts);
+    let item: marina_core::LibraryItem = rom.into();
     let tags = item.tags.clone();
     let details = PreviewDetailsData {
         title: SharedString::from(item.title),
@@ -637,7 +643,11 @@ fn populate_store_details(window: &slint::Weak<MainWindow>, rom: marina_romm::Ro
         tags: SharedString::from(item.tags.join(", ")),
     };
     let selected_rom_id = rom_id.clone();
+    let details_generation = generation_guard.clone();
     let _ = window.upgrade_in_event_loop(move |window| {
+        if details_generation.load(Ordering::Relaxed) != generation {
+            return;
+        }
         let games = window.global::<StoreState>().get_games();
         let selected_index = window
             .global::<StoreState>()
@@ -671,17 +681,28 @@ fn populate_store_details(window: &slint::Weak<MainWindow>, rom: marina_romm::Ro
         .find(|source| !source.is_empty())
         .cloned();
 
+    if !load_preview {
+        return None;
+    }
+
     let preview_window = window.clone();
     let preview_rom_id = rom_id.clone();
     let row_rom_id = rom_id.clone();
     if let Some(preview_source) = preview_source {
-        tokio::spawn(async move {
-            let Some(decoded) =
-                image::load(&image::ImageSource::from(&preview_source), "store-preview").await
+        let task = tokio::spawn(async move {
+            let Some(decoded) = image::load_scaled(
+                &image::ImageSource::from(&preview_source),
+                "store-preview",
+                image::PREVIEW_MAX_DIMENSION,
+            )
+            .await
             else {
                 return;
             };
             let _ = preview_window.upgrade_in_event_loop(move |window| {
+                if generation_guard.load(Ordering::Relaxed) != generation {
+                    return;
+                }
                 let games = window.global::<StoreState>().get_games();
                 let selected_index = window
                     .global::<StoreState>()
@@ -711,6 +732,9 @@ fn populate_store_details(window: &slint::Weak<MainWindow>, rom: marina_romm::Ro
                 }
             });
         });
+        Some(task.abort_handle())
+    } else {
+        None
     }
 }
 

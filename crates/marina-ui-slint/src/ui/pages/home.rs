@@ -1,12 +1,16 @@
 //! Home page data loading.
 
-use std::sync::{Arc, Mutex};
+use std::sync::{
+    Arc, Mutex,
+    atomic::{AtomicU64, Ordering},
+};
 
 use marina_core::LibraryAssetKind;
 use slint::{ComponentHandle, Model, VecModel};
+use tracing::debug;
 
 use super::library as shelf;
-use crate::{GameCardData, HomeState, MainWindow, app, covers, game_cards};
+use crate::{GameCardData, HomeState, MainWindow, ShellPage, ShellState, app, covers, game_cards};
 
 #[derive(Clone)]
 pub(crate) struct PlayedEntry {
@@ -28,6 +32,47 @@ pub(crate) fn new_played_store() -> PlayedStore {
 
 const MAX_PLAYED: usize = 20;
 
+#[derive(Debug)]
+struct HomeSession {
+    generation: u64,
+    tasks: Vec<tokio::task::AbortHandle>,
+}
+
+impl Drop for HomeSession {
+    fn drop(&mut self) {
+        for task in self.tasks.drain(..) {
+            task.abort();
+        }
+        debug!(generation = self.generation, "Home session dropped");
+    }
+}
+
+type ActiveHomeSession = Arc<Mutex<Option<HomeSession>>>;
+
+fn home_session_is_active(session: &ActiveHomeSession, generation: u64) -> bool {
+    session
+        .lock()
+        .expect("Home session state poisoned")
+        .as_ref()
+        .is_some_and(|session| session.generation == generation)
+}
+
+fn register_home_task(
+    active_session: &ActiveHomeSession,
+    generation: u64,
+    task: tokio::task::AbortHandle,
+) {
+    let mut active = active_session.lock().expect("Home session state poisoned");
+    if let Some(session) = active
+        .as_mut()
+        .filter(|session| session.generation == generation)
+    {
+        session.tasks.push(task);
+    } else {
+        task.abort();
+    }
+}
+
 pub(crate) fn record_played(
     store: &PlayedStore,
     played_sources: &PlayedSources,
@@ -47,6 +92,9 @@ pub(crate) fn record_played(
     }
 
     let _ = window.upgrade_in_event_loop(move |window| {
+        if window.global::<ShellState>().get_page() != ShellPage::Home {
+            return;
+        }
         with_played_model(&window, |model| {
             if let Some(index) = (0..model.row_count()).find(|&index| {
                 model
@@ -131,8 +179,15 @@ pub(crate) async fn hydrate_played(
 }
 
 fn publish_played(window: &MainWindow, store: &PlayedStore) {
+    if window.global::<ShellState>().get_page() != ShellPage::Home {
+        return;
+    }
     let cards = snapshot_cards(store);
-    with_played_model(window, |model| model.set_vec(cards));
+    with_played_model(window, |model| {
+        if !same_cards(model, &cards) {
+            model.set_vec(cards);
+        }
+    });
     // Covers resolve through the viewport loader like every other shelf;
     // this refresh replays the last viewport per shelf.
     window.global::<HomeState>().invoke_cover_context_changed(0);
@@ -147,6 +202,17 @@ fn with_played_model(window: &MainWindow, update: impl FnOnce(&VecModel<GameCard
     {
         update(model);
     }
+}
+
+fn same_cards(model: &VecModel<GameCardData>, cards: &[GameCardData]) -> bool {
+    model.row_count() == cards.len()
+        && cards.iter().enumerate().all(|(index, card)| {
+            model.row_data(index).is_some_and(|current| {
+                current.id == card.id
+                    && current.title == card.title
+                    && current.platform == card.platform
+            })
+        })
 }
 
 fn snapshot_cards(store: &PlayedStore) -> Vec<GameCardData> {
@@ -172,10 +238,19 @@ pub(crate) fn install(
 ) {
     let home_state = library_state.clone();
     let home_window = window.as_weak();
-    let home_source_store = home_source_store.clone();
+    let entered_home_sources = home_source_store.clone();
     let played_store = played_store.clone();
+    let home_generation = Arc::new(AtomicU64::new(0));
+    let active_session: ActiveHomeSession = Arc::new(Mutex::new(None));
+    let entered_generation = home_generation.clone();
+    let entered_session = active_session.clone();
 
     window.global::<HomeState>().on_entered(move || {
+        let generation = entered_generation.fetch_add(1, Ordering::Relaxed) + 1;
+        *entered_session.lock().expect("Home session state poisoned") = Some(HomeSession {
+            generation,
+            tasks: Vec::new(),
+        });
         if let Some(window) = home_window.upgrade() {
             publish_played(&window, &played_store);
         }
@@ -183,35 +258,60 @@ pub(crate) fn install(
             return;
         };
         let window = home_window.clone();
-        let home_source_store = home_source_store.clone();
-        tokio::spawn(async move {
+        let home_source_store = entered_home_sources.clone();
+        let request_session = entered_session.clone();
+        let task_session = request_session.clone();
+        let task = tokio::spawn(async move {
             if let Ok((metadata, cover_sources)) =
                 shelf::load_games(&state.library, state.config.romm_url.as_deref()).await
             {
-                *home_source_store
-                    .lock()
-                    .expect("home cover source state poisoned") = cover_sources;
                 let _ = window.upgrade_in_event_loop(move |window| {
+                    // The query may finish after a tab change. Do not republish
+                    // Home cards or restart cover loading while Home is hidden.
+                    if !home_session_is_active(&request_session, generation)
+                        || window.global::<ShellState>().get_page() != ShellPage::Home
+                    {
+                        return;
+                    }
+                    *home_source_store
+                        .lock()
+                        .expect("home cover source state poisoned") = cover_sources;
                     if let Some(model) = window
                         .global::<HomeState>()
                         .get_games()
                         .as_any()
                         .downcast_ref::<VecModel<GameCardData>>()
                     {
-                        model.set_vec(game_cards(metadata));
+                        let cards = game_cards(metadata);
+                        if !same_cards(model, &cards) {
+                            model.set_vec(cards);
+                        }
                     }
                     window.global::<HomeState>().set_loading(false);
+                    window.global::<HomeState>().invoke_cover_context_changed(0);
                 });
-                if window.upgrade().is_some() {
-                    let _ = window.upgrade_in_event_loop(|window| {
-                        window.global::<HomeState>().invoke_cover_context_changed(0);
-                    });
-                }
             } else {
                 let _ = window.upgrade_in_event_loop(|window| {
                     window.global::<HomeState>().set_loading(false);
                 });
             }
         });
+        register_home_task(&task_session, generation, task.abort_handle());
+    });
+
+    let exited_generation = home_generation;
+    let exited_session = active_session;
+    let exited_window = window.as_weak();
+    window.global::<HomeState>().on_exited(move || {
+        exited_generation.fetch_add(1, Ordering::Relaxed);
+        let unloaded_session = exited_session
+            .lock()
+            .expect("Home session state poisoned")
+            .take();
+        drop(unloaded_session);
+        if let Some(window) = exited_window.upgrade() {
+            window.global::<HomeState>().set_loading(false);
+        }
+        crate::image::schedule_allocator_trim();
     });
 }

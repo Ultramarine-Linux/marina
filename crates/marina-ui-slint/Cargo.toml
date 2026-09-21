@@ -16,13 +16,13 @@ slint-build = "1.17.1"
 [dependencies]
 bytesize.workspace = true
 chrono.workspace = true
-# Keep the renderer set explicit: Winit uses Skia over OpenGL/OpenGL ES, and
-# Skia falls back to its software surface when GL initialization fails.
-# Do not enable the Vulkan or WGPU renderer features on the handheld target.
+# FemtoVG over EGL is the sole renderer, matching the handheld graphics stack
+# and the renderer used by the planned layer-shika integration. Do not enable
+# Skia, Vulkan, or WGPU renderers.
 slint = { version = "1.17.1", default-features = false, features = [
     "std",
     "backend-winit",
-    "renderer-skia-opengl",
+    "renderer-femtovg",
     "accessibility",
     "compat-1-2",
     "log",

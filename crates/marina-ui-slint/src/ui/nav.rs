@@ -253,6 +253,7 @@ pub(crate) fn back(window: &MainWindow) {
         ShellPage::GameDetails => {
             let fallback = active_tab_root(&shell);
             let target = with_stack_result(|stack| stack.last().cloned()).unwrap_or(fallback);
+            unload_game_details(window);
             restore(window, &target);
         }
         ShellPage::Library if window.global::<LibraryState>().get_page() == 1 => {
@@ -289,19 +290,51 @@ fn active_tab_root(shell: &ShellState) -> Crumb {
     }
 }
 
+/// Releases the full game record and decoded artwork when details are hidden.
+fn unload_game_details(window: &MainWindow) {
+    let game = window.global::<GameState>();
+    game.set_selected_game(crate::empty_game_card());
+    game.set_details(crate::empty_preview_details());
+    game.set_tags(crate::string_model(Vec::new()));
+    game.set_details_loading(false);
+}
+
+/// Ends active Home work while preserving its bounded visible-cover cache.
+pub(crate) fn leave_home(window: &MainWindow) {
+    let home = window.global::<HomeState>();
+    home.invoke_exited();
+    // This callback owns the viewport loader in Rust. A non-Home context
+    // suspends background work without rebuilding the visible-cover cache.
+    home.invoke_cover_context_changed(-1);
+}
+
 /// Tab jumps shared by header navigation (records) and restores (replays).
 /// Tabs always land on their root: sub-pages reset so the trail and the
 /// visible view can never disagree.
 pub(crate) fn goto_tab(window: &MainWindow, index: i32) {
     let shell = window.global::<ShellState>();
+    if shell.get_page() == ShellPage::GameDetails {
+        unload_game_details(window);
+    }
+    let home = window.global::<HomeState>();
+    let left_home = shell.get_active_tab() == 0 && index != 0;
+    if left_home {
+        leave_home(window);
+    }
+    let store = window.global::<StoreState>();
+    if shell.get_page() == ShellPage::Store && (index != 2 || store.get_page() != 0) {
+        // Store catalogs and decoded previews are deliberately scoped to the
+        // selected platform. Release them when returning to the Store root or
+        // switching tabs instead of retaining them in the global StoreState.
+        store.invoke_platform_exited();
+    }
     shell.set_active_tab(index);
     window.global::<LibraryState>().set_page(0);
-    window.global::<StoreState>().set_page(0);
+    store.set_page(0);
     match index {
         0 => {
             shell.set_page(ShellPage::Home);
-            let home = window.global::<HomeState>();
-            home.set_loading(true);
+            home.set_loading(home.get_games().row_count() == 0);
             home.invoke_entered();
         }
         1 => {
@@ -313,9 +346,9 @@ pub(crate) fn goto_tab(window: &MainWindow, index: i32) {
             window.global::<StoreState>().invoke_entered();
         }
     }
-    window
-        .global::<HomeState>()
-        .invoke_cover_context_changed(index);
+    if !left_home {
+        home.invoke_cover_context_changed(index);
+    }
     window.invoke_focus_navigation();
 }
 

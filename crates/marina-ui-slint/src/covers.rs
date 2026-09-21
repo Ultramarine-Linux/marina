@@ -21,6 +21,10 @@ use crate::{GameCardData, HomeState, MainWindow, image as image_loader};
 
 pub use crate::image::ImageSource as CoverSource;
 
+// Handheld memory is more constrained than storage latency. Do not retain
+// decoded neighbors once they leave the visible horizontal viewport.
+const COVER_PREFETCH_ITEMS: usize = 0;
+
 pub fn source_for(
     source: Option<&str>,
     local_path: Option<&str>,
@@ -59,12 +63,14 @@ pub struct ViewportLoader {
     played_sources: Arc<Mutex<Vec<CoverSource>>>,
     loading: Arc<Mutex<HashSet<(u64, Page, Shelf, usize)>>>,
     resident: Arc<Mutex<HashSet<(Page, Shelf, usize)>>>,
+    wanted: Arc<Mutex<HashSet<(Page, Shelf, usize)>>>,
     /// Indexes whose load failed — or had no source at all — in this
     /// generation. Consulted alongside `resident` so failures are not
     /// retried on every viewport update (notably every scroll frame, when
     /// `update` runs per frame and each attempt spawns a doomed task).
     /// Cleared by `reset()`, so replaced sources get a fresh attempt.
     failed: Arc<Mutex<HashSet<(u64, Page, Shelf, usize)>>>,
+    tasks: Arc<Mutex<HashMap<(u64, Page, Shelf, usize), tokio::task::AbortHandle>>>,
     visible: Arc<Mutex<HashMap<(Page, Shelf), f32>>>,
     generation: Arc<AtomicU64>,
     last_viewport: HashMap<Shelf, (f32, f32, f32)>,
@@ -78,7 +84,9 @@ impl ViewportLoader {
             played_sources: Arc::new(Mutex::new(Vec::new())),
             loading: Arc::new(Mutex::new(HashSet::new())),
             resident: Arc::new(Mutex::new(HashSet::new())),
+            wanted: Arc::new(Mutex::new(HashSet::new())),
             failed: Arc::new(Mutex::new(HashSet::new())),
+            tasks: Arc::new(Mutex::new(HashMap::new())),
             visible: Arc::new(Mutex::new(HashMap::new())),
             generation: Arc::new(AtomicU64::new(0)),
             last_viewport: HashMap::new(),
@@ -101,20 +109,35 @@ impl ViewportLoader {
         }
     }
 
-    pub fn reset(&mut self) {
+    fn cancel_pending(&mut self) {
         self.generation.fetch_add(1, Ordering::Relaxed);
+        let tasks = std::mem::take(&mut *self.tasks.lock().expect("cover task state poisoned"));
+        for task in tasks.into_values() {
+            task.abort();
+        }
         self.loading
             .lock()
             .expect("cover loading state poisoned")
             .clear();
-        self.resident
+        self.wanted
             .lock()
-            .expect("cover resident state poisoned")
+            .expect("cover wanted state poisoned")
             .clear();
         self.failed
             .lock()
             .expect("cover failed state poisoned")
             .clear();
+    }
+
+    /// Cancels hidden-page work while retaining the bounded set of already
+    /// visible images. Re-entry reuses these image identities and avoids
+    /// repeatedly warming renderer caches.
+    pub fn suspend(&mut self, page: Page) {
+        self.cancel_pending();
+        self.visible
+            .lock()
+            .expect("cover visibility state poisoned")
+            .retain(|(key_page, _), _| *key_page != page);
     }
 
     pub fn refresh(&mut self, page: Page) {
@@ -188,7 +211,7 @@ impl ViewportLoader {
             .clone();
         let scroll_x = (-scroll_x).max(0.0);
         let cover_height = cover_height.max(1.0);
-        let prefetch = 2usize;
+        let prefetch = COVER_PREFETCH_ITEMS;
         let mut cursor = 4.0_f32;
         let end = scroll_x + viewport_width;
         let mut first = None;
@@ -210,6 +233,13 @@ impl ViewportLoader {
             .map(|index| (index + prefetch + 1).min(sources.len()))
             .unwrap_or(0);
         let wanted = (first..last).collect::<HashSet<_>>();
+        {
+            let mut wanted_state = self.wanted.lock().expect("cover wanted state poisoned");
+            wanted_state.retain(|(wanted_page, wanted_shelf, _)| {
+                *wanted_page != page || *wanted_shelf != shelf
+            });
+            wanted_state.extend(wanted.iter().map(|index| (page, shelf, *index)));
+        }
         let generation = self.generation.load(Ordering::Relaxed);
         trace!(
             ?page,
@@ -233,25 +263,52 @@ impl ViewportLoader {
         let failed = self.failed.clone();
         for index in 0..games.row_count() {
             if !wanted.contains(&index) {
-                let was_resident = resident
+                let key = (generation, key_page, key_shelf, index);
+                if let Some(task) = self
+                    .tasks
+                    .lock()
+                    .expect("cover task state poisoned")
+                    .remove(&key)
+                {
+                    task.abort();
+                }
+                loading
+                    .lock()
+                    .expect("cover loading state poisoned")
+                    .remove(&key);
+                resident
                     .lock()
                     .expect("cover resident state poisoned")
                     .remove(&(key_page, key_shelf, index));
-                if was_resident {
-                    if let Some(mut game) = games.row_data(index) {
-                        game.cover = Image::default();
-                        game.cover_ratio = 1.0;
-                        games.set_row_data(index, game);
-                    }
+                // The Slint model owns the Image. Clear it regardless of our
+                // bookkeeping so its pixel buffer drops as soon as no other
+                // visible component references it.
+                if let Some(mut game) = games.row_data(index)
+                    && game.cover.size().width > 0
+                {
+                    game.cover = Image::default();
+                    game.cover_ratio = 1.0;
+                    games.set_row_data(index, game);
                 }
             }
         }
         for index in wanted {
             let key = (generation, key_page, key_shelf, index);
-            if resident
-                .lock()
-                .expect("cover resident state poisoned")
-                .contains(&(key_page, key_shelf, index))
+            let resident_key = (key_page, key_shelf, index);
+            let has_image = games
+                .row_data(index)
+                .is_some_and(|game| game.cover.size().width > 0);
+            if !has_image {
+                resident
+                    .lock()
+                    .expect("cover resident state poisoned")
+                    .remove(&resident_key);
+            }
+            if (has_image
+                && resident
+                    .lock()
+                    .expect("cover resident state poisoned")
+                    .contains(&resident_key))
                 || failed
                     .lock()
                     .expect("cover failed state poisoned")
@@ -307,18 +364,24 @@ impl ViewportLoader {
             let resident = resident.clone();
             let loading = loading.clone();
             let failed = failed.clone();
-            tokio::spawn(async move {
+            let wanted_state = self.wanted.clone();
+            let task_registry = self.tasks.clone();
+            let task = tokio::spawn(async move {
                 let decoded = image_loader::load_scaled(
                     &image_loader::ImageSource::from(&source),
                     "shelf-cover",
                     256,
                 )
                 .await;
-                loading
+                task_registry
                     .lock()
-                    .expect("cover loading state poisoned")
+                    .expect("cover task state poisoned")
                     .remove(&(generation, key_page, key_shelf, index));
                 if generation_state.load(Ordering::Relaxed) != generation {
+                    loading
+                        .lock()
+                        .expect("cover loading state poisoned")
+                        .remove(&(generation, key_page, key_shelf, index));
                     debug!(?key_page, ?key_shelf, index, %title, generation, "discarding stale cover result");
                     return;
                 }
@@ -329,10 +392,18 @@ impl ViewportLoader {
                     .copied()
                     .unwrap_or(0.0);
                 if visible_now <= 0.0 {
+                    loading
+                        .lock()
+                        .expect("cover loading state poisoned")
+                        .remove(&(generation, key_page, key_shelf, index));
                     debug!(?key_page, ?key_shelf, index, %title, "discarding cover for hidden shelf");
                     return;
                 }
                 let Some(decoded) = decoded else {
+                    loading
+                        .lock()
+                        .expect("cover loading state poisoned")
+                        .remove(&(generation, key_page, key_shelf, index));
                     failed
                         .lock()
                         .expect("cover failed state poisoned")
@@ -341,7 +412,20 @@ impl ViewportLoader {
                     return;
                 };
                 debug!(?key_page, ?key_shelf, index, %title, width = decoded.width, height = decoded.height, "cover decoded");
-                let _ = window.upgrade_in_event_loop(move |window| {
+                let ui_loading = loading.clone();
+                let queued = window.upgrade_in_event_loop(move |window| {
+                    ui_loading
+                        .lock()
+                        .expect("cover loading state poisoned")
+                        .remove(&(generation, key_page, key_shelf, index));
+                    if generation_state.load(Ordering::Relaxed) != generation
+                        || !wanted_state
+                            .lock()
+                            .expect("cover wanted state poisoned")
+                            .contains(&(key_page, key_shelf, index))
+                    {
+                        return;
+                    }
                     if let Some(mut game) = page_games(&window, key_page, key_shelf).row_data(index) {
                         let (image, ratio) = image_loader::into_slint_image(decoded);
                         resident
@@ -356,18 +440,40 @@ impl ViewportLoader {
                         warn!(?key_page, ?key_shelf, index, %title, "cover row missing when applying image");
                     }
                 });
+                if queued.is_err() {
+                    loading
+                        .lock()
+                        .expect("cover loading state poisoned")
+                        .remove(&(generation, key_page, key_shelf, index));
+                }
             });
+            self.tasks
+                .lock()
+                .expect("cover task state poisoned")
+                .insert(key, task.abort_handle());
         }
     }
 
-    /// Drops every resident cover of one shelf and cancels its pending loads.
-    /// In-flight decodes still finish but discard their result via the
-    /// visibility check above.
+    /// Drops every resident cover of one shelf and aborts pending loads. A
+    /// blocking decode that already started may finish, but its result is
+    /// discarded by the generation and visibility guards.
     fn evict_shelf(&self, page: Page, shelf: Shelf) {
         let Some(window) = self.window.upgrade() else {
             return;
         };
         let games = page_games(&window, page, shelf);
+        let mut tasks = self.tasks.lock().expect("cover task state poisoned");
+        let stale_keys = tasks
+            .keys()
+            .filter(|(_, key_page, key_shelf, _)| *key_page == page && *key_shelf == shelf)
+            .copied()
+            .collect::<Vec<_>>();
+        for key in stale_keys {
+            if let Some(task) = tasks.remove(&key) {
+                task.abort();
+            }
+        }
+        drop(tasks);
         self.loading
             .lock()
             .expect("cover loading state poisoned")
@@ -375,6 +481,10 @@ impl ViewportLoader {
         self.resident
             .lock()
             .expect("cover resident state poisoned")
+            .retain(|(key_page, key_shelf, _)| *key_page != page || *key_shelf != shelf);
+        self.wanted
+            .lock()
+            .expect("cover wanted state poisoned")
             .retain(|(key_page, key_shelf, _)| *key_page != page || *key_shelf != shelf);
         for index in 0..games.row_count() {
             if let Some(mut game) = games.row_data(index) {

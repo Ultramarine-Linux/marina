@@ -122,6 +122,41 @@ impl StoreCache {
             .collect()
     }
 
+    /// Reads lightweight browse rows without materializing cached backend
+    /// payloads. Use [`Self::get`] when one selected entry needs hydration.
+    pub fn browse_cards(
+        &self,
+        platform_slug: Option<&str>,
+        search: Option<&str>,
+        limit: usize,
+        offset: usize,
+    ) -> Result<Vec<StoreEntry>, rusqlite::Error> {
+        let conn = self.conn.lock().unwrap();
+        let mut statement = conn.prepare(
+            "SELECT entry_id, title, platform_slug, platform_name
+             FROM store_entries
+             WHERE (?1 IS NULL OR platform_slug=?1)
+               AND (?2 IS NULL OR lower(title) LIKE '%'||lower(?2)||'%')
+             ORDER BY title, entry_id LIMIT ?3 OFFSET ?4",
+        )?;
+        let backend_id = &self.backend_id;
+        statement
+            .query_map(
+                params![platform_slug, search, limit as i64, offset as i64],
+                |row| {
+                    Ok(StoreEntry {
+                        backend_id: backend_id.clone(),
+                        entry_id: row.get(0)?,
+                        title: row.get(1)?,
+                        platform_slug: row.get(2)?,
+                        platform_name: row.get(3)?,
+                        payload_json: None,
+                    })
+                },
+            )?
+            .collect()
+    }
+
     pub fn get(&self, entry_id: &str) -> Result<Option<StoreEntry>, rusqlite::Error> {
         let conn = self.conn.lock().unwrap();
         let mut statement = conn.prepare(
@@ -212,6 +247,10 @@ mod tests {
         let page = cache.browse(Some("snes"), None, 10, 0).unwrap();
         assert_eq!(page.len(), 1);
         assert_eq!(page[0].title, "Zelda");
+        let cards = cache.browse_cards(Some("snes"), None, 10, 0).unwrap();
+        assert_eq!(cards.len(), 1);
+        assert_eq!(cards[0].title, "Zelda");
+        assert!(cards[0].payload_json.is_none());
         assert!(cache.get("1").unwrap().is_some());
     }
 

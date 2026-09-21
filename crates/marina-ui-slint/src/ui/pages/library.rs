@@ -26,11 +26,9 @@ use crate::{
 pub(crate) fn install(
     window: &MainWindow,
     library_state: &Arc<Mutex<Option<app::AppStateHandle>>>,
-    source_store: &Arc<Mutex<Vec<CoverSource>>>,
 ) {
     let detail_state = library_state.clone();
     let detail_window = window.as_weak();
-    let source_store = source_store.clone();
 
     window
         .global::<LibraryState>()
@@ -50,6 +48,16 @@ pub(crate) fn install(
             // Clear the pane first: the previous game's details must not
             // linger while the new fetch is in flight.
             let _ = window.upgrade_in_event_loop(|window| {
+                let games = window.global::<LibraryState>().get_games();
+                for index in 0..games.row_count() {
+                    if let Some(mut game) = games.row_data(index)
+                        && game.cover.size().width > 0
+                    {
+                        game.cover = slint::Image::default();
+                        game.cover_ratio = 1.0;
+                        games.set_row_data(index, game);
+                    }
+                }
                 window
                     .global::<GameState>()
                     .set_details(crate::empty_preview_details());
@@ -77,7 +85,13 @@ pub(crate) fn install(
                         debug!(game_id = %id, ?cover_path, assets = item.assets.len(), "library preview item loaded");
                         let decoded = if let Some(path) = cover_path {
                             let source = covers::source_for(None, Some(&path), None);
-                            match image::load(&image::ImageSource::from(&source), "library-preview").await {
+                            match image::load_scaled(
+                                &image::ImageSource::from(&source),
+                                "library-preview",
+                                image::PREVIEW_MAX_DIMENSION,
+                            )
+                            .await
+                            {
                                 Some(decoded) => Some(decoded),
                                 None => {
                                     warn!(game_id = %id, %path, "library preview cover produced no bytes");
@@ -201,6 +215,7 @@ pub(crate) fn install(
         // until the callback has unwound.
         let route_window = window.as_weak();
         let _ = route_window.upgrade_in_event_loop(|window| {
+            crate::ui::nav::leave_home(&window);
             window
                 .global::<ShellState>()
                 .set_page(ShellPage::GameDetails);
@@ -238,8 +253,12 @@ pub(crate) fn install(
                         .map(|(_, path)| path);
                     let detail_image = if let Some(path) = detail_cover {
                         let source = covers::source_for(None, Some(&path), None);
-                        match image::load(&image::ImageSource::from(&source), "library-detail")
-                            .await
+                        match image::load_scaled(
+                            &image::ImageSource::from(&source),
+                            "library-detail",
+                            image::PREVIEW_MAX_DIMENSION,
+                        )
+                        .await
                         {
                             Some(decoded) => Some(decoded),
                             None => None,
@@ -285,9 +304,9 @@ pub(crate) fn install(
     let query_state = library_state.clone();
 
     let query_window = window.as_weak();
-    window.global::<LibraryState>().on_platform_query({
-        let source_store = source_store.clone();
-        move |platform_slug| {
+    window
+        .global::<LibraryState>()
+        .on_platform_query(move |platform_slug| {
             if let Some(window) = query_window.upgrade() {
                 crate::ui::nav::drill_library(&window, platform_slug.as_str());
             }
@@ -300,7 +319,6 @@ pub(crate) fn install(
             };
             let base_url = state.config.romm_url.clone();
             let window = query_window.clone();
-            let source_store = source_store.clone();
             tokio::spawn(async move {
                 let loaded = load_platform_games(
                     &state.library,
@@ -308,7 +326,7 @@ pub(crate) fn install(
                     platform_slug.as_str(),
                 )
                 .await;
-                let (metadata, cover_sources) = match loaded {
+                let (metadata, _) = match loaded {
                     Ok(loaded) => loaded,
                     Err(error) => {
                         error!(%error, platform = %platform_slug, "platform games loading failed");
@@ -318,7 +336,6 @@ pub(crate) fn install(
                         return;
                     }
                 };
-                *source_store.lock().expect("cover source state poisoned") = cover_sources;
                 let _ = window.upgrade_in_event_loop(move |window| {
                     let model = window.global::<LibraryState>().get_games();
                     let model = model
@@ -338,8 +355,7 @@ pub(crate) fn install(
                     }
                 });
             });
-        }
-    });
+        });
 
     let library_refresh_state = library_state.clone();
     let library_refresh_window = window.as_weak();
