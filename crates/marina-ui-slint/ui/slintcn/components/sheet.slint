@@ -27,6 +27,10 @@ export component Sheet inherits Rectangle {
     in property <bool>   dismiss-on-backdrop: true;
     // Cross-axis dimension of the panel: width for left/right, height for top/bottom.
     in property <length> panel-extent: 360px;
+    // Reduces panel/header padding for dense, list-oriented sheets.
+    in property <bool> compact: false;
+    // Disable when sheet content owns a more specific initial focus target.
+    in property <bool> auto-focus: true;
     // Fired when the sheet closes for any reason.
     callback dismissed();
 
@@ -43,7 +47,7 @@ export component Sheet inherits Rectangle {
         interval: 50ms;
         triggered => {
             self.stop();
-            if (root.open) { root.focus(); }
+            if (root.open && root.auto-focus) { root.focus(); }
         }
     }
 
@@ -66,6 +70,7 @@ export component Sheet inherits Rectangle {
     panel := SheetPanel {
         title: root.title;
         description: root.description;
+        compact: root.compact;
 
         width:  root.is-horizontal ? root.panel-extent : root.width;
         height: root.is-horizontal ? root.height       : root.panel-extent;

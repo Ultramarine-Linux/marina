@@ -384,8 +384,10 @@ export component StorePage inherits Rectangle {
         open <=> root.artifact-sheet-open;
         side: SheetSide.right;
         panel-extent: 440px;
-        title: "Download artifacts";
-        description: root.games[root.selected-game-index].title;
+        compact: true;
+        auto-focus: false;
+        title: "Download Artifacts";
+        description: "";
         dismiss-on-backdrop: root.install-status == "";
         artifact-nav := FocusScope {
             width: 0px;
@@ -399,24 +401,24 @@ export component StorePage inherits Rectangle {
                 // button past the end, so focus never leaves this scope:
                 // arrows move, Accept activates, Esc closes.
                 if (event.text == Key.PageUp) {
-                    sheet-body.row-cursor = max(0, sheet-body.row-cursor - max(1, Math.floor(sheet-body.list-height / 64px)));
+                    sheet-body.row-cursor = max(0, sheet-body.row-cursor - max(1, Math.floor(sheet-body.list-height / sheet-body.artifact-row-height)));
                     sheet-body.sync-file-index();
-                    sheet-body.list-scroll = min(0px, -sheet-body.row-cursor * 64px);
+                    sheet-body.list-scroll = min(0px, -sheet-body.row-cursor * sheet-body.artifact-row-height);
                     return accept;
                 }
                 if (event.text == Key.PageDown) {
-                    sheet-body.row-cursor = min(root.artifacts.length, sheet-body.row-cursor + max(1, Math.floor(sheet-body.list-height / 64px)));
+                    sheet-body.row-cursor = min(root.artifacts.length, sheet-body.row-cursor + max(1, Math.floor(sheet-body.list-height / sheet-body.artifact-row-height)));
                     sheet-body.sync-file-index();
                     if (sheet-body.row-cursor < root.artifacts.length) {
-                        sheet-body.list-scroll = min(0px, sheet-body.list-height - (sheet-body.row-cursor + 1) * 64px);
+                        sheet-body.list-scroll = min(0px, sheet-body.list-height - (sheet-body.row-cursor + 1) * sheet-body.artifact-row-height);
                     }
                     return accept;
                 }
                 if (event.text == Key.UpArrow) {
                     sheet-body.row-cursor = max(0, sheet-body.row-cursor - 1);
                     sheet-body.sync-file-index();
-                    if (sheet-body.row-cursor * 64px < -sheet-body.list-scroll) {
-                        sheet-body.list-scroll = -sheet-body.row-cursor * 64px;
+                    if (sheet-body.row-cursor * sheet-body.artifact-row-height < -sheet-body.list-scroll) {
+                        sheet-body.list-scroll = -sheet-body.row-cursor * sheet-body.artifact-row-height;
                     }
                     return accept;
                 }
@@ -425,8 +427,8 @@ export component StorePage inherits Rectangle {
                     sheet-body.sync-file-index();
                     // The Download button sits below the list and needs no
                     // scrolling; moving onto it must not shift rows.
-                    if (sheet-body.row-cursor < root.artifacts.length && sheet-body.list-height > 0px && (sheet-body.row-cursor + 1) * 64px > -sheet-body.list-scroll + sheet-body.list-height) {
-                        sheet-body.list-scroll = sheet-body.list-height - (sheet-body.row-cursor + 1) * 64px;
+                    if (sheet-body.row-cursor < root.artifacts.length && sheet-body.list-height > 0px && (sheet-body.row-cursor + 1) * sheet-body.artifact-row-height > -sheet-body.list-scroll + sheet-body.list-height) {
+                        sheet-body.list-scroll = sheet-body.list-height - (sheet-body.row-cursor + 1) * sheet-body.artifact-row-height;
                     }
                     return accept;
                 }
@@ -455,18 +457,20 @@ export component StorePage inherits Rectangle {
         }
         sheet-body := VerticalLayout {
             vertical-stretch: 1;
-            padding: Tokens.spacing-lg;
-            spacing: Tokens.spacing-md;
+            padding-left: Tokens.spacing-lg;
+            padding-right: Tokens.spacing-lg;
+            spacing: Tokens.spacing-sm;
             // Row cursor over every list row; == artifacts.length means the
-            // Download button below. Rows are a uniform 64px so offsets are
-            // exact without prefix sums.
+            // Download button below. Uniform rows keep offsets exact without
+            // needing prefix sums.
             property <int> row-cursor: 0;
+            property <length> artifact-row-height: 40px;
             property <length> list-scroll: 0px;
             // Reported by the list itself: elements inside conditionals
             // aren't referenceable from outside them.
             property <length> list-height: 0px;
 
-            function row-top(row: int) -> length { return row * 64px; }
+            function row-top(row: int) -> length { return row * self.artifact-row-height; }
 
             function sync-file-index() {
                 if (row-cursor < root.artifacts.length && !root.artifacts[row-cursor].is-directory) {
@@ -500,7 +504,7 @@ export component StorePage inherits Rectangle {
                     changed height => { sheet-body.list-height = self.height; }
                     for artifact[i] in root.artifacts: Rectangle {
                         width: parent.width;
-                        height: 64px;
+                        height: sheet-body.artifact-row-height;
                         border-radius: Tokens.radius-sm;
                         border-width: artifact-nav.has-focus && i == sheet-body.row-cursor ? Tokens.focus-ring-width : 0px;
                         border-color: Tokens.color-ring-muted;
@@ -531,40 +535,43 @@ export component StorePage inherits Rectangle {
                             HorizontalLayout {
                                 padding-left: Tokens.spacing-md + artifact.depth * Tokens.spacing-lg;
                                 padding-right: Tokens.spacing-md;
-                                padding-top: Tokens.spacing-md;
-                                padding-bottom: Tokens.spacing-md;
-                                spacing: Tokens.spacing-md;
-                                Checkbox {
+                                spacing: Tokens.spacing-sm;
+                                alignment: start;
+                                Rectangle {
                                     width: 16px;
-                                    height: 20px;
-                                    checked: root.selected-artifacts[artifact.file-index];
-                                    toggled(value) => {
-                                        root.selected-artifacts[artifact.file-index] = value;
-                                        root.selected-artifact-index = artifact.file-index;
-                                        root.artifact-selected(artifact.file-index);
+                                    vertical-stretch: 1;
+                                    artifact-checkbox := Checkbox {
+                                        y: (parent.height - self.height) / 2;
+                                        width: 16px;
+                                        height: 20px;
+                                        checked: root.selected-artifacts[artifact.file-index];
+                                        focus-on-click: false;
+                                        toggled(value) => {
+                                            sheet-body.row-cursor = i;
+                                            root.selected-artifacts[artifact.file-index] = value;
+                                            root.selected-artifact-index = artifact.file-index;
+                                            root.artifact-selected(artifact.file-index);
+                                            artifact-nav.focus();
+                                        }
                                     }
                                 }
-
-                                VerticalLayout {
+                                Typography {
                                     horizontal-stretch: 1;
-                                    spacing: Tokens.spacing-xs;
-                                    Typography {
-                                        height: 16px;
-                                        text: artifact.path;
-                                        variant: TextVariant.body-sm;
-                                        font-family: "monospace";
-                                        vertical-alignment: center;
-                                        overflow: elide;
-                                    }
-                                    Typography {
-                                        height: 12px;
-                                        text: artifact.size;
-                                        variant: TextVariant.caption;
-                                        tone: TextTone.muted;
-                                        font-family: "monospace";
-                                        vertical-alignment: center;
-                                        overflow: elide;
-                                    }
+                                    text: artifact.path;
+                                    variant: TextVariant.body-sm;
+                                    font-family: "monospace";
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                }
+                                Typography {
+                                    width: 72px;
+                                    text: artifact.size;
+                                    variant: TextVariant.caption;
+                                    tone: TextTone.muted;
+                                    font-family: "monospace";
+                                    horizontal-alignment: right;
+                                    vertical-alignment: center;
+                                    overflow: elide;
                                 }
                             }
                         }
@@ -577,6 +584,7 @@ export component StorePage inherits Rectangle {
                 x: (parent.width - self.width) / 2;
                 dl-btn := Button {
                     text: "Download selected";
+                    size: ButtonSize.sm;
                     clicked => { root.download-selected(); }
                 }
                 if artifact-nav.has-focus && sheet-body.row-cursor >= root.artifacts.length: FocusRing {

@@ -10,6 +10,8 @@ export component Checkbox {
     in property <string> label;
     // When true, the checkbox dims and stops responding.
     in property <bool> disabled: false;
+    // Disable when a composite parent owns keyboard/controller focus.
+    in property <bool> focus-on-click: true;
     // Fired with the new `checked` value when the user toggles.
     callback toggled(bool);
     // True while focus arrived from a pointer press — suppresses the ring so it
@@ -97,7 +99,9 @@ export component Checkbox {
             if (!root.disabled) {
                 root.checked = !root.checked;
                 root.toggled(root.checked);
-                focus-scope.focus();
+                if (root.focus-on-click) {
+                    focus-scope.focus();
+                }
             }
         }
     }
