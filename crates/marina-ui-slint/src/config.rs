@@ -764,6 +764,67 @@ backend = "native"
     }
 
     #[test]
+    fn runtime_config_reload_observes_core_file_edits() {
+        let _guard = ENV_LOCK.lock().unwrap();
+        const TOUCHED: &[&str] = &[
+            "MARINA_CONFIG",
+            "MARINA_RETROARCH_BINARY",
+            "MARINA_RETROARCH_CORES_DIR",
+        ];
+        let stashed = TOUCHED
+            .iter()
+            .map(|var| ((*var).to_owned(), env::var_os(var)))
+            .collect::<Vec<_>>();
+        let dir = std::env::temp_dir().join(format!(
+            "marina-config-reload-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let path = dir.join("config.toml");
+        std::fs::create_dir_all(&dir).unwrap();
+        unsafe {
+            for var in TOUCHED {
+                env::remove_var(var);
+            }
+            env::set_var("MARINA_CONFIG", &path);
+        }
+
+        std::fs::write(
+            &path,
+            "[platform.\"snes\".retroarch]\ncore = \"snes9x_libretro.so\"\n",
+        )
+        .unwrap();
+        let initial = Config::from_env();
+        assert_eq!(
+            initial.platforms["snes"].retroarch.core.as_deref(),
+            Some(std::path::Path::new("snes9x_libretro.so"))
+        );
+
+        std::fs::write(
+            &path,
+            "[platform.\"snes\".retroarch]\ncore = \"bsnes_libretro.so\"\n",
+        )
+        .unwrap();
+        let reloaded = Config::from_env();
+        assert_eq!(
+            reloaded.platforms["snes"].retroarch.core.as_deref(),
+            Some(std::path::Path::new("bsnes_libretro.so"))
+        );
+
+        std::fs::remove_dir_all(&dir).ok();
+        unsafe {
+            for (var, value) in stashed {
+                match value {
+                    Some(value) => env::set_var(var, value),
+                    None => env::remove_var(var),
+                }
+            }
+        }
+    }
+
+    #[test]
     fn retroarch_env_overrides_merge_over_file() {
         let figment = Figment::new()
             .merge(Toml::string(

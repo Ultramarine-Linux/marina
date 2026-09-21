@@ -9,7 +9,7 @@ use slint::ComponentHandle;
 use tracing::{error, info, warn};
 
 use crate::ui::pages::home;
-use crate::{GameState, MainWindow, app};
+use crate::{GameState, MainWindow, app, config::Config};
 
 pub(crate) fn install(
     window: &MainWindow,
@@ -38,11 +38,14 @@ pub(crate) fn install(
         let played_sources = played_sources.clone();
         let played_window = played_window.clone();
         tokio::spawn(async move {
-            // The launcher is built per launch so platform/core config edits
-            // take effect without restarting the shell.
+            // Reload only the launcher's inputs at the launch boundary. The
+            // AppState config is a startup snapshot used by long-lived
+            // services, but platform/core edits must not require restarting
+            // the shell.
+            let launch_config = Config::from_env();
             let game_launcher = GameLauncher::new()
-                .with_retroarch_config(state.config.retroarch.clone())
-                .with_platform_configs(state.config.platforms.clone());
+                .with_retroarch_config(launch_config.retroarch)
+                .with_platform_configs(launch_config.platforms);
             match state.library.get(&item_id).await {
                 Ok(Some(item)) => match game_launcher.launch_item(&item).await {
                     Ok(launched) => {
