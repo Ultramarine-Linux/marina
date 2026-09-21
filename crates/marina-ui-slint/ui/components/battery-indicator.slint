@@ -9,8 +9,8 @@ import { IconSet } from "@lucide/lucide.slint";
 //
 // The root is an explicit-height container box: it matches the top-bar
 // control density so the row centers as one unit, and its width follows
-// the content. Items use tight spacing so the glyph, label, and charging
-// bolt read as a single cluster.
+// the content. Items use tight spacing so the glyph and label read as a
+// single cluster; while charging, the bolt is overlaid inside the battery.
 export component BatteryIndicator inherits Rectangle {
     in property <float> percentage: 100;
     in property <bool> charging: false;
@@ -88,6 +88,14 @@ export component BatteryIndicator inherits Rectangle {
                             easing: Tokens.motion-easing-standard;
                         }
                     }
+
+                    if root.charging: LucideIcon {
+                        x: (parent.width - self.width) / 2;
+                        y: (parent.height - self.height) / 2;
+                        icon: IconSet.Zap;
+                        size: 10px;
+                        tint: Tokens.color-foreground;
+                    }
                 }
 
                 Rectangle {
@@ -106,11 +114,5 @@ export component BatteryIndicator inherits Rectangle {
             }
         }
 
-        if root.charging: bolt := LucideIcon {
-            icon: IconSet.Zap;
-            size: 13px;
-            height: 13px;
-            tint: Tokens.color-affirm;
-        }
     }
 }
