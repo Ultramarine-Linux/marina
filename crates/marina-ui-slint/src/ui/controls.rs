@@ -4,12 +4,16 @@ use std::{cell::Cell, rc::Rc, time::Duration};
 
 use marina_input::{InputAction, InputEvent, InputEventKind};
 use slint::{
-    ComponentHandle, Model, ModelRc, VecModel,
+    ComponentHandle, Model, ModelRc, SharedString, VecModel,
     platform::{Key, WindowEvent},
 };
+use tracing::error;
 
 use crate::ui::nav;
-use crate::{MainWindow, ShellPage, ShellState, StoreState, ToastItem, ToastQueue};
+use crate::{
+    MainWindow, ProfileAction, ShellPage, ShellState, StoreState, ToastItem, ToastQueue,
+    ToastVariant,
+};
 
 const TOAST_DURATION: Duration = Duration::from_secs(4);
 const TOAST_DISMISS_ANIMATION: Duration = Duration::from_millis(250);
@@ -61,6 +65,39 @@ pub(crate) fn configure_navigation(window: &MainWindow) {
 pub(crate) fn restore_content_focus(window: &MainWindow) {
     let shell = window.global::<ShellState>();
     shell.set_content_focus_request(shell.get_content_focus_request() + 1);
+}
+
+pub(crate) fn configure_profile_menu(window: &MainWindow) {
+    let weak = window.as_weak();
+    window
+        .global::<ShellState>()
+        .on_profile_action(move |action| {
+            let Some(window) = weak.upgrade() else {
+                return;
+            };
+            match action {
+                ProfileAction::Settings => nav::open_settings(&window),
+                ProfileAction::Exit => {
+                    if let Err(error) = slint::quit_event_loop() {
+                        error!(%error, "failed to quit the event loop");
+                    }
+                }
+                ProfileAction::Shutdown => {
+                    let weak = window.as_weak();
+                    tokio::spawn(async move {
+                        if let Err(error) = marina_power::power_off().await {
+                            error!(%error, "shutdown request failed");
+                            let _ = weak.upgrade_in_event_loop(move |window| {
+                                window.global::<ToastQueue>().invoke_show(
+                                    SharedString::from("Shutdown request failed"),
+                                    ToastVariant::Error,
+                                );
+                            });
+                        }
+                    });
+                }
+            }
+        });
 }
 
 pub(crate) fn dispatch_controller_action(window: &MainWindow, event: InputEvent) {

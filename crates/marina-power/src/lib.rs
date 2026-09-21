@@ -164,6 +164,21 @@ enum SessionOutcome {
     Backoff,
 }
 
+#[zbus::proxy(
+    interface = "org.freedesktop.login1.Manager",
+    default_service = "org.freedesktop.login1",
+    default_path = "/org/freedesktop/login1"
+)]
+trait LoginManager {
+    fn power_off(&self, interactive: bool) -> zbus::Result<()>;
+}
+
+pub async fn power_off() -> Result<(), zbus::Error> {
+    let connection = zbus::Connection::system().await?;
+    let manager = LoginManagerProxy::new(&connection).await?;
+    manager.power_off(false).await
+}
+
 /// Continuously reports battery status: an immediate initial read, live
 /// updates from UPower `PropertiesChanged` / `DeviceAdded` / `DeviceRemoved`
 /// signals, and a slow poll fallback against missed signals.

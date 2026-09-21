@@ -12,6 +12,7 @@ import { StoreState } from "store.slint";
 export { ToastQueue, ToastItem, ToastVariant } from "../slintcn/components/toast.slint";
 export { ShellPage } from "route.slint";
 export { ShellState } from "../components/app-shell.slint";
+export { ProfileAction } from "../components/profile-menu.slint";
 export { HomeState } from "../components/shelf.slint";
 export { LibraryState } from "library.slint";
 export { GameState } from "../components/game-details-view.slint";
@@ -49,6 +50,7 @@ export component MainWindow inherits Window {
         clock-time: ShellState.clock-time;
         navigate(index) => { ShellState.navigate(index); }
         focus-content => { ShellState.content-focus-request += 1; }
+        profile-action(action) => { ShellState.profile-action(action); }
 
         PageRouter { }
     }

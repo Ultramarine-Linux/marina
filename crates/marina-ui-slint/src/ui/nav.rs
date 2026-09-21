@@ -25,6 +25,7 @@ const MAX_CRUMBS: usize = 25;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Crumb {
     Tab(Tab),
+    Settings,
     LibraryPlatform { slug: String, name: String },
     StorePlatform { slug: String, name: String },
 }
@@ -58,6 +59,7 @@ impl Crumb {
     fn label(&self) -> String {
         match self {
             Self::Tab(tab) => tab.label().to_owned(),
+            Self::Settings => "Settings".to_owned(),
             Self::LibraryPlatform { name, .. } | Self::StorePlatform { name, .. } => name.clone(),
         }
     }
@@ -106,6 +108,17 @@ pub(crate) fn push_tab(window: &MainWindow, index: i32) {
         stack.push(Crumb::Tab(tab));
     });
     publish(window);
+}
+
+pub(crate) fn open_settings(window: &MainWindow) {
+    push(Crumb::Settings);
+    window.global::<ShellState>().set_page(ShellPage::Settings);
+    publish(window);
+    let weak = window.as_weak();
+    let _ = weak.upgrade_in_event_loop(move |window| {
+        let shell = window.global::<ShellState>();
+        shell.set_content_focus_request(shell.get_content_focus_request() + 1);
+    });
 }
 
 /// Records drilling into a library platform. No-op during restores.
@@ -256,6 +269,11 @@ pub(crate) fn back(window: &MainWindow) {
             unload_game_details(window);
             restore(window, &target);
         }
+        ShellPage::Settings => {
+            let fallback = active_tab_root(&shell);
+            let target = pop().unwrap_or(fallback);
+            restore(window, &target);
+        }
         ShellPage::Library if window.global::<LibraryState>().get_page() == 1 => {
             let target = pop().unwrap_or(Crumb::Tab(Tab::Library));
             restore(window, &target);
@@ -355,6 +373,9 @@ pub(crate) fn goto_tab(window: &MainWindow, index: i32) {
 fn restore(window: &MainWindow, target: &Crumb) {
     match target {
         Crumb::Tab(tab) => goto_tab(window, tab.index()),
+        Crumb::Settings => {
+            window.global::<ShellState>().set_page(ShellPage::Settings);
+        }
         Crumb::LibraryPlatform { slug, .. } => restore_library_games(window, slug),
         Crumb::StorePlatform { slug, .. } => restore_store_games(window, slug),
     }

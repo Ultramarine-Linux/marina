@@ -84,6 +84,7 @@ async fn main() -> Result<(), slint::PlatformError> {
     info!("main window constructed; completing lightweight UI setup");
     ui::controls::configure_toasts(&window);
     ui::controls::configure_navigation(&window);
+    ui::controls::configure_profile_menu(&window);
 
     // Controller discovery can block inside gilrs while probing input devices.
     // Never make window creation wait for it; initialize it after the event loop
