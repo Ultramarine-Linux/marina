@@ -6,16 +6,19 @@ import { Tokens } from "../theme/tokens.slint";
 export component Skeleton inherits Rectangle {
     // Corner radius of the placeholder.
     in property <length> radius: Tokens.radius-md;
+    // Persistent placeholders (for example, games without artwork) disable
+    // pulsing so an otherwise idle screen does not continuously repaint.
+    in property <bool> animated: true;
 
     background: Tokens.color-muted;
     border-radius: root.radius;
 
     property <bool> dim: false;
-    opacity: dim ? 0.45 : 1.0;
+    opacity: root.animated && dim ? 0.45 : 1.0;
 
     pulse := Timer {
         interval: 800ms;
-        running: true;
+        running: root.animated;
         triggered => { root.dim = !root.dim; }
     }
 

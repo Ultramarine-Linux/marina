@@ -16,7 +16,15 @@ slint-build = "1.17.1"
 [dependencies]
 bytesize.workspace = true
 chrono.workspace = true
-slint = { version = "1.17.1", features = [
+# Keep the renderer set explicit: Winit uses Skia over OpenGL/OpenGL ES, and
+# Skia falls back to its software surface when GL initialization fails.
+# Do not enable the Vulkan or WGPU renderer features on the handheld target.
+slint = { version = "1.17.1", default-features = false, features = [
+    "std",
+    "backend-winit",
+    "renderer-skia-opengl",
+    "accessibility",
+    "compat-1-2",
     "log",
     "serde",
     "raw-window-handle-06",

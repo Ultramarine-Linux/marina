@@ -51,6 +51,9 @@ export component GameCard inherits Card {
         width: root.cover-width;
         height: root.cover-height;
         radius: 0px;
+        // An empty cover can mean "no artwork", not active loading. Keeping
+        // this placeholder static lets the Home screen fully idle.
+        animated: false;
     }
     if root.cover-image.width > 0: Image {
         y: 0;

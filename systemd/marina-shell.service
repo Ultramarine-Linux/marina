@@ -10,6 +10,9 @@ Type=simple
 
 # 640x360 logical pixels render at 1280x720 physical pixels.
 Environment=SLINT_SCALE_FACTOR=2.0
+# Select Skia's default surface: OpenGL/OpenGL ES first, with Skia's
+# automatic software-surface fallback when GL initialization fails.
+Environment=SLINT_BACKEND=winit-skia
 Environment=RUST_LOG=debug
 ExecStart=/opt/marina/marina-ui-slint
 Restart=on-failure
