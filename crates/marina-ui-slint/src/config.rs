@@ -62,6 +62,9 @@ struct FileConfig {
     library: LibrarySection,
     #[serde(default)]
     #[template(table)]
+    clock: ClockSection,
+    #[serde(default)]
+    #[template(table)]
     retroarch: RetroArchConfig,
     /// Per-platform backend and core selection, keyed by platform slug.
     #[serde(default)]
@@ -98,6 +101,15 @@ struct LibrarySection {
     scan_on_startup: Option<bool>,
 }
 
+/// Top-bar digital clock settings.
+#[derive(Clone, Debug, Default, Deserialize, ConfigTemplate)]
+struct ClockSection {
+    /// Use 12-hour time (`9:05 PM`) instead of 24-hour time (`21:05`).
+    #[serde(default, alias = "12hr")]
+    #[template(env = "MARINA_CLOCK_12HR", example = "false")]
+    twelve_hour: Option<bool>,
+}
+
 /// A single store backend's file configuration.
 #[derive(Clone, Debug, Default, Deserialize, ConfigTemplate)]
 pub struct RommConfig {
@@ -129,6 +141,7 @@ pub struct Config {
     pub import_romm_on_startup: bool,
     pub scan_on_startup: bool,
     pub library_root: Option<std::path::PathBuf>,
+    pub clock_twelve_hour: bool,
 
     pub retroarch: RetroArchConfig,
     pub platforms: HashMap<String, PlatformRuntimeConfig>,
@@ -170,6 +183,7 @@ impl Config {
         };
         let import_romm_on_startup = romm.import_on_startup.unwrap_or(false);
         let scan_on_startup = file.library.scan_on_startup.unwrap_or(true);
+        let clock_twelve_hour = file.clock.twelve_hour.unwrap_or(false);
         if !scan_on_startup {
             tracing::info!(
                 "local library scan disabled at startup by config or MARINA_SCAN_ON_STARTUP=false"
@@ -221,6 +235,7 @@ impl Config {
             romm_token,
             import_romm_on_startup,
             scan_on_startup,
+            clock_twelve_hour,
             library_root: file.library.root.clone().or(default_library_root),
             retroarch: file.retroarch.clone(),
             platforms: file.platform.clone(),
@@ -395,6 +410,31 @@ scan_on_startup = false
     }
 
     #[test]
+    fn parses_clock_section() {
+        let config: FileConfig = toml::from_str(
+            r#"
+[clock]
+twelve_hour = true
+"#,
+        )
+        .unwrap();
+        assert_eq!(config.clock.twelve_hour, Some(true));
+        // The shorthand `12hr` key is accepted as an alias.
+        let config: FileConfig = toml::from_str(
+            r#"
+[clock]
+12hr = true
+"#,
+        )
+        .unwrap();
+        assert_eq!(config.clock.twelve_hour, Some(true));
+
+        let figment = Figment::new().merge(Toml::string("[clock]\n12hr = true\n"));
+        assert!(Config::from_figment(figment).clock_twelve_hour);
+        assert!(!Config::from_figment(Figment::new()).clock_twelve_hour);
+    }
+
+    #[test]
     fn figment_merges_toml_base_with_key_path_overrides() {
         let figment = Figment::new()
             .merge(Toml::string(
@@ -426,7 +466,7 @@ scan_on_startup = false
     fn generated_template_parses_and_covers_every_key() {
         let template = default_config_template();
         let value: toml::Value = toml::from_str(&template).expect("template must parse as TOML");
-        for table in ["store", "library", "retroarch", "platform"] {
+        for table in ["store", "library", "clock", "retroarch", "platform"] {
             assert!(
                 value.get(table).is_some(),
                 "template is missing [{table}]:\n{template}"
@@ -453,6 +493,7 @@ scan_on_startup = false
             "storage_uri =",
             "store_cache_dir =",
             "scan_on_startup =",
+            "twelve_hour =",
             "backend =",
             "core =",
         ] {
@@ -470,6 +511,7 @@ scan_on_startup = false
             "MARINA_STORAGE_URI",
             "MARINA_STORE_CACHE_DIR",
             "MARINA_SCAN_ON_STARTUP",
+            "MARINA_CLOCK_12HR",
             "MARINA_RETROARCH_BINARY",
             "MARINA_RETROARCH_CORES_DIR",
         ] {
@@ -535,6 +577,7 @@ scan_on_startup = false
             ("store.romm.enable", "MARINA_ENABLE_ROMM", true),
             ("store.romm.url", "ROMM_URL", false),
             ("library.scan_on_startup", "MARINA_SCAN_ON_STARTUP", true),
+            ("clock.twelve_hour", "MARINA_CLOCK_12HR", true),
             ("library.root", "MARINA_LIBRARY_ROOT", false),
             ("retroarch.binary", "MARINA_RETROARCH_BINARY", false),
             ("retroarch.cores_dir", "MARINA_RETROARCH_CORES_DIR", false),
@@ -553,6 +596,7 @@ scan_on_startup = false
             "ROMM_TOKEN",
             "MARINA_IMPORT_ROMM_ON_STARTUP",
             "MARINA_SCAN_ON_STARTUP",
+            "MARINA_CLOCK_12HR",
             "MARINA_STORAGE_URI",
             "MARINA_STORE_CACHE_DIR",
             "MARINA_LIBRARY_ROOT",

@@ -5,6 +5,7 @@ import { NavigationMenu, NavigationItem } from "../slintcn/components/navigation
 import { Text as Typography } from "../slintcn/components/text.slint";
 import { TextVariant, TextTone } from "../slintcn/components/text.slint";
 import { BreadcrumbItem } from "../slintcn/components/breadcrumb.slint";
+import { BatteryIndicator } from "battery-indicator.slint";
 import { ShellPage } from "../pages/route.slint";
 
 export global ShellState {
@@ -16,6 +17,15 @@ export global ShellState {
     in-out property <string> profile-initials: "U";
     in-out property <image> profile-image;
     in-out property <int> content-focus-request: 0;
+    // UPower DisplayDevice state. `battery-available` is false when no
+    // battery is present (e.g. desktop) or UPower is unreachable; the
+    // indicator stays hidden in that case.
+    in-out property <bool> battery-available: false;
+    in-out property <float> battery-percentage: 100;
+    in-out property <bool> battery-charging: false;
+    // Local time (`HH:MM`, or 12-hour when configured) for the top-right
+    // digital clock.
+    in-out property <string> clock-time: "--:--";
     // Navigation trail; the last item is the current location.
     in-out property <[BreadcrumbItem]> breadcrumbs;
     callback navigate(int);
@@ -33,6 +43,10 @@ export component AppShell inherits Rectangle {
     in property <image> profile-image;
     in-out property <int> active-tab: 0;
     in-out property <string> search-query;
+    in property <bool> battery-available: false;
+    in property <float> battery-percentage: 100;
+    in property <bool> battery-charging: false;
+    in property <string> clock-time: "--:--";
     callback navigate(int);
     callback focus-content;
 
@@ -114,13 +128,42 @@ export component AppShell inherits Rectangle {
                         }
                     }
 
-                    // Empty spacer balancing the profile region so the
-                    // navigation stays centered.
+                    // Right region balancing the profile region so the
+                    // navigation stays centered. Hosts the battery level
+                    // view and digital clock end-aligned; the battery is
+                    // empty on devices without one.
                     Rectangle {
                         min-width: 0px;
                         preferred-width: 0px;
                         horizontal-stretch: 1;
                         height: parent.height;
+                        clip: true;
+
+                        HorizontalLayout {
+                            x: 0px;
+                            y: 0px;
+                            width: parent.width;
+                            height: parent.height;
+                            spacing: Tokens.spacing-md;
+                            alignment: end;
+
+                            if root.battery-available: BatteryIndicator {
+                                percentage: root.battery-percentage;
+                                charging: root.battery-charging;
+                            }
+
+                            // Fills the row height like the battery box above:
+                            // HorizontalLayout top-aligns children, so equal
+                            // heights are what keep both on one center line.
+                            clock_label := Typography {
+                                text: root.clock-time;
+                                height: Tokens.density-button-default;
+                                variant: TextVariant.label;
+                                tone: TextTone.muted;
+                                vertical-alignment: center;
+                                font-size: 18px;
+                            }
+                        }
                     }
                 }
             }

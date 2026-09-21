@@ -43,6 +43,10 @@ export component MainWindow inherits Window {
         profile-image: ShellState.profile-image;
         active-tab <=> ShellState.active-tab;
         search-query <=> ShellState.search-query;
+        battery-available: ShellState.battery-available;
+        battery-percentage: ShellState.battery-percentage;
+        battery-charging: ShellState.battery-charging;
+        clock-time: ShellState.clock-time;
         navigate(index) => { ShellState.navigate(index); }
         focus-content => { ShellState.content-focus-request += 1; }
 

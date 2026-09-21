@@ -127,6 +127,8 @@ async fn main() -> Result<(), slint::PlatformError> {
         }
     });
     ui::profile::initialize(&window, username.clone());
+    ui::battery::initialize(&window);
+    ui::clock::initialize(&window);
     window
         .global::<HomeState>()
         .set_games(ModelRc::from(std::rc::Rc::new(VecModel::from(Vec::new()))));
