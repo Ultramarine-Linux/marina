@@ -1,5 +1,7 @@
 //! `#[derive(ConfigTemplate)]`: renders a commented TOML template of a
 //! config struct's defaults, using `///` doc comments as documentation.
+//! `#[derive(ConfigSettings)]` flattens the same configuration tree into
+//! metadata rows suitable for a settings panel.
 //!
 //! Like clap's derive, the same annotations also wire up the runtime side:
 //! every `#[template(env = "VAR")]` field contributes a
@@ -30,6 +32,8 @@
 //! - `table`: emit a `[table]` header for a struct field;
 //! - `skip`: omit the field from the template entirely.
 
+use std::collections::HashMap;
+
 use proc_macro::TokenStream;
 use proc_macro2::Span;
 use quote::quote;
@@ -40,10 +44,19 @@ use syn::{
     parse_macro_input,
 };
 
-#[proc_macro_derive(ConfigTemplate, attributes(template))]
+#[proc_macro_derive(ConfigTemplate, attributes(template, setting))]
 pub fn derive_config_template(input: TokenStream) -> TokenStream {
     let input = parse_macro_input!(input as DeriveInput);
     match expand(&input) {
+        Ok(tokens) => tokens.into(),
+        Err(error) => error.to_compile_error().into(),
+    }
+}
+
+#[proc_macro_derive(ConfigSettings, attributes(setting, template))]
+pub fn derive_config_settings(input: TokenStream) -> TokenStream {
+    let input = parse_macro_input!(input as DeriveInput);
+    match expand_settings(&input) {
         Ok(tokens) => tokens.into(),
         Err(error) => error.to_compile_error().into(),
     }
@@ -228,6 +241,374 @@ fn is_leaf_name(name: &str) -> bool {
 
 fn is_string_like(name: &str) -> bool {
     matches!(name, "String" | "PathBuf")
+}
+
+#[derive(Default)]
+struct SettingsAttr {
+    title: Option<String>,
+    control: Option<String>,
+    sensitive: bool,
+    panel: Option<String>,
+    panel_title: Option<String>,
+    panel_order: Option<i32>,
+    section: Option<String>,
+    section_title: Option<String>,
+    section_order: Option<i32>,
+    order: Option<i32>,
+    skip: bool,
+}
+
+#[derive(Default)]
+struct SectionMeta {
+    title: Option<String>,
+    order: Option<i32>,
+}
+
+#[derive(Default)]
+struct PanelMeta {
+    title: Option<String>,
+    order: Option<i32>,
+}
+
+fn parse_settings_attr(attrs: &[Attribute]) -> syn::Result<SettingsAttr> {
+    let mut out = SettingsAttr::default();
+    for attr in attrs.iter().filter(|attr| attr.path().is_ident("setting")) {
+        let parsed: TemplateArgs = attr.parse_args_with(TemplateArgs::parse)?;
+        for arg in parsed.0 {
+            let name = arg.name.to_string();
+            match name.as_str() {
+                "title" => out.title = Some(require_value(&arg)?),
+                "control" => out.control = Some(require_value(&arg)?),
+                "sensitive" => {
+                    require_no_value(&arg)?;
+                    out.sensitive = true;
+                }
+                "panel" => out.panel = Some(require_value(&arg)?),
+                "panel_title" => out.panel_title = Some(require_value(&arg)?),
+                "panel_order" => out.panel_order = Some(parse_order(&arg)?),
+                "section" => out.section = Some(require_value(&arg)?),
+                "section_title" => out.section_title = Some(require_value(&arg)?),
+                "section_order" => out.section_order = Some(parse_order(&arg)?),
+                "order" => out.order = Some(parse_order(&arg)?),
+                "skip" | "hidden" => {
+                    require_no_value(&arg)?;
+                    out.skip = true;
+                }
+                other => {
+                    return Err(syn::Error::new_spanned(
+                        arg.name,
+                        format!("unknown setting argument `{other}`"),
+                    ));
+                }
+            }
+        }
+    }
+    Ok(out)
+}
+
+fn parse_order(arg: &TemplateArg) -> syn::Result<i32> {
+    let value = require_value(arg)?;
+    value.parse::<i32>().map_err(|_| {
+        syn::Error::new_spanned(
+            &arg.name,
+            format!("`{}` must be a signed 32-bit integer", arg.name),
+        )
+    })
+}
+
+fn human_title(name: &str) -> String {
+    let mut title = String::new();
+    for (index, ch) in name.chars().enumerate() {
+        if index == 0 {
+            title.extend(ch.to_uppercase());
+        } else if ch == '_' || ch == '-' {
+            title.push(' ');
+        } else {
+            title.push(ch);
+        }
+    }
+    title
+}
+
+fn setting_env_tokens(attr: &FieldAttr, ident: &Ident) -> proc_macro2::TokenStream {
+    match attr.env.as_deref() {
+        Some(value) => {
+            let value = LitStr::new(value, ident.span());
+            quote! { Some(#value) }
+        }
+        None => quote! { None },
+    }
+}
+
+fn setting_control(name: &str) -> &'static str {
+    match name {
+        "bool" => "toggle",
+        "String" | "PathBuf" => "text",
+        "i8" | "i16" | "i32" | "i64" | "i128" | "isize" | "u8" | "u16" | "u32" | "u64" | "u128"
+        | "usize" | "f32" | "f64" => "number",
+        "Vec" => "list",
+        "HashMap" => "map",
+        _ => "text",
+    }
+}
+
+fn settings_type(ty: &Type) -> (Type, bool) {
+    match last_segment(ty).as_deref() {
+        Some("Option") => generic_type_arg(ty, 0)
+            .map(|inner| (inner, true))
+            .unwrap_or_else(|| (ty.clone(), false)),
+        _ => (ty.clone(), false),
+    }
+}
+
+fn settings_path(prefix: proc_macro2::TokenStream, key: &LitStr) -> proc_macro2::TokenStream {
+    quote! {
+        if #prefix.is_empty() {
+            String::from(#key)
+        } else {
+            format!("{}.{}", #prefix, #key)
+        }
+    }
+}
+
+fn expand_settings(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {
+    let name = &input.ident;
+    let fields = match &input.data {
+        Data::Struct(data) => match &data.fields {
+            Fields::Named(fields) => &fields.named,
+            _ => {
+                return Err(syn::Error::new_spanned(
+                    name,
+                    "ConfigSettings only supports structs with named fields",
+                ));
+            }
+        },
+        _ => {
+            return Err(syn::Error::new_spanned(
+                name,
+                "ConfigSettings can only be derived for structs",
+            ));
+        }
+    };
+
+    // Register section metadata before expanding any field so sibling fields can
+    // reference a section by id without repeating its title or order.
+    let mut section_registry = HashMap::<String, SectionMeta>::new();
+    let mut panel_registry = HashMap::<String, PanelMeta>::new();
+    for field in fields {
+        let setting = parse_settings_attr(&field.attrs)?;
+        if let Some(section) = setting.section.as_ref() {
+            let metadata = section_registry.entry(section.clone()).or_default();
+            if let Some(title) = setting.section_title {
+                metadata.title = Some(title);
+            }
+            if let Some(order) = setting.section_order {
+                metadata.order = Some(order);
+            }
+        }
+        if let Some(panel) = setting.panel.as_ref() {
+            let metadata = panel_registry.entry(panel.clone()).or_default();
+            if let Some(title) = setting.panel_title {
+                metadata.title = Some(title);
+            }
+            if let Some(order) = setting.panel_order {
+                metadata.order = Some(order);
+            }
+        }
+    }
+
+    let mut body = proc_macro2::TokenStream::new();
+    for field in fields {
+        let ident = field.ident.as_ref().expect("named fields");
+        let field_name = ident.to_string();
+        let key = LitStr::new(&field_name, ident.span());
+        let template = parse_field_attr(&field.attrs)?;
+        let setting = parse_settings_attr(&field.attrs)?;
+        if template.skip || setting.skip {
+            continue;
+        }
+        if last_segment(&field.ty).as_deref() == Some("Option")
+            && generic_type_arg(&field.ty, 0).is_none()
+        {
+            return Err(syn::Error::new_spanned(
+                &field.ty,
+                "Option fields need an explicit type argument",
+            ));
+        }
+        let (inner_ty, is_option) = settings_type(&field.ty);
+        let type_name = last_segment(&inner_ty).unwrap_or_default();
+        let docs = doc_lines(&field.attrs).join("\n");
+        let title_text = setting
+            .title
+            .as_deref()
+            .map(str::to_owned)
+            .unwrap_or_else(|| human_title(&field_name));
+        let title = LitStr::new(&title_text, ident.span());
+        let control = setting
+            .control
+            .as_deref()
+            .map(|value| LitStr::new(value, ident.span()))
+            .unwrap_or_else(|| LitStr::new(setting_control(&type_name), ident.span()));
+        let description = LitStr::new(&docs, ident.span());
+        let env = setting_env_tokens(&template, ident);
+        let panel = setting
+            .panel
+            .as_deref()
+            .map(|value| LitStr::new(value, ident.span()));
+        let registered_panel = setting
+            .panel
+            .as_ref()
+            .and_then(|panel| panel_registry.get(panel));
+        let resolved_panel_title = setting
+            .panel_title
+            .clone()
+            .or_else(|| registered_panel.and_then(|metadata| metadata.title.clone()));
+        let resolved_panel_order = setting
+            .panel_order
+            .or_else(|| registered_panel.and_then(|metadata| metadata.order));
+        let panel_tokens = match panel.as_ref() {
+            Some(value) => quote! { String::from(#value) },
+            None => quote! { __panel.to_owned() },
+        };
+        let panel_title = resolved_panel_title
+            .as_deref()
+            .map(|value| LitStr::new(value, ident.span()));
+        let panel_title_tokens = match (panel.as_ref(), panel_title.as_ref()) {
+            (Some(_panel), Some(title)) => quote! { String::from(#title) },
+            (Some(panel), None) => {
+                let title = LitStr::new(&human_title(&panel.value()), ident.span());
+                quote! { String::from(#title) }
+            }
+            (None, Some(title)) => quote! { String::from(#title) },
+            (None, None) => quote! { __panel_title.to_owned() },
+        };
+        let panel_order = resolved_panel_order
+            .map(|value| quote! { #value })
+            .unwrap_or_else(|| quote! { __panel_order });
+        let sensitive = setting.sensitive;
+        let path = settings_path(quote! { __prefix }, &key);
+        let section = setting
+            .section
+            .as_deref()
+            .map(|value| LitStr::new(value, ident.span()));
+        let registered_section = setting
+            .section
+            .as_ref()
+            .and_then(|section| section_registry.get(section));
+        let resolved_section_title = setting
+            .section_title
+            .clone()
+            .or_else(|| registered_section.and_then(|metadata| metadata.title.clone()));
+        let resolved_section_order = setting
+            .section_order
+            .or_else(|| registered_section.and_then(|metadata| metadata.order));
+        let section_title = resolved_section_title
+            .as_deref()
+            .map(|value| LitStr::new(value, ident.span()));
+        let section_tokens = match section.as_ref() {
+            Some(value) => quote! { String::from(#value) },
+            None => quote! { __section.to_owned() },
+        };
+        let section_title_tokens = match (section.as_ref(), section_title.as_ref()) {
+            (Some(_section), Some(title)) => quote! { String::from(#title) },
+            (Some(section), None) => {
+                let title = LitStr::new(&human_title(&section.value()), ident.span());
+                quote! { String::from(#title) }
+            }
+            (None, Some(title)) => quote! { String::from(#title) },
+            (None, None) => quote! { __section_title.to_owned() },
+        };
+        let section_order = resolved_section_order
+            .map(|value| quote! { #value })
+            .unwrap_or_else(|| quote! { __section_order });
+        let order = setting.order.unwrap_or(0);
+
+        if type_name == "HashMap" {
+            body.extend(quote! {
+                __out.push((#path, String::from(#title), String::from(#description), #control, #env, #sensitive, #panel_tokens, #panel_title_tokens, #panel_order, #section_tokens, #section_title_tokens, #section_order, #order));
+            });
+        } else if is_leaf_name(&type_name) {
+            body.extend(quote! {
+                __out.push((#path, String::from(#title), String::from(#description), #control, #env, #sensitive, #panel_tokens, #panel_title_tokens, #panel_order, #section_tokens, #section_title_tokens, #section_order, #order));
+            });
+        } else if is_option {
+            return Err(syn::Error::new_spanned(
+                &field.ty,
+                "ConfigSettings only supports Option<leaf> and Option<HashMap<...>> fields",
+            ));
+        } else {
+            let child_panel = match panel.as_ref() {
+                Some(value) => quote! { #value },
+                None => quote! { __panel },
+            };
+            let child_panel_title = match (panel.as_ref(), panel_title.as_ref()) {
+                (_, Some(title)) => quote! { #title },
+                (Some(panel), None) => {
+                    let title = LitStr::new(&human_title(&panel.value()), ident.span());
+                    quote! { #title }
+                }
+                (None, None) => quote! { __panel_title },
+            };
+            let child_panel_order = resolved_panel_order
+                .map(|value| quote! { #value })
+                .unwrap_or_else(|| quote! { __panel_order });
+            let child_section = match section.as_ref() {
+                Some(value) => quote! { #value },
+                None => quote! { #key },
+            };
+            let child_section_title = match (section.as_ref(), section_title.as_ref()) {
+                (_, Some(title)) => quote! { #title },
+                (Some(section), None) => {
+                    let title = LitStr::new(&human_title(&section.value()), ident.span());
+                    quote! { #title }
+                }
+                (None, None) => {
+                    let title = LitStr::new(&human_title(&field_name), ident.span());
+                    quote! { #title }
+                }
+            };
+            let child_section_order = resolved_section_order
+                .map(|value| quote! { #value })
+                .unwrap_or_else(|| quote! { __section_order });
+            body.extend(quote! {
+                __out.extend(self.#ident.__marina_settings_with_section(
+                    &#path,
+                    #child_panel,
+                    #child_panel_title,
+                    #child_panel_order,
+                    #child_section,
+                    #child_section_title,
+                    #child_section_order,
+                ));
+            });
+        }
+    }
+
+    Ok(quote! {
+        impl #name {
+            pub fn __marina_settings(
+                &self,
+                __prefix: &str,
+            ) -> Vec<(String, String, String, &'static str, Option<&'static str>, bool, String, String, i32, String, String, i32, i32)> {
+                self.__marina_settings_with_section(__prefix, "", "", 0, "", "", 0)
+            }
+
+            pub fn __marina_settings_with_section(
+                &self,
+                __prefix: &str,
+                __panel: &str,
+                __panel_title: &str,
+                __panel_order: i32,
+                __section: &str,
+                __section_title: &str,
+                __section_order: i32,
+            ) -> Vec<(String, String, String, &'static str, Option<&'static str>, bool, String, String, i32, String, String, i32, i32)> {
+                let mut __out = Vec::new();
+                #body
+                __out
+            }
+        }
+    })
 }
 
 fn expand(input: &DeriveInput) -> syn::Result<proc_macro2::TokenStream> {

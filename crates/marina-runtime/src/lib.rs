@@ -7,7 +7,7 @@ use std::{
     process::Stdio,
 };
 
-use marina_config_derive::ConfigTemplate;
+use marina_config_derive::{ConfigSettings, ConfigTemplate};
 use marina_core::LibraryItem;
 use serde::Deserialize;
 use thiserror::Error;
@@ -34,7 +34,7 @@ fn default_cores_dir() -> PathBuf {
 }
 
 /// Frontend-level RetroArch configuration.
-#[derive(Clone, Debug, Deserialize, ConfigTemplate)]
+#[derive(Clone, Debug, Deserialize, ConfigTemplate, ConfigSettings)]
 pub struct RetroArchConfig {
     /// RetroArch frontend binary, resolved via `PATH` when relative.
     #[serde(default = "default_retroarch_binary")]
@@ -61,7 +61,7 @@ impl Default for RetroArchConfig {
 }
 
 /// Per-platform RetroArch settings.
-#[derive(Clone, Debug, Default, Deserialize, ConfigTemplate)]
+#[derive(Clone, Debug, Default, Deserialize, ConfigTemplate, ConfigSettings)]
 pub struct RetroArchPlatformConfig {
     /// Core for this platform: either a bare file name resolved against the
     /// `[retroarch] cores_dir` or a full path to the core.
@@ -81,7 +81,7 @@ pub enum PlatformBackendKind {
 
 /// Per-platform runtime configuration. The template renders one commented
 /// `[platform."<slug>"]` example; copy and adapt it per platform.
-#[derive(Clone, Debug, Default, Deserialize, ConfigTemplate)]
+#[derive(Clone, Debug, Default, Deserialize, ConfigTemplate, ConfigSettings)]
 pub struct PlatformRuntimeConfig {
     /// Backend for this platform: `"native"` or `"retroarch"`. When unset,
     /// the `"apps"` platform stays native and every other platform infers
@@ -96,6 +96,7 @@ pub struct PlatformRuntimeConfig {
     pub platform: Option<String>,
     #[serde(default)]
     #[template(table)]
+    #[setting(panel = "retroarch-core")]
     pub retroarch: RetroArchPlatformConfig,
 }
 

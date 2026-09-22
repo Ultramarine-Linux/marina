@@ -3,29 +3,56 @@ import { Tokens } from "../slintcn/theme/tokens.slint";
 
 import { Text as Typography } from "../slintcn/components/text.slint";
 import { TextVariant, TextTone } from "../slintcn/components/text.slint";
+import { Input } from "../slintcn/components/input.slint";
+import { Switch } from "../slintcn/components/switch.slint";
 import { CrumbHeader } from "../components/crumb-header.slint";
 import { ShellState } from "../components/app-shell.slint";
 
 export struct SettingsEntry {
+    path: string,
     title: string,
     summary: string,
+    control: string,
+    value: string,
+    bool-value: bool,
+    sensitive: bool,
+    environment-overridden: bool,
+}
+
+export struct SettingsPanel {
+    title: string,
+    entries: [SettingsEntry],
+}
+
+export struct SettingsSection {
+    title: string,
+    panels: [SettingsPanel],
+}
+
+export global SettingsState {
+    in-out property <[SettingsSection]> sections;
+    in-out property <[string]> platform-names;
+    callback setting-changed(string, string, string, bool);
 }
 
 export component SettingsPage inherits Rectangle {
     in property <int> focus-request: 0;
     callback focus-header;
 
-    property <[SettingsEntry]> entries: [
-        {
-            title: "Placeholder",
-            summary: "placeholder.",
-        },
-        {
-            title: "Switching test",
-            summary: "placeholder 2.",
-        }
-    ];
-    property <int> selected-index: 0;
+    private property <[SettingsSection]> sections: SettingsState.sections;
+    property <int> selected-section: 0;
+    property <int> selected-panel: 0;
+    private property <int> active-pane: 0;
+    private property <int> selected-entry: 0;
+    private property <int> selected-platform: 0;
+    private property <[string]> menu-stack: [];
+    private property <string> menu-open-target: "";
+    private property <[string]> platform-names: SettingsState.platform-names;
+
+    private property <SettingsSection> current-section: root.sections[root.selected-section];
+    private property <SettingsPanel> current-panel: root.current-section.panels[root.selected-panel];
+    private property <bool> menu-open: root.menu-stack.length > 0;
+    private property <bool> platform-detail-open: root.menu-stack.length > 1;
 
     background: transparent;
     forward-focus: page-focus;
@@ -43,9 +70,69 @@ export component SettingsPage inherits Rectangle {
         }
     }
 
-    function select-entry(index: int) {
-        if (root.entries.length <= 0) { return; }
-        root.selected-index = min(max(index, 0), root.entries.length - 1);
+    function select-panel(section: int, panel: int) {
+        if (root.sections.length <= 0) { return; }
+        root.selected-section = min(max(section, 0), root.sections.length - 1);
+        root.selected-panel = min(max(panel, 0), root.sections[root.selected-section].panels.length - 1);
+        root.selected-entry = 0;
+    }
+
+    function open-menu(target: string) {
+        if (target != "runtime.retroarch.platforms") { return; }
+        root.menu-open-target = target;
+        root.menu-stack = [target];
+        root.selected-platform = 0;
+        root.active-pane = 1;
+    }
+
+    function open-selected-menu() {
+        if (root.current-panel.entries.length <= 0) { return; }
+        let entry = root.current-panel.entries[root.selected-entry];
+        if (entry.control == "menu") {
+            root.open-menu(entry.path);
+        }
+    }
+
+    function open-platform(index: int) {
+        if (root.platform-names.length <= 0) { return; }
+        root.selected-platform = min(max(index, 0), root.platform-names.length - 1);
+        root.menu-stack = [root.menu-open-target, root.platform-names[root.selected-platform]];
+    }
+
+    function close-menu() {
+        if (!root.menu-open) { return; }
+        if (root.platform-detail-open) {
+            root.menu-stack = [root.menu-open-target];
+        } else {
+            root.menu-stack = [];
+            root.menu-open-target = "";
+            root.active-pane = 0;
+        }
+    }
+
+    function move-entry(delta: int) {
+        if (root.current-panel.entries.length <= 0) { return; }
+        root.selected-entry = min(max(root.selected-entry + delta, 0), root.current-panel.entries.length - 1);
+    }
+
+    function move-platform(delta: int) {
+        if (root.platform-names.length <= 0) { return; }
+        root.selected-platform = min(max(root.selected-platform + delta, 0), root.platform-names.length - 1);
+    }
+
+    function move-panel(delta: int) {
+        if (root.sections.length <= 0) { return; }
+        if (delta > 0) {
+            if (root.selected-panel + 1 < root.current-section.panels.length) {
+                root.selected-panel += 1;
+            } else if (root.selected-section + 1 < root.sections.length) {
+                root.select-panel(root.selected-section + 1, 0);
+            }
+        } else if (root.selected-panel > 0) {
+            root.selected-panel -= 1;
+        } else if (root.selected-section > 0) {
+            root.select-panel(root.selected-section - 1, root.sections[root.selected-section - 1].panels.length - 1);
+        }
     }
 
     page-focus := FocusScope {
@@ -53,19 +140,56 @@ export component SettingsPage inherits Rectangle {
         height: 0px;
         key-pressed(event) => {
             if (event.text == "\u{1b}") {
-                ShellState.back-requested();
+                if (root.menu-open) {
+                    root.close-menu();
+                } else {
+                    ShellState.back-requested();
+                }
                 return accept;
             }
+            if (root.menu-open) {
+                if (event.text == Key.UpArrow) {
+                    if (!root.platform-detail-open) { root.move-platform(-1); }
+                    return accept;
+                }
+                if (event.text == Key.DownArrow) {
+                    if (!root.platform-detail-open) { root.move-platform(1); }
+                    return accept;
+                }
+                if (event.text == Key.Return && !root.platform-detail-open) {
+                    root.open-platform(root.selected-platform);
+                    return accept;
+                }
+                return reject;
+            }
             if (event.text == Key.UpArrow) {
-                if (root.selected-index == 0) {
+                if (root.active-pane == 1) {
+                    root.move-entry(-1);
+                } else if (root.selected-section == 0 && root.selected-panel == 0) {
                     root.focus-header();
                 } else {
-                    root.select-entry(root.selected-index - 1);
+                    root.move-panel(-1);
                 }
                 return accept;
             }
             if (event.text == Key.DownArrow) {
-                root.select-entry(root.selected-index + 1);
+                if (root.active-pane == 1) {
+                    root.move-entry(1);
+                } else {
+                    root.move-panel(1);
+                }
+                return accept;
+            }
+            if (event.text == Key.RightArrow) {
+                root.active-pane = 1;
+                return accept;
+            }
+            if (event.text == Key.LeftArrow) {
+                root.active-pane = 0;
+                return accept;
+            }
+            if (event.text == Key.Return && root.active-pane == 1) {
+                root.open-selected-menu();
                 return accept;
             }
             return reject;
@@ -86,7 +210,7 @@ export component SettingsPage inherits Rectangle {
 
             Rectangle {
                 width: 34%;
-                min-width: 260px;
+                min-width: 240px;
                 background: Tokens.color-surface-1;
                 border-radius: Tokens.radius-md;
                 clip: true;
@@ -94,31 +218,52 @@ export component SettingsPage inherits Rectangle {
                 ListView {
                     width: parent.width;
                     height: parent.height;
-                    for entry[i] in root.entries: Rectangle {
+                    for section[section-index] in root.sections: Rectangle {
                         width: parent.width;
-                        height: 42px;
-                        background: i == root.selected-index
-                            ? Tokens.color-surface-3
-                            : (entry-touch.has-hover ? Tokens.color-surface-2 : transparent);
-                        border-radius: Tokens.radius-sm;
-                        border-width: page-focus.has-focus && i == root.selected-index ? Tokens.focus-ring-width : 0px;
-                        border-color: Tokens.color-ring-muted;
+                        height: section.panels.length * 58px + 34px;
+                        background: transparent;
 
                         Typography {
                             x: Tokens.spacing-2xl;
+                            y: 4px;
                             width: parent.width - 2 * Tokens.spacing-2xl;
-                            height: parent.height;
-                            text: entry.title;
-                            variant: TextVariant.body-lg;
+                            height: 26px;
+                            text: section.title;
+                            variant: TextVariant.caption;
+                            tone: TextTone.muted;
                             vertical-alignment: center;
-                            overflow: elide;
                         }
 
-                        entry-touch := TouchArea {
-                            mouse-cursor: pointer;
-                            clicked => {
-                                page-focus.focus();
-                                root.select-entry(i);
+                        VerticalLayout {
+                            y: 34px;
+                            height: parent.height - 34px;
+                            for panel[panel-index] in section.panels: Rectangle {
+                                height: 58px;
+                                background: section-index == root.selected-section && panel-index == root.selected-panel
+                                    ? Tokens.color-surface-3
+                                    : (panel-touch.has-hover ? Tokens.color-surface-2 : transparent);
+                                border-radius: Tokens.radius-sm;
+                                border-width: page-focus.has-focus && section-index == root.selected-section && panel-index == root.selected-panel
+                                    ? Tokens.focus-ring-width : 0px;
+                                border-color: Tokens.color-ring-muted;
+
+                                Typography {
+                                    x: Tokens.spacing-2xl;
+                                    width: parent.width - 2 * Tokens.spacing-2xl;
+                                    height: parent.height;
+                                    text: panel.title;
+                                    variant: TextVariant.body-lg;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                }
+
+                                panel-touch := TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => {
+                                        page-focus.focus();
+                                        root.select-panel(section-index, panel-index);
+                                    }
+                                }
                             }
                         }
                     }
@@ -129,25 +274,188 @@ export component SettingsPage inherits Rectangle {
                 horizontal-stretch: 1;
                 background: Tokens.color-surface-1;
                 border-radius: Tokens.radius-md;
+                clip: true;
 
-                VerticalLayout {
+                if !root.menu-open: VerticalLayout {
                     padding: Tokens.spacing-xl;
-                    spacing: Tokens.spacing-lg;
+                    spacing: Tokens.spacing-md;
+
+                    ListView {
+                        vertical-stretch: 1;
+                        for entry[entry-index] in root.current-panel.entries: Rectangle {
+                            width: parent.width;
+                            height: entry.control == "toggle" ? 118px : 142px;
+                            background: entry-index == root.selected-entry && root.active-pane == 1
+                                ? Tokens.color-surface-3
+                                : Tokens.color-surface-2;
+                            border-radius: Tokens.radius-sm;
+                            border-width: entry-index == root.selected-entry && root.active-pane == 1 && page-focus.has-focus
+                                ? Tokens.focus-ring-width : 0px;
+                            border-color: Tokens.color-ring-muted;
+
+                            VerticalLayout {
+                                padding: Tokens.spacing-lg;
+                                spacing: Tokens.spacing-sm;
+                                Typography {
+                                    text: entry.title;
+                                    variant: TextVariant.body-lg;
+                                    overflow: elide;
+                                }
+                                Typography {
+                                    text: entry.summary;
+                                    variant: TextVariant.caption;
+                                    tone: TextTone.muted;
+                                    wrap: word-wrap;
+                                    max-height: 36px;
+                                }
+                                Typography {
+                                    text: entry.environment-overridden
+                                        ? "Overridden by environment; read-only"
+                                        : entry.path;
+                                    variant: TextVariant.caption;
+                                    tone: TextTone.muted;
+                                    overflow: elide;
+                                }
+
+                                if entry.control == "text" || entry.control == "secret" || entry.control == "path": Input {
+                                    text: entry.value;
+                                    placeholder: entry.control == "path" ? "Enter a path" : "Not configured";
+                                    password: entry.sensitive || entry.control == "secret";
+                                    read-only: entry.environment-overridden;
+                                    accepted(value) => {
+                                        if (!entry.environment-overridden) {
+                                            SettingsState.setting-changed(entry.path, entry.control, value, false);
+                                        }
+                                    }
+                                }
+
+                                if entry.control == "menu": Typography {
+                                    text: ">";
+                                    variant: TextVariant.title;
+                                    tone: TextTone.muted;
+                                    horizontal-alignment: right;
+                                }
+
+                                if entry.control == "list" || entry.control == "map": Typography {
+                                    text: "List editing is not available yet.";
+                                    variant: TextVariant.body;
+                                    tone: TextTone.muted;
+                                    wrap: word-wrap;
+                                }
+                            }
+
+                            if entry.control == "toggle": Switch {
+                                x: parent.width - self.preferred-width - Tokens.spacing-lg;
+                                y: (parent.height - self.preferred-height) / 2;
+                                label: "";
+                                checked: entry.bool-value;
+                                disabled: entry.environment-overridden;
+                                toggled(value) => {
+                                    SettingsState.setting-changed(entry.path, entry.control, "", value);
+                                }
+                            }
+
+                            // The generated row's layout sits beneath the visual
+                            // switch on some backends, so keep a semantic hit
+                            // target above it for reliable pointer activation.
+                            if entry.control == "toggle" && !entry.environment-overridden: TouchArea {
+                                x: parent.width - 88px;
+                                y: 0px;
+                                width: 88px;
+                                height: parent.height;
+                                mouse-cursor: pointer;
+                                clicked => {
+                                    SettingsState.setting-changed(
+                                        entry.path,
+                                        entry.control,
+                                        "",
+                                        !entry.bool-value,
+                                    );
+                                }
+                            }
+
+                            if entry.control == "menu": TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => {
+                                    page-focus.focus();
+                                    root.selected-entry = entry-index;
+                                    root.active-pane = 1;
+                                    root.open-menu(entry.path);
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if root.menu-open && !root.platform-detail-open: VerticalLayout {
+                    padding: Tokens.spacing-xl;
+                    spacing: Tokens.spacing-md;
 
                     Typography {
-                        text: root.entries[root.selected-index].title;
+                        text: "Platforms";
+                        variant: TextVariant.title;
+                    }
+                    Typography {
+                        text: "Choose a platform to configure in RetroArch.";
+                        variant: TextVariant.caption;
+                        tone: TextTone.muted;
+                    }
+                    ListView {
+                        vertical-stretch: 1;
+                        for platform[index] in root.platform-names: Rectangle {
+                            width: parent.width;
+                            height: 58px;
+                            background: index == root.selected-platform ? Tokens.color-surface-3 : Tokens.color-surface-2;
+                            border-radius: Tokens.radius-sm;
+                            border-width: index == root.selected-platform && page-focus.has-focus
+                                ? Tokens.focus-ring-width : 0px;
+                            border-color: Tokens.color-ring-muted;
+
+                            Typography {
+                                x: Tokens.spacing-lg;
+                                width: parent.width - 2 * Tokens.spacing-lg;
+                                height: parent.height;
+                                text: platform;
+                                variant: TextVariant.body-lg;
+                                vertical-alignment: center;
+                                overflow: elide;
+                            }
+                            TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => {
+                                    page-focus.focus();
+                                    root.open-platform(index);
+                                }
+                            }
+                        }
+                    }
+                    if root.platform-names.length == 0: Typography {
+                        text: "No platform overrides are configured.";
+                        variant: TextVariant.body;
+                        tone: TextTone.muted;
+                    }
+                }
+
+                if root.platform-detail-open: VerticalLayout {
+                    padding: Tokens.spacing-xl;
+                    spacing: Tokens.spacing-md;
+
+                    Typography {
+                        text: root.menu-stack[1];
                         variant: TextVariant.title;
                         overflow: elide;
                     }
-
                     Typography {
-                        text: root.entries[root.selected-index].summary;
-                        variant: TextVariant.body-lg;
+                        text: "Platform-specific RetroArch settings will be editable here.";
+                        variant: TextVariant.body;
                         tone: TextTone.muted;
                         wrap: word-wrap;
                     }
-
-                    Rectangle { vertical-stretch: 1; }
+                    Typography {
+                        text: "Press Back to return to Platforms.";
+                        variant: TextVariant.caption;
+                        tone: TextTone.muted;
+                    }
                 }
             }
         }

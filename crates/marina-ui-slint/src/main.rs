@@ -57,6 +57,7 @@ async fn main() -> Result<(), slint::PlatformError> {
     // asynchronously once the event loop is running.
     let username = std::env::var("USER").unwrap_or_else(|_| "user".into());
     let window = MainWindow::new()?;
+    ui::settings::configure(&window);
     // Controller events are allowed only while Marina owns the native window,
     // but the selected Slint focus target belongs to the UI regardless of
     // whether a controller is connected.

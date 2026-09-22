@@ -1,28 +1,27 @@
 //! Runtime configuration: figment-merged TOML file + environment.
 //!
-//! Store backends live in their own config-file section so adding a backend
-//! is a new `[store.<backend>]` table, not more top-level env vars:
+//! Store backends live in the library namespace:
 //!
 //! ```toml
-//! [store.romm]
+//! [library.romm]
 //! enable = true
 //! url = "https://romm.example.com"
 //! token = "rmm_..."
 //! import_on_startup = false
 //! ```
 //!
-//! Emulator runtimes follow the same pattern. `[retroarch]` holds the
-//! frontend-wide settings and each `[platform."<slug>"]` table pins a
-//! backend (and its settings) for one platform:
+//! Emulator runtimes live under `[runtime.retroarch]`; each
+//! `[runtime.retroarch.platforms."<slug>"]` table pins a backend and its
+//! settings for one platform:
 //!
 //! ```toml
-//! [retroarch]
+//! [runtime.retroarch]
 //! binary = "retroarch"
 //! cores_dir = "/var/games/retroarch/cores"
 //!
-//! [platform."gba"]
+//! [runtime.retroarch.platforms."gba"]
 //! backend = "retroarch"
-//! [platform."gba".retroarch]
+//! [runtime.retroarch.platforms."gba".retroarch]
 //! core = "mgba_libretro.so"
 //! ```
 //!
@@ -55,54 +54,78 @@ use figment::{
     Figment,
     providers::{Format, Toml},
 };
-use marina_config_derive::ConfigTemplate;
+use marina_config_derive::{ConfigSettings, ConfigTemplate};
 use marina_portmaster::{DEFAULT_PORTS_DIR, DEFAULT_RELEASE, PortMasterConfig};
 use marina_runtime::{
-    PlatformRuntimeConfig, RetroArchConfig, portmaster::Config as RuntimePortMasterConfig,
+    PlatformRuntimeConfig, RetroArchConfig as EffectiveRetroArchConfig,
+    portmaster::Config as RuntimePortMasterConfig,
 };
 use serde::Deserialize;
 use tracing::warn;
 
 /// Top-level Marina configuration file.
-#[derive(Clone, Debug, Default, Deserialize, ConfigTemplate)]
+#[derive(Clone, Debug, Default, Deserialize, ConfigTemplate, ConfigSettings)]
 struct FileConfig {
     #[serde(default)]
-    store: StoreSection,
+    #[template(table)]
+    #[setting(section = "general", section_title = "General", section_order = "10")]
+    general: GeneralSection,
+
     #[serde(default)]
     #[template(table)]
+    #[setting(section = "library", section_title = "Library", section_order = "30")]
     library: LibrarySection,
+
     #[serde(default)]
     #[template(table)]
-    clock: ClockSection,
-    #[serde(default)]
-    #[template(table)]
-    retroarch: RetroArchConfig,
-    #[serde(default)]
-    #[template(table)]
-    portmaster: RuntimePortMasterConfig,
-    /// Per-platform backend and core selection, keyed by platform slug.
-    #[serde(default)]
-    #[template(example = "gba")]
-    platform: HashMap<String, PlatformRuntimeConfig>,
+    #[setting(section = "runtime", section_title = "Runtime", section_order = "40")]
+    runtime: RuntimeSection,
 }
 
-/// Store backend namespace: each backend gets its own `[store.<backend>]`
-/// table so adding one never needs new top-level keys.
-#[derive(Clone, Debug, Default, Deserialize, ConfigTemplate)]
-struct StoreSection {
+#[derive(Clone, Debug, Default, Deserialize, ConfigTemplate, ConfigSettings)]
+struct GeneralSection {
     #[serde(default)]
     #[template(table)]
+    #[setting(
+        section = "general",
+        panel = "time_date",
+        panel_title = "Time & Date",
+        panel_order = "10"
+    )]
+    time_date: ClockSection,
+}
+
+#[derive(Clone, Debug, Default, Deserialize, ConfigTemplate, ConfigSettings)]
+struct LibrarySection {
+    #[serde(default)]
+    #[template(table)]
+    #[setting(
+        section = "library",
+        panel = "local",
+        panel_title = "Library",
+        panel_order = "10"
+    )]
+    local: LocalLibrarySection,
+    #[serde(default)]
+    #[template(table)]
+    #[setting(
+        section = "library",
+        panel = "romm",
+        panel_title = "RomM Integration",
+        panel_order = "20"
+    )]
     romm: RommConfig,
     #[serde(default)]
     #[template(table)]
     portmaster: PortMasterStoreConfig,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, ConfigTemplate)]
-struct LibrarySection {
+#[derive(Clone, Debug, Default, Deserialize, ConfigTemplate, ConfigSettings)]
+struct LocalLibrarySection {
     /// Root directory containing the local library (`roms/<platform>/...`).
     #[serde(default)]
     #[template(env = "MARINA_LIBRARY_ROOT", example = "/var/games/library")]
+    #[setting(control = "path")]
     root: Option<PathBuf>,
     /// SQLite library database URI.
     #[serde(default)]
@@ -111,6 +134,7 @@ struct LibrarySection {
     /// Directory holding per-backend store catalog caches.
     #[serde(default)]
     #[template(env = "MARINA_STORE_CACHE_DIR", example = "")]
+    #[setting(control = "path")]
     store_cache_dir: Option<PathBuf>,
     /// Scan the local library root for games at startup.
     #[serde(default)]
@@ -118,8 +142,84 @@ struct LibrarySection {
     scan_on_startup: Option<bool>,
 }
 
+#[derive(Clone, Debug, Default, Deserialize, ConfigTemplate, ConfigSettings)]
+struct RuntimeSection {
+    #[serde(default)]
+    #[template(table)]
+    #[setting(
+        section = "runtime",
+        panel = "retroarch",
+        panel_title = "RetroArch",
+        panel_order = "10"
+    )]
+    retroarch: RetroArchConfig,
+    #[serde(default)]
+    #[template(table)]
+    portmaster: PortMasterRuntimeConfig,
+}
+
+#[derive(Clone, Debug, Deserialize, ConfigTemplate, ConfigSettings)]
+struct RetroArchConfig {
+    /// RetroArch frontend binary, resolved via `PATH` when relative.
+    #[serde(default = "default_retroarch_binary")]
+    #[template(env = "MARINA_RETROARCH_BINARY")]
+    #[setting(control = "path")]
+    binary: PathBuf,
+    /// Directory scanned for libretro cores (`*_libretro.so`).
+    #[serde(default = "default_cores_dir")]
+    #[template(env = "MARINA_RETROARCH_CORES_DIR")]
+    #[setting(control = "path")]
+    cores_dir: PathBuf,
+    /// Extra frontend flags inserted before `-L <core> <rom>`.
+    #[serde(default)]
+    #[setting(title = "Extra arguments", control = "list")]
+    extra_args: Vec<String>,
+    /// Per-platform backend and core selection, keyed by platform slug.
+    #[serde(default)]
+    #[template(example = "gba")]
+    #[setting(title = "Platforms", control = "menu", order = "40")]
+    platforms: HashMap<String, PlatformRuntimeConfig>,
+}
+
+impl Default for RetroArchConfig {
+    fn default() -> Self {
+        let effective = EffectiveRetroArchConfig::default();
+        Self {
+            binary: effective.binary,
+            cores_dir: effective.cores_dir,
+            extra_args: effective.extra_args,
+            platforms: HashMap::new(),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Deserialize, ConfigTemplate, ConfigSettings)]
+struct PortMasterRuntimeConfig {
+    /// Host path containing `<port>.sh` launchers and the `PortMaster` tree.
+    #[serde(default = "default_portmaster_ports_dir")]
+    #[template(env = "MARINA_PORTMASTER_PORTS_DIR")]
+    #[setting(control = "path")]
+    ports_dir: PathBuf,
+}
+
+impl Default for PortMasterRuntimeConfig {
+    fn default() -> Self {
+        Self {
+            ports_dir: default_portmaster_ports_dir(),
+        }
+    }
+}
+
+fn default_retroarch_binary() -> PathBuf {
+    PathBuf::from(marina_runtime::DEFAULT_RETROARCH_BINARY)
+}
+
+fn default_cores_dir() -> PathBuf {
+    PathBuf::from(marina_runtime::DEFAULT_CORES_DIR)
+}
+
 /// Top-bar digital clock settings.
-#[derive(Clone, Debug, Default, Deserialize, ConfigTemplate)]
+#[derive(Clone, Debug, Default, Deserialize, ConfigTemplate, ConfigSettings)]
 struct ClockSection {
     /// Use 12-hour time (`9:05 PM`) instead of 24-hour time (`21:05`).
     #[serde(default, alias = "12hr")]
@@ -128,7 +228,7 @@ struct ClockSection {
 }
 
 /// A single store backend's file configuration.
-#[derive(Clone, Debug, Default, Deserialize, ConfigTemplate)]
+#[derive(Clone, Debug, Default, Deserialize, ConfigTemplate, ConfigSettings)]
 pub struct RommConfig {
     /// Whether the RomM store backend is enabled.
     #[serde(default)]
@@ -141,6 +241,7 @@ pub struct RommConfig {
     /// API token for the RomM server.
     #[serde(default)]
     #[template(env = "ROMM_TOKEN", example = "")]
+    #[setting(title = "API token", control = "secret", sensitive)]
     pub token: Option<String>,
     /// Import the RomM catalog into the store cache at startup.
     #[serde(default)]
@@ -148,7 +249,7 @@ pub struct RommConfig {
     pub import_on_startup: Option<bool>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, ConfigTemplate)]
+#[derive(Clone, Debug, Default, Deserialize, ConfigTemplate, ConfigSettings)]
 struct PortMasterStoreConfig {
     #[serde(default)]
     #[template(env = "MARINA_ENABLE_PORTMASTER", example = "false")]
@@ -181,7 +282,7 @@ pub struct Config {
     pub library_root: Option<std::path::PathBuf>,
     pub clock_twelve_hour: bool,
 
-    pub retroarch: RetroArchConfig,
+    pub retroarch: EffectiveRetroArchConfig,
     pub portmaster: RuntimePortMasterConfig,
     pub platforms: HashMap<String, PlatformRuntimeConfig>,
 }
@@ -193,7 +294,7 @@ impl Config {
         }
         let figment = merge_config_files(Figment::new(), config_sources());
         // Env vars merge over the file as key-path tuples: `(key, value)`
-        // with a dotted path like "store.romm.url" nests like the TOML.
+        // with a dotted path like "library.romm.url" nests like the TOML.
         // The bindings are generated from `#[template(env = "..")]`,
         // clap-derive style, so they cannot disagree with the template.
         Self::from_figment(apply_env(figment))
@@ -207,8 +308,8 @@ impl Config {
                 FileConfig::default()
             }
         };
-        let romm = &file.store.romm;
-        let portmaster = &file.store.portmaster;
+        let romm = &file.library.romm;
+        let portmaster = &file.library.portmaster;
 
         let romm_enabled = romm.enable.unwrap_or(false);
         let romm_url = if romm_enabled { romm.url.clone() } else { None };
@@ -218,8 +319,8 @@ impl Config {
             None
         };
         let import_romm_on_startup = romm.import_on_startup.unwrap_or(false);
-        let scan_on_startup = file.library.scan_on_startup.unwrap_or(true);
-        let clock_twelve_hour = file.clock.twelve_hour.unwrap_or(false);
+        let scan_on_startup = file.library.local.scan_on_startup.unwrap_or(true);
+        let clock_twelve_hour = file.general.time_date.twelve_hour.unwrap_or(false);
         if !scan_on_startup {
             tracing::info!(
                 "local library scan disabled at startup by config or MARINA_SCAN_ON_STARTUP=false"
@@ -227,10 +328,10 @@ impl Config {
         }
         if !romm_enabled {
             tracing::info!(
-                "RomM backend disabled by default; enable it with [store.romm] enable = true"
+                "RomM backend disabled by default; enable it with [library.romm] enable = true"
             );
         } else if romm_url.is_none() {
-            warn!("[store.romm] url not set — relative cover paths will not resolve");
+            warn!("[library.romm] url not set — relative cover paths will not resolve");
         }
 
         let default_library_root = Some(std::path::PathBuf::from("/var/games/library"));
@@ -254,11 +355,13 @@ impl Config {
         Self {
             storage_uri: file
                 .library
+                .local
                 .storage_uri
                 .clone()
                 .unwrap_or(default_storage_uri),
             store_cache_dir: file
                 .library
+                .local
                 .store_cache_dir
                 .clone()
                 .or_else(|| {
@@ -281,10 +384,16 @@ impl Config {
             portmaster_store: portmaster_config,
             scan_on_startup,
             clock_twelve_hour,
-            library_root: file.library.root.clone().or(default_library_root),
-            retroarch: file.retroarch.clone(),
-            portmaster: file.portmaster.clone(),
-            platforms: file.platform.clone(),
+            library_root: file.library.local.root.clone().or(default_library_root),
+            retroarch: EffectiveRetroArchConfig {
+                binary: file.runtime.retroarch.binary.clone(),
+                cores_dir: file.runtime.retroarch.cores_dir.clone(),
+                extra_args: file.runtime.retroarch.extra_args.clone(),
+            },
+            portmaster: RuntimePortMasterConfig {
+                ports_dir: file.runtime.portmaster.ports_dir.clone(),
+            },
+            platforms: file.runtime.retroarch.platforms.clone(),
         }
     }
 }
@@ -419,6 +528,28 @@ fn config_write_path() -> Option<PathBuf> {
 /// schema the way a hand-maintained example file can. Commented-out keys
 /// show illustrative values; the app behaves exactly as if the file did
 /// not exist until they are uncommented.
+/// Returns the generated, framework-neutral settings schema.
+///
+/// The UI adapter owns presentation and persistence; this method only exposes
+/// the metadata emitted by `ConfigSettings`.
+pub fn settings_schema() -> Vec<(
+    String,
+    String,
+    String,
+    &'static str,
+    Option<&'static str>,
+    bool,
+    String,
+    String,
+    i32,
+    String,
+    String,
+    i32,
+    i32,
+)> {
+    FileConfig::default().__marina_settings("")
+}
+
 pub fn default_config_template() -> String {
     let mut out = String::from(CONFIG_PREAMBLE);
     FileConfig::default().__marina_config_transparent(&mut out, "", true);
@@ -463,11 +594,8 @@ pub fn ensure_config_file() -> std::io::Result<PathBuf> {
 }
 
 /// Updates a single scalar in a TOML document while preserving comments,
-/// whitespace, and key order. Backing for future in-UI settings editing:
-/// parse the config file into a [`toml_edit::Document`], upsert, write
-/// back with `doc.to_string()`.
-/// Not wired into the UI yet; the settings screen will call this.
-#[allow(dead_code)]
+/// whitespace, and key order. Parses the config file into a
+/// [`toml_edit::Document`], upserts, then renders it with `doc.to_string()`.
 pub fn upsert_toml_value(
     document: &str,
     table_path: &[&str],
@@ -490,6 +618,80 @@ pub fn upsert_toml_value(
     Ok(doc.to_string())
 }
 
+/// A scalar setting value read from or written to the user configuration.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ScalarSettingValue {
+    Bool(bool),
+    String(String),
+}
+
+/// Returns the active config file, creating the generated template first when
+/// needed. This is intended for background tasks; it performs filesystem I/O.
+pub fn active_config_path() -> Result<PathBuf, String> {
+    ensure_config_file().map_err(|error| error.to_string())
+}
+
+/// Reads values that are explicitly present in the active TOML file. Missing
+/// optional scalar values use an empty string or `false`, matching the
+/// generated template's raw, editable configuration state.
+pub fn read_scalar_settings() -> Result<HashMap<String, ScalarSettingValue>, String> {
+    let path = active_config_path()?;
+    let document = std::fs::read_to_string(&path)
+        .map_err(|error| format!("could not read {}: {error}", path.display()))?;
+    let value: toml::Value = toml::from_str(&document)
+        .map_err(|error| format!("could not parse {}: {error}", path.display()))?;
+    let mut values = HashMap::new();
+    for (setting_path, _, _, control, _, _, _, _, _, _, _, _, _) in settings_schema() {
+        let value = setting_path
+            .split('.')
+            .try_fold(&value, |value, key| value.get(key));
+        let scalar = match (control, value) {
+            ("toggle", Some(toml::Value::Boolean(value))) => ScalarSettingValue::Bool(*value),
+            ("toggle", _) => ScalarSettingValue::Bool(false),
+            (_, Some(toml::Value::String(value))) => ScalarSettingValue::String(value.clone()),
+            (_, _) => ScalarSettingValue::String(String::new()),
+        };
+        values.insert(setting_path, scalar);
+    }
+    Ok(values)
+}
+
+/// Writes an editable bool, string, or path setting to the active TOML file.
+/// The edited document is deserialized as [`FileConfig`] before an atomic
+/// replacement, so invalid UI input never corrupts the user's configuration.
+pub fn write_scalar_setting(path: &str, value: ScalarSettingValue) -> Result<(), String> {
+    let config_path = active_config_path()?;
+    let document = std::fs::read_to_string(&config_path)
+        .map_err(|error| format!("could not read {}: {error}", config_path.display()))?;
+    let mut segments = path.split('.').collect::<Vec<_>>();
+    let key = segments
+        .pop()
+        .filter(|key| !key.is_empty())
+        .ok_or_else(|| "setting path cannot be empty".to_owned())?;
+    if segments.iter().any(|segment| segment.is_empty()) {
+        return Err(format!("invalid setting path `{path}`"));
+    }
+    let item = match value {
+        ScalarSettingValue::Bool(value) => toml_edit::value(value),
+        ScalarSettingValue::String(value) => toml_edit::value(value),
+    };
+    let updated = upsert_toml_value(&document, &segments, key, item)
+        .map_err(|error| format!("could not update TOML: {error}"))?;
+    toml::from_str::<FileConfig>(&updated)
+        .map_err(|error| format!("updated configuration is invalid: {error}"))?;
+
+    let temporary = config_path.with_extension(format!("toml.{}.tmp", std::process::id()));
+    std::fs::write(&temporary, updated)
+        .map_err(|error| format!("could not write {}: {error}", temporary.display()))?;
+    std::fs::rename(&temporary, &config_path).map_err(|error| {
+        let _ = std::fs::remove_file(&temporary);
+        format!(
+            "could not replace {} with updated configuration: {error}",
+            config_path.display()
+        )
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -499,50 +701,50 @@ mod tests {
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
-    fn parses_store_romm_section() {
+    fn parses_library_sections() {
         let config: FileConfig = toml::from_str(
             r#"
-[store.romm]
+[library.romm]
 enable = true
 url = "https://romm.example.com"
 token = "secret"
 import_on_startup = true
 
-[library]
+[library.local]
 scan_on_startup = false
 "#,
         )
         .unwrap();
         assert_eq!(
-            config.store.romm.url.as_deref(),
+            config.library.romm.url.as_deref(),
             Some("https://romm.example.com")
         );
-        assert_eq!(config.store.romm.token.as_deref(), Some("secret"));
-        assert_eq!(config.store.romm.enable, Some(true));
-        assert_eq!(config.library.scan_on_startup, Some(false));
+        assert_eq!(config.library.romm.token.as_deref(), Some("secret"));
+        assert_eq!(config.library.romm.enable, Some(true));
+        assert_eq!(config.library.local.scan_on_startup, Some(false));
     }
 
     #[test]
     fn parses_clock_section() {
         let config: FileConfig = toml::from_str(
             r#"
-[clock]
+[general.time_date]
 twelve_hour = true
 "#,
         )
         .unwrap();
-        assert_eq!(config.clock.twelve_hour, Some(true));
+        assert_eq!(config.general.time_date.twelve_hour, Some(true));
         // The shorthand `12hr` key is accepted as an alias.
         let config: FileConfig = toml::from_str(
             r#"
-[clock]
+[general.time_date]
 12hr = true
 "#,
         )
         .unwrap();
-        assert_eq!(config.clock.twelve_hour, Some(true));
+        assert_eq!(config.general.time_date.twelve_hour, Some(true));
 
-        let figment = Figment::new().merge(Toml::string("[clock]\n12hr = true\n"));
+        let figment = Figment::new().merge(Toml::string("[general.time_date]\n12hr = true\n"));
         assert!(Config::from_figment(figment).clock_twelve_hour);
         assert!(!Config::from_figment(Figment::new()).clock_twelve_hour);
     }
@@ -551,9 +753,12 @@ twelve_hour = true
     fn figment_merges_toml_base_with_key_path_overrides() {
         let figment = Figment::new()
             .merge(Toml::string(
-                "[store.romm]\nenable = true\nurl = \"https://file.example.com\"\n",
+                "[library.romm]\nenable = true\nurl = \"https://file.example.com\"\n",
             ))
-            .merge(("store.romm.url", "https://override.example.com".to_string()));
+            .merge((
+                "library.romm.url",
+                "https://override.example.com".to_string(),
+            ));
         let config = Config::from_figment(figment);
         assert_eq!(
             config.romm_url.as_deref(),
@@ -637,8 +842,8 @@ twelve_hour = true
     #[test]
     fn toml_edit_upsert_preserves_comments() {
         let updated = upsert_toml_value(
-            "# my romm server\n[store.romm]\nenable = false\n",
-            &["store", "romm"],
+            "# my romm server\n[library.romm]\nenable = false\n",
+            &["library", "romm"],
             "url",
             toml_edit::value("https://romm.example.com"),
         )
@@ -652,21 +857,27 @@ twelve_hour = true
     fn generated_template_parses_and_covers_every_key() {
         let template = default_config_template();
         let value: toml::Value = toml::from_str(&template).expect("template must parse as TOML");
-        for table in ["store", "library", "clock", "retroarch", "platform"] {
+        for table in ["general", "library", "runtime"] {
             assert!(
                 value.get(table).is_some(),
                 "template is missing [{table}]:\n{template}"
             );
         }
-        assert!(value["store"].get("romm").is_some());
-        assert!(value["platform"].get("gba").is_some());
+        assert!(value["general"].get("time_date").is_some());
+        assert!(value["library"].get("local").is_some());
+        assert!(value["library"].get("romm").is_some());
+        assert!(value["runtime"]["retroarch"].get("platforms").is_some());
         // Non-optional leaves render their real defaults, active.
         assert_eq!(
-            value["retroarch"].get("binary").and_then(|v| v.as_str()),
+            value["runtime"]["retroarch"]
+                .get("binary")
+                .and_then(|v| v.as_str()),
             Some("retroarch")
         );
         assert_eq!(
-            value["retroarch"].get("cores_dir").and_then(|v| v.as_str()),
+            value["runtime"]["retroarch"]
+                .get("cores_dir")
+                .and_then(|v| v.as_str()),
             Some("/var/games/retroarch/cores")
         );
         // Optional leaves render as commented placeholders with docs + env.
@@ -760,13 +971,21 @@ twelve_hour = true
         // The generated bindings must address the documented key paths.
         let bindings = FileConfig::default().__marina_env_bindings("");
         for (path, var, is_bool) in [
-            ("store.romm.enable", "MARINA_ENABLE_ROMM", true),
-            ("store.romm.url", "ROMM_URL", false),
-            ("library.scan_on_startup", "MARINA_SCAN_ON_STARTUP", true),
-            ("clock.twelve_hour", "MARINA_CLOCK_12HR", true),
-            ("library.root", "MARINA_LIBRARY_ROOT", false),
-            ("retroarch.binary", "MARINA_RETROARCH_BINARY", false),
-            ("retroarch.cores_dir", "MARINA_RETROARCH_CORES_DIR", false),
+            ("library.romm.enable", "MARINA_ENABLE_ROMM", true),
+            ("library.romm.url", "ROMM_URL", false),
+            (
+                "library.local.scan_on_startup",
+                "MARINA_SCAN_ON_STARTUP",
+                true,
+            ),
+            ("general.time_date.twelve_hour", "MARINA_CLOCK_12HR", true),
+            ("library.local.root", "MARINA_LIBRARY_ROOT", false),
+            ("runtime.retroarch.binary", "MARINA_RETROARCH_BINARY", false),
+            (
+                "runtime.retroarch.cores_dir",
+                "MARINA_RETROARCH_CORES_DIR",
+                false,
+            ),
         ] {
             let expected = (path.to_owned(), var, is_bool);
             assert!(
@@ -812,16 +1031,16 @@ twelve_hour = true
         std::fs::write(
             &path,
             r#"
-[store.romm]
+[library.romm]
 enable = true
 url = "https://file.example.com"
 token = "file-token"
 import_on_startup = false
 
-[library]
+[library.local]
 scan_on_startup = false
 
-[retroarch]
+[runtime.retroarch]
 binary = "/file/retroarch"
 cores_dir = "/file/cores"
 "#,
@@ -901,28 +1120,31 @@ cores_dir = "/file/cores"
     fn parses_retroarch_and_platform_sections() {
         let config: FileConfig = toml::from_str(
             r#"
-[retroarch]
+[runtime.retroarch]
 binary = "/usr/bin/retroarch"
 cores_dir = "/var/games/retroarch/cores"
 extra_args = ["-f"]
 
-[platform."gba"]
+[runtime.retroarch.platforms."gba"]
 backend = "retroarch"
-[platform."gba".retroarch]
+[runtime.retroarch.platforms."gba".retroarch]
 core = "mgba_libretro.so"
 
-[platform."snes"]
+[runtime.retroarch.platforms."snes"]
 backend = "native"
 "#,
         )
         .unwrap();
-        assert_eq!(config.retroarch.binary, PathBuf::from("/usr/bin/retroarch"));
         assert_eq!(
-            config.retroarch.cores_dir,
+            config.runtime.retroarch.binary,
+            PathBuf::from("/usr/bin/retroarch")
+        );
+        assert_eq!(
+            config.runtime.retroarch.cores_dir,
             PathBuf::from("/var/games/retroarch/cores")
         );
-        assert_eq!(config.retroarch.extra_args, vec!["-f"]);
-        let gba = &config.platform["gba"];
+        assert_eq!(config.runtime.retroarch.extra_args, vec!["-f"]);
+        let gba = &config.runtime.retroarch.platforms["gba"];
         assert_eq!(
             gba.backend_kind("gba"),
             marina_runtime::PlatformBackendKind::RetroArch
@@ -932,7 +1154,7 @@ backend = "native"
             Some(std::path::Path::new("mgba_libretro.so"))
         );
         assert_eq!(
-            config.platform["snes"].backend_kind("snes"),
+            config.runtime.retroarch.platforms["snes"].backend_kind("snes"),
             marina_runtime::PlatformBackendKind::Native
         );
     }
@@ -940,7 +1162,7 @@ backend = "native"
     #[test]
     fn platform_tables_accept_absolute_core_paths() {
         let figment = Figment::new().merge(Toml::string(
-            "[platform.\"gba\"]\nbackend = \"retroarch\"\n[platform.\"gba\".retroarch]\ncore = \"/opt/cores/mgba_libretro.so\"\n",
+            "[runtime.retroarch.platforms.\"gba\"]\nbackend = \"retroarch\"\n[runtime.retroarch.platforms.\"gba\".retroarch]\ncore = \"/opt/cores/mgba_libretro.so\"\n",
         ));
         let config = Config::from_figment(figment);
         assert_eq!(
@@ -979,7 +1201,7 @@ backend = "native"
 
         std::fs::write(
             &path,
-            "[platform.\"snes\".retroarch]\ncore = \"snes9x_libretro.so\"\n",
+            "[runtime.retroarch.platforms.\"snes\".retroarch]\ncore = \"snes9x_libretro.so\"\n",
         )
         .unwrap();
         let initial = Config::from_env();
@@ -990,7 +1212,7 @@ backend = "native"
 
         std::fs::write(
             &path,
-            "[platform.\"snes\".retroarch]\ncore = \"bsnes_libretro.so\"\n",
+            "[runtime.retroarch.platforms.\"snes\".retroarch]\ncore = \"bsnes_libretro.so\"\n",
         )
         .unwrap();
         let reloaded = Config::from_env();
@@ -1014,9 +1236,9 @@ backend = "native"
     fn retroarch_env_overrides_merge_over_file() {
         let figment = Figment::new()
             .merge(Toml::string(
-                "[retroarch]\nbinary = \"/file/retroarch\"\ncores_dir = \"/file/cores\"\n",
+                "[runtime.retroarch]\nbinary = \"/file/retroarch\"\ncores_dir = \"/file/cores\"\n",
             ))
-            .merge(("retroarch.binary", "/env/retroarch".to_string()));
+            .merge(("runtime.retroarch.binary", "/env/retroarch".to_string()));
         let config = Config::from_figment(figment);
         assert_eq!(config.retroarch.binary, PathBuf::from("/env/retroarch"));
         assert_eq!(config.retroarch.cores_dir, PathBuf::from("/file/cores"));
