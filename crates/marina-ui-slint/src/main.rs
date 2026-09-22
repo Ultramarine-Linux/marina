@@ -13,10 +13,7 @@ use marina_input::{InputConfig, InputLoop};
 use marina_library::{
     query::SearchQuery,
     read::{LibraryRead, PlatformRead},
-    write::{LibraryWrite, PlatformWrite},
 };
-
-use marina_scanner::scan;
 use serde::Serialize;
 use slint::{ComponentHandle, Image, Model, ModelRc, SharedString, VecModel};
 use tracing::{error, info, warn};
@@ -307,101 +304,14 @@ async fn reconcile_local(
         error!(%error, "failed to sync XDG applications");
     }
 
-    if state.config.scan_on_startup {
-        if let Some(root) = state.config.library_root.clone() {
-            match tokio::fs::try_exists(&root).await {
-                Ok(false) => {
-                    info!(path = %root.display(), "local library root does not exist yet; skipping scan");
-                }
-                Ok(true) => match scan(&root) {
-                    Ok(items) => {
-                        info!(count = items.len(), "local game scan completed");
-                        // The scanner is filesystem presence only: it must never
-                        // overwrite enriched records (e.g. from a store
-                        // install). If an entry for a scanned path already
-                        // exists, the game is there — leave it exactly as is.
-                        // The scanner only adds missing entries and removes
-                        // ones whose files vanished from disk.
-                        let scanned_paths: std::collections::HashSet<String> = items
-                            .iter()
-                            .filter_map(|item| item.local_path.clone())
-                            .collect();
-                        let known_platforms: std::collections::HashSet<String> = state
-                            .library
-                            .platforms()
-                            .await
-                            .unwrap_or_default()
-                            .into_iter()
-                            .map(|platform| platform.slug)
-                            .collect();
-                        for item in items {
-                            let platform_slug = item.platform_slug.clone();
-                            if let Some(slug) = platform_slug.as_deref() {
-                                if !known_platforms.contains(slug) {
-                                    let _ = state
-                                        .library
-                                        .add_platform(marina_core::Platform::new(slug, slug))
-                                        .await;
-                                }
-                            }
-                            let existing = state
-                                .library
-                                .search(
-                                    SearchQuery::new()
-                                        .platform(platform_slug.as_deref().unwrap_or_default())
-                                        .limit(usize::MAX),
-                                )
-                                .await
-                                .ok()
-                                .and_then(|items| {
-                                    items
-                                        .into_iter()
-                                        .find(|candidate| candidate.local_path == item.local_path)
-                                });
-                            if existing.is_some() {
-                                continue;
-                            }
-                            if let Err(error) = state.library.add(item).await {
-                                error!(%error, "failed to store scanned local game");
-                            }
-                        }
-                        // Prune entries in the scanner's domain whose files no
-                        // longer exist physically. Anything outside
-                        // `<root>/roms` (e.g. XDG apps) is left alone.
-                        let roms_root = root.join("roms");
-                        match state
-                            .library
-                            .search(SearchQuery::new().limit(usize::MAX))
-                            .await
-                        {
-                            Ok(stored) => {
-                                for item in stored {
-                                    let Some(path) = item.local_path.as_deref() else {
-                                        continue;
-                                    };
-                                    if !std::path::Path::new(path).starts_with(&roms_root) {
-                                        continue;
-                                    }
-                                    if !scanned_paths.contains(path) {
-                                        info!(path, "local game files vanished; removing entry");
-                                        if let Err(error) = state.library.remove(&item.id).await {
-                                            error!(%error, path, "failed to remove vanished game");
-                                        }
-                                    }
-                                }
-                            }
-                            Err(error) => error!(%error, "failed to list library for prune"),
-                        }
-                    }
-                    Err(error) => error!(%error, "local game scan failed"),
-                },
-                Err(error) => {
-                    error!(%error, path = %root.display(), "could not inspect local library root")
-                }
-            }
-        }
-    }
+    app::reconcile_local_games(&state).await;
 
+    // Reconciliation changes the persisted platform/game rows. Refresh the
+    // Library projection as well as Home so a newly discovered local platform
+    // appears immediately even when its startup hydration finished earlier.
+    if let Err(error) = shelf::refresh_platform_cards(&state.library, &window).await {
+        error!(%error, "post-scan library platform refresh failed");
+    }
     refresh_home(&state, &window, loader_sources, home_sources).await;
 }
 
