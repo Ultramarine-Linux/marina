@@ -9,8 +9,10 @@ export struct NavigationItem { label: string }
 export component NavigationMenu inherits Rectangle {
     // Items shown in the nav strip (left-to-right).
     in property <[NavigationItem]> items;
-    // Index of the highlighted item; bound two-way so consumers drive routing.
+    // Index of the active tab. `show-active` can suppress its presentation for
+    // top-level sibling routes such as Settings while preserving the return tab.
     in-out property <int> active: 0;
+    in property <bool> show-active: true;
     // Fired when an item is clicked; `active` is updated first.
     callback navigate(int);
 
@@ -33,7 +35,7 @@ export component NavigationMenu inherits Rectangle {
                 width: parent.width;
                 height: parent.height;
                 border-radius: Tokens.radius-sm;
-                background: i == root.active
+                background: root.show-active && i == root.active
                     ? Tokens.color-surface-2
                     : (ta.has-hover ? Tokens.color-surface-1 : transparent);
 
@@ -42,11 +44,11 @@ export component NavigationMenu inherits Rectangle {
                     padding-right: Tokens.spacing-md;
                     lab := Text {
                         text: it.label;
-                        color: i == root.active
+                        color: root.show-active && i == root.active
                             ? Tokens.color-foreground
                             : Tokens.color-muted-foreground;
                         font-size: Tokens.typography-body-sm-size;
-                        font-weight: i == root.active
+                        font-weight: root.show-active && i == root.active
                             ? Tokens.typography-weight-semibold
                             : Tokens.typography-weight-medium;
                         vertical-alignment: center;

@@ -120,12 +120,16 @@ pub(crate) fn dispatch_controller_action(window: &MainWindow, event: InputEvent)
     match event.action {
         InputAction::PreviousTab => {
             let shell = window.global::<ShellState>();
-            shell.invoke_navigate((shell.get_active_tab() + 2) % 3);
+            if shell.get_page() != ShellPage::Settings {
+                shell.invoke_navigate((shell.get_active_tab() + 2) % 3);
+            }
             return;
         }
         InputAction::NextTab => {
             let shell = window.global::<ShellState>();
-            shell.invoke_navigate((shell.get_active_tab() + 1) % 3);
+            if shell.get_page() != ShellPage::Settings {
+                shell.invoke_navigate((shell.get_active_tab() + 1) % 3);
+            }
             return;
         }
         InputAction::Menu => return,

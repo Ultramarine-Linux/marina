@@ -42,6 +42,7 @@ export component AppShell inherits Rectangle {
     in property <string> profile-username: "user";
     in property <string> profile-initials: "U";
     in property <image> profile-image;
+    in property <ShellPage> page: ShellPage.home;
     in-out property <int> active-tab: 0;
     in-out property <string> search-query;
     in property <bool> battery-available: false;
@@ -117,6 +118,7 @@ export component AppShell inherits Rectangle {
                             y: (parent.height - self.height) / 2;
                             items: root.navigation-items;
                             active <=> root.active-tab;
+                            show-active: root.page != ShellPage.settings;
                             navigate(index) => {
                                 root.active-tab = index;
                                 root.navigate(index);

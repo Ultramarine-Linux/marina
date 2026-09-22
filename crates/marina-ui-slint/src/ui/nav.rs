@@ -7,8 +7,8 @@
 //! selected platform) lives in globals for the same reason; the trail only
 //! records *where*, the globals preserve *what*.
 //!
-//! The trail is a path, not a history: tabs are roots (jumping rebase to
-//! just the tab), drills append beneath them. Open games are not pushed:
+//! The trail is a path, not a history: tabs and Settings are roots, while
+//! drills append beneath tabs. Open games are not pushed:
 //! detail views render the selected game title as the visual current crumb,
 //! and back from a detail restores the trail top beneath it.
 
@@ -111,7 +111,10 @@ pub(crate) fn push_tab(window: &MainWindow, index: i32) {
 }
 
 pub(crate) fn open_settings(window: &MainWindow) {
-    push(Crumb::Settings);
+    with_stack(|stack| {
+        stack.clear();
+        stack.push(Crumb::Settings);
+    });
     window.global::<ShellState>().set_page(ShellPage::Settings);
     publish(window);
     let weak = window.as_weak();
@@ -270,8 +273,11 @@ pub(crate) fn back(window: &MainWindow) {
             restore(window, &target);
         }
         ShellPage::Settings => {
-            let fallback = active_tab_root(&shell);
-            let target = pop().unwrap_or(fallback);
+            let target = active_tab_root(&shell);
+            with_stack(|stack| {
+                stack.clear();
+                stack.push(target.clone());
+            });
             restore(window, &target);
         }
         ShellPage::Library if window.global::<LibraryState>().get_page() == 1 => {
