@@ -32,7 +32,7 @@ pub(crate) fn configure_navigation(window: &MainWindow) {
             _ => ShellPage::Store,
         };
         if shell.get_active_tab() == index && shell.get_page() == target {
-            window.invoke_focus_navigation();
+            window.invoke_focus_content();
             return;
         }
         nav::push_tab(&window, index);

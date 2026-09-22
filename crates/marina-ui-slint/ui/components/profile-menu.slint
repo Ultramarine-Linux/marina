@@ -17,7 +17,6 @@ export component ProfileChip inherits Rectangle {
     in property <string> profile-initials: "U";
     in property <image> profile-image;
     callback activated;
-    callback focus-right;
     callback focus-content;
 
     forward-focus: chip-scope;
@@ -76,7 +75,6 @@ export component ProfileChip inherits Rectangle {
         height: 0px;
         key-pressed(event) => {
             if (event.text == Key.RightArrow) {
-                root.focus-right();
                 return accept;
             }
             if (event.text == Key.DownArrow) {

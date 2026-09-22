@@ -19,7 +19,7 @@ export { GameState } from "../components/game-details-view.slint";
 export { StoreState } from "store.slint";
 
 export component MainWindow inherits Window {
-    callback focus-navigation;
+    callback focus-content;
     property <[NavigationItem]> navigation-items: [
         { label: "Home" },
         { label: "Library" },
@@ -52,10 +52,12 @@ export component MainWindow inherits Window {
         focus-content => { ShellState.content-focus-request += 1; }
         profile-action(action) => { ShellState.profile-action(action); }
 
-        PageRouter { }
+        PageRouter {
+            focus-header => { shell.focus-profile(); }
+        }
     }
 
-    focus-navigation => { shell.focus(); }
+    focus-content => { ShellState.content-focus-request += 1; }
 
     Toaster {
         width: parent.width;

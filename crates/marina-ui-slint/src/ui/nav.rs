@@ -367,7 +367,7 @@ pub(crate) fn goto_tab(window: &MainWindow, index: i32) {
     if !left_home {
         home.invoke_cover_context_changed(index);
     }
-    window.invoke_focus_navigation();
+    window.invoke_focus_content();
 }
 
 fn restore(window: &MainWindow, target: &Crumb) {
@@ -405,7 +405,7 @@ fn restore_library_games(window: &MainWindow, slug: &str) {
     *suppress_push().lock().expect("breadcrumb lock poisoned") = true;
     library.invoke_platform_query(SharedString::from(slug));
     *suppress_push().lock().expect("breadcrumb lock poisoned") = false;
-    window.invoke_focus_navigation();
+    window.invoke_focus_content();
 }
 
 fn restore_store_games(window: &MainWindow, slug: &str) {
@@ -429,5 +429,5 @@ fn restore_store_games(window: &MainWindow, slug: &str) {
     *suppress_push().lock().expect("breadcrumb lock poisoned") = true;
     store.invoke_platform_query(SharedString::from(slug));
     *suppress_push().lock().expect("breadcrumb lock poisoned") = false;
-    window.invoke_focus_navigation();
+    window.invoke_focus_content();
 }

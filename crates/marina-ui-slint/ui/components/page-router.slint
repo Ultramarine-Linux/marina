@@ -29,6 +29,7 @@ export component PageRouter inherits Rectangle {
         loading: GameState.details-loading;
         focus-request: ShellState.content-focus-request;
         action-requested => { GameState.play-requested(GameState.selected-game.id); }
+        focus-header => { root.focus-header(); }
     }
 
     if ShellState.page == ShellPage.home: Rectangle {

@@ -57,7 +57,11 @@ export component AppShell inherits Rectangle {
     property <bool> profile-menu-open: false;
 
     background: Tokens.color-background.with-alpha(0.92);
-    forward-focus: navigation;
+    forward-focus: profile-chip;
+
+    public function focus-profile() {
+        profile-chip.focus-chip();
+    }
 
     VerticalLayout {
         // Only persistent shell chrome owns the outer padding. Routed pages
@@ -96,7 +100,6 @@ export component AppShell inherits Rectangle {
                                 root.profile-menu-open = true;
                                 profile-dropdown.focus();
                             }
-                            focus-right => { navigation.focus(); }
                             focus-content => { root.focus-content(); }
                         }
                     }
@@ -118,8 +121,6 @@ export component AppShell inherits Rectangle {
                                 root.active-tab = index;
                                 root.navigate(index);
                             }
-                            focus-content => { root.focus-content(); }
-                            focus-left => { profile-chip.focus-chip(); }
                         }
                     }
 
