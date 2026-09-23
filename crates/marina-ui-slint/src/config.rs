@@ -48,9 +48,7 @@ use figment::{
     providers::{Format, Toml},
 };
 use marina_config_derive::ConfigTemplate;
-use marina_portmaster::{
-    DEFAULT_HARBOURMASTER, DEFAULT_PORTS_DIR, DEFAULT_RELEASE, PortMasterConfig,
-};
+use marina_portmaster::{DEFAULT_PORTS_DIR, DEFAULT_RELEASE, PortMasterConfig};
 use marina_runtime::{
     PlatformRuntimeConfig, RetroArchConfig, portmaster::Config as RuntimePortMasterConfig,
 };
@@ -149,8 +147,7 @@ struct PortMasterStoreConfig {
     enable: Option<bool>,
     #[serde(default = "default_portmaster_release")]
     release: String,
-    #[serde(default = "default_portmaster_binary")]
-    binary: PathBuf,
+
     #[serde(default = "default_portmaster_ports_dir")]
     ports_dir: PathBuf,
 }
@@ -158,9 +155,7 @@ struct PortMasterStoreConfig {
 fn default_portmaster_release() -> String {
     DEFAULT_RELEASE.to_owned()
 }
-fn default_portmaster_binary() -> PathBuf {
-    PathBuf::from(DEFAULT_HARBOURMASTER)
-}
+
 fn default_portmaster_ports_dir() -> PathBuf {
     PathBuf::from(DEFAULT_PORTS_DIR)
 }
@@ -249,7 +244,6 @@ impl Config {
             .unwrap_or(false)
             .then(|| PortMasterConfig {
                 release: portmaster.release.clone(),
-                binary: portmaster.binary.clone(),
                 ports_dir: portmaster.ports_dir.clone(),
             });
 

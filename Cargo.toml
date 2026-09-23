@@ -51,6 +51,7 @@ rusqlite = "0.32"
 thiserror = "2"
 tokio = { version = "1", features = ["fs", "macros", "process", "rt-multi-thread", "sync", "time"] }
 zip = { version = "8.6", default-features = false, features = ["deflate"] }
+md-5 = "0.10"
 urlencoding = "2"
 async-trait = "0.1"
 tracing = "0.1"

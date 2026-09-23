@@ -41,15 +41,9 @@ pm_platform_helper() {
     ) &
 }
 
-pm_finish() {
-    # Do not leave controller keyboard helpers behind after a port exits.
-    pkill -x gptokeyb >/dev/null 2>&1 || true
-    if command -v swaymsg >/dev/null 2>&1; then
-        swaymsg -s "$SWAYSOCK" 'scratchpad show' >/dev/null 2>&1 || true
-        swaymsg -s "$SWAYSOCK" '[app_id="org.ultramarinelinux.MarinaShell"] fullscreen disable' >/dev/null 2>&1 || true
-        swaymsg -s "$SWAYSOCK" '[app_id="org.ultramarinelinux.MarinaShell"] focus' >/dev/null 2>&1 || true
-    fi
-}
+# Focus restoration is owned by the systemd ExecStopPost helper, which also
+# runs when a port crashes before reaching this callback.
+pm_finish() { :; }
 
 # Compatibility hooks used by some newer ports. They are intentionally
 # harmless until Marina implements the corresponding lifecycle integration.

@@ -4,8 +4,6 @@
 //! HarbourMaster remains the installer of record; Marina only bootstraps its
 //! PortMaster payload and registers the resulting launcher in the library.
 
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
 use std::{
     io::Cursor,
     path::{Path, PathBuf},
@@ -19,12 +17,14 @@ use marina_store::{
     InstallMode, InstallRequest, StoreBackend, StoreEntry, StoreError, StorePlatform, StoreQuery,
 };
 use serde_json::Value;
-use tokio::{process::Command, sync::Mutex};
+use tokio::sync::Mutex;
+
+mod installer;
 use zip::ZipArchive;
 
 pub const DEFAULT_RELEASE: &str = "2026-09-21_0303";
 pub const DEFAULT_PORTS_DIR: &str = "/var/games/ports";
-pub const DEFAULT_HARBOURMASTER: &str = "/var/games/ports/PortMaster/harbourmaster";
+
 const RELEASE_BASE: &str = "https://github.com/PortsMaster/PortMaster-New/releases/download";
 
 fn default_release() -> String {
@@ -33,15 +33,11 @@ fn default_release() -> String {
 fn default_ports_dir() -> PathBuf {
     PathBuf::from(DEFAULT_PORTS_DIR)
 }
-fn default_harbourmaster() -> PathBuf {
-    PathBuf::from(DEFAULT_HARBOURMASTER)
-}
 
 #[derive(Clone, Debug)]
 pub struct PortMasterConfig {
     pub release: String,
     pub ports_dir: PathBuf,
-    pub binary: PathBuf,
 }
 
 impl Default for PortMasterConfig {
@@ -49,7 +45,6 @@ impl Default for PortMasterConfig {
         Self {
             release: default_release(),
             ports_dir: default_ports_dir(),
-            binary: default_harbourmaster(),
         }
     }
 }
@@ -67,12 +62,8 @@ enum Error {
     #[error("PortMaster image archive error: {0}")]
     Zip(#[from] zip::result::ZipError),
 
-    #[error("PortMaster command failed: {status}: {stderr}")]
-    Command { status: String, stderr: String },
-    #[error("PortMaster command could not start: {0}")]
+    #[error("PortMaster file operation failed: {0}")]
     Io(#[from] std::io::Error),
-    #[error("PortMaster package installed but no launcher was found in {0}")]
-    MissingLauncher(String),
 }
 
 #[derive(Clone, Debug)]
@@ -117,55 +108,6 @@ impl PortMasterStore {
         let entries = parse_catalog(&value).map_err(StoreError::backend)?;
         *self.catalog.lock().await = Some(entries.clone());
         Ok(entries)
-    }
-
-    async fn ensure_harbourmaster(&self) -> Result<(), StoreError> {
-        if tokio::fs::try_exists(&self.config.binary)
-            .await
-            .unwrap_or(false)
-        {
-            #[cfg(unix)]
-            tokio::fs::set_permissions(&self.config.binary, std::fs::Permissions::from_mode(0o755))
-                .await
-                .map_err(|e| StoreError::backend(Error::Io(e)))?;
-            return Ok(());
-        }
-        tokio::fs::create_dir_all(&self.config.ports_dir)
-            .await
-            .map_err(|e| StoreError::backend(Error::Io(e)))?;
-        let archive = self.config.ports_dir.join("PortMaster.zip");
-        let bytes = self
-            .client
-            .get(self.asset_url("PortMaster.zip"))
-            .send()
-            .await
-            .map_err(|e| StoreError::backend(Error::Http(e)))?
-            .error_for_status()
-            .map_err(|e| StoreError::backend(Error::Http(e)))?
-            .bytes()
-            .await
-            .map_err(|e| StoreError::backend(Error::Http(e)))?;
-        tokio::fs::write(&archive, &bytes)
-            .await
-            .map_err(|e| StoreError::backend(Error::Io(e)))?;
-        let output = Command::new("python3")
-            .args(["-m", "zipfile", "-e"])
-            .arg(&archive)
-            .arg(&self.config.ports_dir)
-            .output()
-            .await
-            .map_err(|e| StoreError::backend(Error::Io(e)))?;
-        if !output.status.success() {
-            return Err(StoreError::backend(Error::Command {
-                status: output.status.to_string(),
-                stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
-            }));
-        }
-        #[cfg(unix)]
-        tokio::fs::set_permissions(&self.config.binary, std::fs::Permissions::from_mode(0o755))
-            .await
-            .map_err(|e| StoreError::backend(Error::Io(e)))?;
-        Ok(())
     }
 }
 
@@ -284,39 +226,44 @@ impl StoreBackend for PortMasterStore {
         library: &(dyn Library + Send + Sync),
         request: InstallRequest,
     ) -> Result<LibraryItem, StoreError> {
-        self.ensure_harbourmaster().await?;
+        installer::ensure_payload(
+            &self.client,
+            self.asset_url("PortMaster.zip"),
+            self.config.ports_dir.clone(),
+        )
+        .await
+        .map_err(StoreError::backend)?;
         let package_id = request.entry.entry_id.clone();
-        let install_target = request
+        let payload = request
             .entry
             .payload_json
             .as_deref()
-            .and_then(|json| serde_json::from_str::<Value>(json).ok())
-            .and_then(|port| {
-                port.pointer("/source/url")
-                    .and_then(Value::as_str)
+            .and_then(|json| serde_json::from_str::<Value>(json).ok());
+        let install_target = payload
+            .as_ref()
+            .and_then(|port| port.pointer("/source/url").and_then(Value::as_str))
+            .ok_or_else(|| StoreError::backend(installer::Error::MissingLauncher))?;
+        let expected_md5 = payload
+            .as_ref()
+            .and_then(|port| port.pointer("/source/md5").and_then(Value::as_str));
+        let items = payload
+            .as_ref()
+            .and_then(|port| port.get("items").and_then(Value::as_array))
+            .map(|items| {
+                items
+                    .iter()
+                    .filter_map(Value::as_str)
                     .map(str::to_owned)
+                    .collect()
             })
-            .unwrap_or_else(|| package_id.clone());
-        let output = Command::new("python3")
-            .arg(&self.config.binary)
-            .current_dir(&self.config.ports_dir)
-            .env("HM_TOOLS_DIR", &self.config.ports_dir)
-            .env("HM_PORTS_DIR", &self.config.ports_dir)
-            .env("HM_SCRIPTS_DIR", &self.config.ports_dir)
-            .args(["--no-check", "install", &install_target])
-            .output()
-            .await
-            .map_err(|e| StoreError::backend(Error::Io(e)))?;
-        if !output.status.success() {
-            return Err(StoreError::backend(Error::Command {
-                status: output.status.to_string(),
-                stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
-            }));
-        }
-        let launcher = find_launcher(
-            &self.config.ports_dir,
-            &package_id,
-            request.entry.payload_json.as_deref(),
+            .unwrap_or_default();
+        let launcher = installer::install_port(
+            &self.client,
+            install_target.to_owned(),
+            expected_md5,
+            package_id.clone(),
+            items,
+            self.config.ports_dir.clone(),
         )
         .await
         .map_err(StoreError::backend)?;
@@ -390,52 +337,4 @@ fn parse_catalog(value: &Value) -> Result<Vec<StoreEntry>, Error> {
             })
         })
         .collect()
-}
-
-async fn find_launcher(
-    root: &Path,
-    package: &str,
-    payload_json: Option<&str>,
-) -> Result<PathBuf, Error> {
-    if let Some(items) = payload_json
-        .and_then(|json| serde_json::from_str::<Value>(json).ok())
-        .and_then(|port| port.get("items").and_then(Value::as_array).cloned())
-    {
-        for item in items.iter().filter_map(Value::as_str) {
-            if !item.to_ascii_lowercase().ends_with(".sh") {
-                continue;
-            }
-            let candidate = root.join(item);
-            if !candidate.starts_with(root) {
-                continue;
-            }
-            if tokio::fs::try_exists(&candidate).await.unwrap_or(false) {
-                return Ok(candidate);
-            }
-        }
-    }
-    let stem = package
-        .strip_suffix(".zip")
-        .unwrap_or(package)
-        .to_ascii_lowercase();
-    let mut dirs = vec![root.to_owned()];
-    while let Some(dir) = dirs.pop() {
-        let mut entries = tokio::fs::read_dir(&dir).await?;
-        while let Some(entry) = entries.next_entry().await? {
-            let path = entry.path();
-            if path.is_dir() {
-                dirs.push(path);
-                continue;
-            }
-            if path.extension().and_then(|ext| ext.to_str()) == Some("sh")
-                && path
-                    .file_stem()
-                    .and_then(|name| name.to_str())
-                    .is_some_and(|name| name.to_ascii_lowercase() == stem)
-            {
-                return Ok(path);
-            }
-        }
-    }
-    Err(Error::MissingLauncher(root.display().to_string()))
 }
