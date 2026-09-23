@@ -11,7 +11,7 @@ use std::{
 };
 
 use async_trait::async_trait;
-use marina_core::LibraryItem;
+use marina_core::{LibraryItem, Platform};
 use marina_library::Library;
 use marina_store::{
     InstallMode, InstallRequest, StoreBackend, StoreEntry, StoreError, StorePlatform, StoreQuery,
@@ -285,6 +285,9 @@ impl StoreBackend for PortMasterStore {
                 local_path: Some(image.path.to_string_lossy().into_owned()),
             });
         }
+        let _ = library
+            .add_platform(Platform::new("portmaster", "PortMaster"))
+            .await;
         library.add(item).await.map_err(StoreError::backend)
     }
 }
