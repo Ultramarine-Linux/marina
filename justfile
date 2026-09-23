@@ -9,6 +9,7 @@ service_name := "marina-shell.service"
 portmaster_service := "systemd/portmaster@.service"
 portmaster_mount_helper := "scripts/portmaster/usr/local/libexec/portmaster-mount-stack"
 portmaster_launch_helper := "scripts/portmaster/usr/local/libexec/portmaster-launch"
+portmaster_focus_helper := "scripts/portmaster/usr/local/libexec/portmaster-focus"
 portmaster_unmount_helper := "scripts/portmaster/usr/local/libexec/portmaster-unmount-stack"
 portmaster_restore_helper := "scripts/portmaster/usr/local/libexec/portmaster-restore-marina"
 portmaster_control := "scripts/portmaster/compat/control.txt"
@@ -47,13 +48,14 @@ deploy-portmaster:
     scp {{ssh_opts}} "{{portmaster_service}}" "{{deploy_target}}:/etc/systemd/user/portmaster@.service.new"
     scp {{ssh_opts}} "{{portmaster_mount_helper}}" "{{deploy_target}}:/usr/local/libexec/portmaster-mount-stack.new"
     scp {{ssh_opts}} "{{portmaster_launch_helper}}" "{{deploy_target}}:/usr/local/libexec/portmaster-launch.new"
+    scp {{ssh_opts}} "{{portmaster_focus_helper}}" "{{deploy_target}}:/usr/local/libexec/portmaster-focus.new"
     scp {{ssh_opts}} "{{portmaster_unmount_helper}}" "{{deploy_target}}:/usr/local/libexec/portmaster-unmount-stack.new"
     scp {{ssh_opts}} "{{portmaster_restore_helper}}" "{{deploy_target}}:/usr/local/libexec/portmaster-restore-marina.new"
     scp {{ssh_opts}} "{{portmaster_control}}" "{{deploy_target}}:/var/games/ports/PortMaster/control.txt.new"
     scp {{ssh_opts}} "{{portmaster_mod}}" "{{deploy_target}}:/var/games/ports/PortMaster/mod_MARINA.txt.new"
     scp {{ssh_opts}} "{{portmaster_libgl}}" "{{deploy_target}}:/var/games/ports/PortMaster/libgl_default.txt.new"
     scp {{ssh_opts}} "{{portmaster_chmod}}" "{{deploy_target}}:/var/games/ports/PortMaster/bin/chmod.new"
-    ssh {{ssh_opts}} {{deploy_target}} "mv /etc/systemd/user/portmaster@.service.new /etc/systemd/user/portmaster@.service && mv /usr/local/libexec/portmaster-mount-stack.new /usr/local/libexec/portmaster-mount-stack && mv /usr/local/libexec/portmaster-launch.new /usr/local/libexec/portmaster-launch && mv /usr/local/libexec/portmaster-unmount-stack.new /usr/local/libexec/portmaster-unmount-stack && mv /usr/local/libexec/portmaster-restore-marina.new /usr/local/libexec/portmaster-restore-marina && mv /var/games/ports/PortMaster/control.txt.new /var/games/ports/PortMaster/control.txt && mv /var/games/ports/PortMaster/mod_MARINA.txt.new /var/games/ports/PortMaster/mod_MARINA.txt && rm -f /var/games/ports/PortMaster/mod_ROCKNIX.txt && mv /var/games/ports/PortMaster/libgl_default.txt.new /var/games/ports/PortMaster/libgl_default.txt && mv /var/games/ports/PortMaster/bin/chmod.new /var/games/ports/PortMaster/bin/chmod && chmod 0755 /usr/local/libexec/portmaster-mount-stack /usr/local/libexec/portmaster-launch /usr/local/libexec/portmaster-unmount-stack /usr/local/libexec/portmaster-restore-marina /var/games/ports/PortMaster/control.txt /var/games/ports/PortMaster/mod_MARINA.txt /var/games/ports/PortMaster/bin/chmod /var/games/ports/PortMaster/gptokeyb"
+    ssh {{ssh_opts}} {{deploy_target}} "mv /etc/systemd/user/portmaster@.service.new /etc/systemd/user/portmaster@.service && mv /usr/local/libexec/portmaster-mount-stack.new /usr/local/libexec/portmaster-mount-stack && mv /usr/local/libexec/portmaster-launch.new /usr/local/libexec/portmaster-launch && mv /usr/local/libexec/portmaster-focus.new /usr/local/libexec/portmaster-focus && mv /usr/local/libexec/portmaster-unmount-stack.new /usr/local/libexec/portmaster-unmount-stack && mv /usr/local/libexec/portmaster-restore-marina.new /usr/local/libexec/portmaster-restore-marina && mv /var/games/ports/PortMaster/control.txt.new /var/games/ports/PortMaster/control.txt && mv /var/games/ports/PortMaster/mod_MARINA.txt.new /var/games/ports/PortMaster/mod_MARINA.txt && rm -f /var/games/ports/PortMaster/mod_ROCKNIX.txt && mv /var/games/ports/PortMaster/libgl_default.txt.new /var/games/ports/PortMaster/libgl_default.txt && mv /var/games/ports/PortMaster/bin/chmod.new /var/games/ports/PortMaster/bin/chmod && chmod 0755 /usr/local/libexec/portmaster-mount-stack /usr/local/libexec/portmaster-launch /usr/local/libexec/portmaster-focus /usr/local/libexec/portmaster-unmount-stack /usr/local/libexec/portmaster-restore-marina /var/games/ports/PortMaster/control.txt /var/games/ports/PortMaster/mod_MARINA.txt /var/games/ports/PortMaster/bin/chmod /var/games/ports/PortMaster/gptokeyb"
 
 # Deploy, restart the graphical user service, and follow its logs over SSH.
 run-remote: deploy

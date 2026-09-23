@@ -29,6 +29,11 @@ pm_platform_helper() {
                     fi
                 done < "/sys/fs/cgroup$cgroup/cgroup.procs"
             fi
+            if [ -z "$pid" ]; then
+                # Nested user namespaces may hide the service cgroup mount;
+                # fall back to the exact executable name, never a substring.
+                pid="$(pgrep -x "$game_binary" | head -n 1)"
+            fi
             if [ -n "$pid" ] && swaymsg -s "$SWAYSOCK" '[app_id="org.ultramarinelinux.MarinaShell"] move scratchpad' >/dev/null 2>&1 \
                 && swaymsg -s "$SWAYSOCK" "[pid=$pid] focus, fullscreen enable" >/dev/null 2>&1; then
                 echo "PortMaster: moved Marina to scratchpad and fullscreened service pid $pid"

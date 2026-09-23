@@ -18,6 +18,7 @@ fi
 launcher="$(find "$install_dir" -maxdepth 1 -type f -name '*.sh' -printf '%f\n' | head -n 1)"
 [ -n "$launcher" ] || { echo "PortMaster: no launcher in $install_dir" >&2; exit 127; }
 
+export SWAYSOCK="${SWAYSOCK:-$(find /run/user/1000 -maxdepth 1 -type s -name 'sway-ipc.*.sock' -print -quit 2>/dev/null)}"
 export PORTMASTER_PORT="$port"
 export PORTMASTER_LAUNCHER="$launcher"
 export PORTMASTER_LOWER="$lower"
@@ -48,12 +49,12 @@ exec unshare -Urm /bin/sh -c '
 
     mkdir -p /roms/ports "$PORTMASTER_HOME/.local/share"
     mount -t overlay overlay \
-        -o "lowerdir=$PORTMASTER_INSTALL_DIR,upperdir=$PORTMASTER_PORT_UPPER,workdir=$PORTMASTER_PORT_WORK" \
+        -o "userxattr,lowerdir=$PORTMASTER_INSTALL_DIR,upperdir=$PORTMASTER_PORT_UPPER,workdir=$PORTMASTER_PORT_WORK" \
         /roms/ports
     mkdir -p /roms/ports/PortMaster
     mount --bind /var/games/ports/PortMaster /roms/ports/PortMaster
     mount -t overlay overlay \
-        -o "lowerdir=$PORTMASTER_EMPTY,upperdir=$PORTMASTER_HOME_UPPER,workdir=$PORTMASTER_HOME_WORK" \
+        -o "userxattr,lowerdir=$PORTMASTER_EMPTY,upperdir=$PORTMASTER_HOME_UPPER,workdir=$PORTMASTER_HOME_WORK" \
         "$PORTMASTER_HOME"
 
     exec "/roms/ports/$PORTMASTER_LAUNCHER"
