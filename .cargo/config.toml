@@ -1,5 +1,4 @@
 [env]
-# Required by surrealdb-librocksdb-sys when its `lto` feature is enabled.
 CC = { value = "/usr/bin/clang", force = false }
 CXX = { value = "/usr/bin/clang++", force = false }
 # Use Mold instead of LLD for Rust's linker-plugin LTO path.
