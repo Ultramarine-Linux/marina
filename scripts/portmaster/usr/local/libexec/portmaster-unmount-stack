@@ -1,0 +1,7 @@
+#!/bin/sh
+# Tear down the per-port overlay after a PortMaster launcher exits.
+set -u
+
+port=${1:?missing port instance}
+mountpoint -q /roms/ports && umount /roms/ports || true
+rm -rf "/run/portmaster/work/$port"

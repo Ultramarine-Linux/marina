@@ -48,7 +48,12 @@ use figment::{
     providers::{Format, Toml},
 };
 use marina_config_derive::ConfigTemplate;
-use marina_runtime::{PlatformRuntimeConfig, RetroArchConfig};
+use marina_portmaster::{
+    DEFAULT_HARBOURMASTER, DEFAULT_PORTS_DIR, DEFAULT_RELEASE, PortMasterConfig,
+};
+use marina_runtime::{
+    PlatformRuntimeConfig, RetroArchConfig, portmaster::Config as RuntimePortMasterConfig,
+};
 use serde::Deserialize;
 use tracing::warn;
 
@@ -66,6 +71,9 @@ struct FileConfig {
     #[serde(default)]
     #[template(table)]
     retroarch: RetroArchConfig,
+    #[serde(default)]
+    #[template(table)]
+    portmaster: RuntimePortMasterConfig,
     /// Per-platform backend and core selection, keyed by platform slug.
     #[serde(default)]
     #[template(example = "gba")]
@@ -79,6 +87,9 @@ struct StoreSection {
     #[serde(default)]
     #[template(table)]
     romm: RommConfig,
+    #[serde(default)]
+    #[template(table)]
+    portmaster: PortMasterStoreConfig,
 }
 
 #[derive(Clone, Debug, Default, Deserialize, ConfigTemplate)]
@@ -131,6 +142,29 @@ pub struct RommConfig {
     pub import_on_startup: Option<bool>,
 }
 
+#[derive(Clone, Debug, Default, Deserialize, ConfigTemplate)]
+struct PortMasterStoreConfig {
+    #[serde(default)]
+    #[template(env = "MARINA_ENABLE_PORTMASTER", example = "false")]
+    enable: Option<bool>,
+    #[serde(default = "default_portmaster_release")]
+    release: String,
+    #[serde(default = "default_portmaster_binary")]
+    binary: PathBuf,
+    #[serde(default = "default_portmaster_ports_dir")]
+    ports_dir: PathBuf,
+}
+
+fn default_portmaster_release() -> String {
+    DEFAULT_RELEASE.to_owned()
+}
+fn default_portmaster_binary() -> PathBuf {
+    PathBuf::from(DEFAULT_HARBOURMASTER)
+}
+fn default_portmaster_ports_dir() -> PathBuf {
+    PathBuf::from(DEFAULT_PORTS_DIR)
+}
+
 #[derive(Debug)]
 pub struct Config {
     pub storage_uri: String,
@@ -139,11 +173,13 @@ pub struct Config {
     pub romm_url: Option<String>,
     pub romm_token: Option<String>,
     pub import_romm_on_startup: bool,
+    pub portmaster_store: Option<PortMasterConfig>,
     pub scan_on_startup: bool,
     pub library_root: Option<std::path::PathBuf>,
     pub clock_twelve_hour: bool,
 
     pub retroarch: RetroArchConfig,
+    pub portmaster: RuntimePortMasterConfig,
     pub platforms: HashMap<String, PlatformRuntimeConfig>,
 }
 
@@ -173,6 +209,7 @@ impl Config {
             }
         };
         let romm = &file.store.romm;
+        let portmaster = &file.store.portmaster;
 
         let romm_enabled = romm.enable.unwrap_or(false);
         let romm_url = if romm_enabled { romm.url.clone() } else { None };
@@ -207,6 +244,15 @@ impl Config {
             })
             .unwrap_or_else(|| "sqlite://marina.db".to_owned());
 
+        let portmaster_config = portmaster
+            .enable
+            .unwrap_or(false)
+            .then(|| PortMasterConfig {
+                release: portmaster.release.clone(),
+                binary: portmaster.binary.clone(),
+                ports_dir: portmaster.ports_dir.clone(),
+            });
+
         Self {
             storage_uri: file
                 .library
@@ -234,10 +280,12 @@ impl Config {
             romm_url,
             romm_token,
             import_romm_on_startup,
+            portmaster_store: portmaster_config,
             scan_on_startup,
             clock_twelve_hour,
             library_root: file.library.root.clone().or(default_library_root),
             retroarch: file.retroarch.clone(),
+            portmaster: file.portmaster.clone(),
             platforms: file.platform.clone(),
         }
     }

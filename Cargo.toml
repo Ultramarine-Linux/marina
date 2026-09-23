@@ -17,6 +17,7 @@ members = [
     "crates/marina-test",
     "crates/marina-input",
     "crates/marina-runtime",
+    "crates/marina-portmaster",
     "crates/marina-power",
     "crates/marina-config-derive",
     "crates/marina-ui-slint",
@@ -48,7 +49,7 @@ toml_edit = "0.19"
 serde_urlencoded = "0.7"
 rusqlite = "0.32"
 thiserror = "2"
-tokio = { version = "1", features = ["macros", "process", "rt-multi-thread", "time"] }
+tokio = { version = "1", features = ["fs", "macros", "process", "rt-multi-thread", "sync", "time"] }
 urlencoding = "2"
 async-trait = "0.1"
 tracing = "0.1"
@@ -69,4 +70,5 @@ marina-library = { path = "crates/marina-library" }
 marina-store-sqlite = { path = "crates/marina-store-sqlite" }
 marina-input = { path = "crates/marina-input" }
 marina-runtime = { path = "crates/marina-runtime" }
+marina-portmaster = { path = "crates/marina-portmaster" }
 marina-power = { path = "crates/marina-power" }

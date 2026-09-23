@@ -45,6 +45,7 @@ pub(crate) fn install(
             let launch_config = Config::from_env();
             let game_launcher = GameLauncher::new()
                 .with_retroarch_config(launch_config.retroarch)
+                .with_portmaster_config(launch_config.portmaster)
                 .with_platform_configs(launch_config.platforms);
             match state.library.get(&item_id).await {
                 Ok(Some(item)) => match game_launcher.launch_item(&item).await {

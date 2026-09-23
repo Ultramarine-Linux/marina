@@ -6,7 +6,7 @@ use std::{
 };
 
 use async_trait::async_trait;
-use marina_store::{StoreBackend, StoreEntry, StoreError, StorePlatform, StoreQuery};
+use marina_store::{InstallMode, StoreBackend, StoreEntry, StoreError, StorePlatform, StoreQuery};
 
 use crate::{Auth, Client, PlatformQuery, Rom, RomQuery};
 
@@ -119,6 +119,10 @@ impl StoreBackend for RommStore {
 
     fn display_name(&self) -> &str {
         "RomM"
+    }
+
+    fn install_mode(&self) -> InstallMode {
+        InstallMode::MultipleArtifacts
     }
 
     fn as_any(&self) -> &dyn std::any::Any {

@@ -126,7 +126,8 @@ export component PageRouter inherits Rectangle {
         details-loading <=> StoreState.details-loading;
         install-status <=> StoreState.install-status;
         install-progress <=> StoreState.install-progress;
-        artifact-sheet-open <=> StoreState.artifact-sheet-open;
+        artifact-sheet-open: StoreState.artifact-sheet-open;
+        direct-install: StoreState.direct-install;
         platform-query(slug) => { StoreState.platform-query(slug); }
         game-selected(id, index) => { StoreState.game-selected(id, index); }
         artifact-selected(index) => { StoreState.artifact-selected(index); }
