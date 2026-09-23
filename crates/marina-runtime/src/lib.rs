@@ -116,7 +116,9 @@ impl PlatformRuntimeConfig {
                 }
             }
         }
-        if self.retroarch.core.is_some() || platform_slug != "apps" {
+        if platform_slug == "portmaster" {
+            PlatformBackendKind::Portmaster
+        } else if self.retroarch.core.is_some() || platform_slug != "apps" {
             PlatformBackendKind::RetroArch
         } else {
             PlatformBackendKind::Native
@@ -283,6 +285,12 @@ pub enum LaunchError {
     UnsupportedBackend(String),
     #[error("invalid PortMaster launcher path: {path}")]
     InvalidPortLauncher { path: String },
+    #[error("failed to prepare PortMaster save directory {path}: {source}")]
+    PortmasterSetup {
+        path: String,
+        #[source]
+        source: std::io::Error,
+    },
 }
 
 /// Launches games as transient per-user systemd services in `graphical-apps.slice`.
@@ -736,6 +744,15 @@ mod tests {
     fn apps_platform_defaults_to_native() {
         let config = PlatformRuntimeConfig::default();
         assert_eq!(config.backend_kind("apps"), PlatformBackendKind::Native);
+    }
+
+    #[test]
+    fn portmaster_platform_defaults_to_portmaster() {
+        let config = PlatformRuntimeConfig::default();
+        assert_eq!(
+            config.backend_kind("portmaster"),
+            PlatformBackendKind::Portmaster
+        );
     }
 
     #[test]

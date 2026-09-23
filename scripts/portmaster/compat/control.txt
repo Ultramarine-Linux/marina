@@ -1,0 +1,59 @@
+#!/bin/bash
+# Marina PortMaster compatibility layer for the ROCKNIX-compatible TG5050.
+# This file is sourced by upstream port launchers; it intentionally avoids
+# CFW GUI, sudo, and EmulationStation integration.
+
+ESUDO=""
+ESUDOKILL="-1"
+directory="roms"
+controlfolder="/roms/ports/PortMaster"
+CFW_NAME="ROCKNIX"
+DEVICE_ARCH="aarch64"
+DISPLAY_WIDTH=720
+DISPLAY_HEIGHT=1280
+ANALOGSTICKS=2
+LOWRES="N"
+
+export CFW_NAME DEVICE_ARCH DISPLAY_WIDTH DISPLAY_HEIGHT ANALOGSTICKS LOWRES
+# Keep CFW_NAME=ROCKNIX for upstream port feature gates, while loading
+# Marina's own platform hooks from a separately named module.
+[ -f "$controlfolder/mod_MARINA.txt" ] && source "$controlfolder/mod_MARINA.txt"
+export SDL_GAMECONTROLLERCONFIG_FILE="$controlfolder/gamecontrollerdb.txt"
+
+get_controls() {
+    export SDL_GAMECONTROLLERCONFIG_FILE="$controlfolder/gamecontrollerdb.txt"
+    # SDL_GAMECONTROLLERCONFIG is inherited by every child process, so never
+    # export the complete database (it is hundreds of KiB). Keep one mapping.
+    controller_guid="030000005e0400008e02000014010000"
+    sdl_controllerconfig="$(grep -i "^${controller_guid}," "$SDL_GAMECONTROLLERCONFIG_FILE" 2>/dev/null | head -n 1)"
+    printf '%s\n' "$sdl_controllerconfig" > /tmp/gamecontrollerdb.txt
+    export sdl_controllerconfig
+}
+
+GPTOKEYB="$controlfolder/gptokeyb"
+
+# PortMaster's contract is bind_directories SOURCE TARGET: the target is
+# exposed at the source path. A real bind mount is unavailable without root,
+# so use the upstream no-root symlink fallback inside PrivateTmp.
+bind_directories() {
+    while [ "$#" -ge 2 ]; do
+        source_dir="$1"
+        target_dir="$2"
+        shift 2
+        mkdir -p "$(dirname "$source_dir")" "$target_dir"
+        rm -rf "$source_dir"
+        ln -s "$target_dir" "$source_dir"
+    done
+}
+
+bind_files() {
+    while [ "$#" -ge 2 ]; do
+        source_file="$1"
+        target_file="$2"
+        shift 2
+        mkdir -p "$(dirname "$source_file")"
+        [ -f "$target_file" ] || : > "$target_file"
+        rm -f "$source_file"
+        ln -s "$target_file" "$source_file"
+    done
+}

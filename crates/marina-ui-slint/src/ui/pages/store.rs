@@ -713,11 +713,12 @@ pub(crate) fn install(
                                         .collect::<Vec<_>>()
                                 })
                                 .unwrap_or_default();
-                            let image_url = payload
-                                .as_ref()
-                                .and_then(|payload| payload.get("marina_image_url"))
-                                .and_then(serde_json::Value::as_str)
-                                .map(str::to_owned);
+                            let image_path = backend
+                                .preview_image(&entry)
+                                .await
+                                .ok()
+                                .flatten()
+                                .map(|image| image.path);
                             let selected_card_id = card_id(&backend_id, &entry_id);
                             let details = PreviewDetailsData {
                                 title: SharedString::from(entry.title),
@@ -740,13 +741,14 @@ pub(crate) fn install(
                                     }
                                 }
                             });
-                            if let Some(image_url) = image_url {
+                            if let Some(image_path) = image_path {
                                 let image_window = detail_window.clone();
                                 let image_session = active_session.clone();
                                 let image_generation = generation_guard.clone();
                                 let image_task = tokio::spawn(async move {
+                                    let image_path = image_path.to_string_lossy().into_owned();
                                     let source =
-                                        crate::covers::source_for(Some(&image_url), None, None);
+                                        crate::covers::source_for(None, Some(&image_path), None);
                                     let Some(decoded) = crate::image::load_scaled(
                                         &source,
                                         "store-preview",

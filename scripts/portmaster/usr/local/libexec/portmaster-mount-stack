@@ -1,16 +1,15 @@
 #!/bin/sh
-# Build the per-port overlay used by portmaster@.service.
-# This runs in the service's unprivileged user/mount namespace; no host mount
-# or root privilege is required.
+# Mount the per-port overlay in systemd's private mount namespace.
 set -u
 
 port=${1:?missing port instance}
-base=/run/portmaster
+base=/run/user/1000/portmaster
+lower="$base/lower"
+upper="$base/upper"
 work="$base/work/$port"
+merged=/roms/ports
 
-# The service has already bound the host payload and persistent upperdir at
-# these paths inside its private root. Mount only the merged PortMaster view.
-mkdir -p /roms/ports "$work"
+mkdir -p "$work" "$merged"
 mount -t overlay overlay \
-  -o "lowerdir=$base/lower,upperdir=$base/upper,workdir=$work" \
-  /roms/ports
+  -o "lowerdir=$lower,upperdir=$upper,workdir=$work" \
+  "$merged"

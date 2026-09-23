@@ -7,6 +7,7 @@
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 use std::{
+    io::Cursor,
     path::{Path, PathBuf},
     sync::Arc,
 };
@@ -19,6 +20,7 @@ use marina_store::{
 };
 use serde_json::Value;
 use tokio::{process::Command, sync::Mutex};
+use zip::ZipArchive;
 
 pub const DEFAULT_RELEASE: &str = "2026-09-21_0303";
 pub const DEFAULT_PORTS_DIR: &str = "/var/games/ports";
@@ -58,6 +60,12 @@ enum Error {
     Http(#[from] reqwest::Error),
     #[error("PortMaster catalog has an unsupported JSON shape")]
     CatalogShape,
+    #[error("PortMaster image archive is missing {0}")]
+    ImageMissing(String),
+    #[error("PortMaster image archive contains an unsafe path")]
+    UnsafeArchivePath,
+    #[error("PortMaster image archive error: {0}")]
+    Zip(#[from] zip::result::ZipError),
 
     #[error("PortMaster command failed: {status}: {stderr}")]
     Command { status: String, stderr: String },
@@ -172,6 +180,58 @@ impl StoreBackend for PortMasterStore {
     fn install_mode(&self) -> InstallMode {
         InstallMode::SingleArtifact
     }
+    async fn preview_image(
+        &self,
+        entry: &StoreEntry,
+    ) -> Result<Option<marina_store::StoreImage>, StoreError> {
+        let Some(image_name) = entry
+            .payload_json
+            .as_deref()
+            .and_then(|json| serde_json::from_str::<Value>(json).ok())
+            .and_then(|port| {
+                port.pointer("/attr/image/screenshot")
+                    .and_then(Value::as_str)
+                    .map(str::to_owned)
+            })
+            .filter(|name| !name.is_empty())
+        else {
+            return Ok(None);
+        };
+        let package = entry.entry_id.trim_end_matches(".zip");
+        let extension = image_name.rsplit('.').next().unwrap_or("png");
+        let member = format!("{package}.screenshot.{extension}");
+        let media_dir = self.config.ports_dir.join(".marina-media");
+        tokio::fs::create_dir_all(&media_dir)
+            .await
+            .map_err(|e| StoreError::backend(Error::Io(e)))?;
+        let archive_path = media_dir.join(format!("images-{}.zip", self.config.release));
+        if !tokio::fs::try_exists(&archive_path).await.unwrap_or(false) {
+            let bytes = self
+                .client
+                .get(self.asset_url("images.zip"))
+                .send()
+                .await
+                .map_err(|e| StoreError::backend(Error::Http(e)))?
+                .error_for_status()
+                .map_err(|e| StoreError::backend(Error::Http(e)))?
+                .bytes()
+                .await
+                .map_err(|e| StoreError::backend(Error::Http(e)))?;
+            tokio::fs::write(&archive_path, bytes)
+                .await
+                .map_err(|e| StoreError::backend(Error::Io(e)))?;
+        }
+        let image_path = media_dir.join(&member);
+        if !tokio::fs::try_exists(&image_path).await.unwrap_or(false) {
+            let archive = archive_path.clone();
+            let output = image_path.clone();
+            tokio::task::spawn_blocking(move || extract_image(&archive, &member, &output))
+                .await
+                .map_err(|e| StoreError::backend(Error::Io(std::io::Error::other(e))))?
+                .map_err(StoreError::backend)?;
+        }
+        Ok(Some(marina_store::StoreImage::new(image_path)))
+    }
     fn as_any(&self) -> &dyn std::any::Any {
         self
     }
@@ -253,9 +313,13 @@ impl StoreBackend for PortMasterStore {
                 stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
             }));
         }
-        let launcher = find_launcher(&self.config.ports_dir, &package_id)
-            .await
-            .map_err(StoreError::backend)?;
+        let launcher = find_launcher(
+            &self.config.ports_dir,
+            &package_id,
+            request.entry.payload_json.as_deref(),
+        )
+        .await
+        .map_err(StoreError::backend)?;
         let mut item = LibraryItem::new_game(request.entry.title.clone());
         item.platform_slug = Some("portmaster".into());
         item.local_path = Some(launcher.to_string_lossy().into_owned());
@@ -263,43 +327,37 @@ impl StoreBackend for PortMasterStore {
             .insert("portmaster.package".into(), package_id.clone());
         item.provider_ids
             .insert("portmaster.release".into(), self.config.release.clone());
-        if let Some(image_url) = request
-            .entry
-            .payload_json
-            .as_deref()
-            .and_then(|json| serde_json::from_str::<Value>(json).ok())
-            .and_then(|port| {
-                port.get("marina_image_url")
-                    .and_then(Value::as_str)
-                    .map(str::to_owned)
-            })
-        {
-            let image_path = self
-                .config
-                .ports_dir
-                .join(".marina-media")
-                .join(format!("{}.png", package_id.trim_end_matches(".zip")));
-            if let Some(parent) = image_path.parent() {
-                tokio::fs::create_dir_all(parent)
-                    .await
-                    .map_err(|e| StoreError::backend(Error::Io(e)))?;
-            }
-            if let Ok(response) = self.client.get(&image_url).send().await
-                && let Ok(response) = response.error_for_status()
-                && let Ok(bytes) = response.bytes().await
-            {
-                tokio::fs::write(&image_path, bytes)
-                    .await
-                    .map_err(|e| StoreError::backend(Error::Io(e)))?;
-                item.assets.push(marina_core::LibraryAsset {
-                    kind: marina_core::LibraryAssetKind::CoverLarge,
-                    source: Some(image_url),
-                    local_path: Some(image_path.to_string_lossy().into_owned()),
-                });
-            }
+        if let Some(image) = self.preview_image(&request.entry).await? {
+            item.assets.push(marina_core::LibraryAsset {
+                kind: marina_core::LibraryAssetKind::CoverLarge,
+                source: None,
+                local_path: Some(image.path.to_string_lossy().into_owned()),
+            });
         }
         library.add(item).await.map_err(StoreError::backend)
     }
+}
+
+fn extract_image(archive_path: &Path, member: &str, output: &Path) -> Result<(), Error> {
+    if Path::new(member).components().any(|component| {
+        matches!(
+            component,
+            std::path::Component::ParentDir
+                | std::path::Component::RootDir
+                | std::path::Component::Prefix(_)
+        )
+    }) {
+        return Err(Error::UnsafeArchivePath);
+    }
+    let bytes = std::fs::read(archive_path)?;
+    let mut archive = ZipArchive::new(Cursor::new(bytes))?;
+    let mut image = archive.by_name(member).map_err(|error| match error {
+        zip::result::ZipError::FileNotFound => Error::ImageMissing(member.to_owned()),
+        other => Error::Zip(other),
+    })?;
+    let mut output_file = std::fs::File::create(output)?;
+    std::io::copy(&mut image, &mut output_file)?;
+    Ok(())
 }
 
 fn parse_catalog(value: &Value) -> Result<Vec<StoreEntry>, Error> {
@@ -321,21 +379,7 @@ fn parse_catalog(value: &Value) -> Result<Vec<StoreEntry>, Error> {
                 .or_else(|| port.get("title").and_then(Value::as_str))
                 .unwrap_or(package)
                 .to_owned();
-            let image_url = port
-                .pointer("/attr/image/screenshot")
-                .and_then(Value::as_str)
-                .filter(|image| !image.is_empty())
-                .map(|image| {
-                                    format!(
-                                        "https://github.com/PortsMaster/PortMaster-Info/raw/main/images/{}.screenshot.{}",
-                                        package_key.trim_end_matches(".zip"),
-                                        image.rsplit('.').next().unwrap_or("png")
-                                    )
-                                });
-            let mut payload = port.clone();
-            if let Some(image_url) = image_url {
-                payload["marina_image_url"] = Value::String(image_url);
-            }
+            let payload = port.clone();
             Ok(StoreEntry {
                 backend_id: "portmaster".into(),
                 entry_id: package.to_owned(),
@@ -348,7 +392,28 @@ fn parse_catalog(value: &Value) -> Result<Vec<StoreEntry>, Error> {
         .collect()
 }
 
-async fn find_launcher(root: &Path, package: &str) -> Result<PathBuf, Error> {
+async fn find_launcher(
+    root: &Path,
+    package: &str,
+    payload_json: Option<&str>,
+) -> Result<PathBuf, Error> {
+    if let Some(items) = payload_json
+        .and_then(|json| serde_json::from_str::<Value>(json).ok())
+        .and_then(|port| port.get("items").and_then(Value::as_array).cloned())
+    {
+        for item in items.iter().filter_map(Value::as_str) {
+            if !item.to_ascii_lowercase().ends_with(".sh") {
+                continue;
+            }
+            let candidate = root.join(item);
+            if !candidate.starts_with(root) {
+                continue;
+            }
+            if tokio::fs::try_exists(&candidate).await.unwrap_or(false) {
+                return Ok(candidate);
+            }
+        }
+    }
     let stem = package
         .strip_suffix(".zip")
         .unwrap_or(package)

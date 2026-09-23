@@ -39,6 +39,18 @@ pub struct StorePlatform {
     pub game_count: Option<u64>,
 }
 
+/// A local preview image supplied by a store backend.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StoreImage {
+    pub path: std::path::PathBuf,
+}
+
+impl StoreImage {
+    pub fn new(path: impl Into<std::path::PathBuf>) -> Self {
+        Self { path: path.into() }
+    }
+}
+
 /// A lightweight catalog entry. Full backend payloads stay behind the
 /// backend; `payload_json` round-trips the raw record for the cache.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -98,6 +110,9 @@ pub trait StoreBackend: Send + Sync + std::fmt::Debug {
     fn display_name(&self) -> &str;
     fn install_mode(&self) -> InstallMode {
         InstallMode::SingleArtifact
+    }
+    async fn preview_image(&self, _entry: &StoreEntry) -> Result<Option<StoreImage>, StoreError> {
+        Ok(None)
     }
     async fn list_platforms(&self) -> Result<Vec<StorePlatform>, StoreError>;
     async fn browse(&self, query: StoreQuery) -> Result<Vec<StoreEntry>, StoreError>;

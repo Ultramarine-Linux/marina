@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use marina_config_derive::ConfigTemplate;
 use marina_core::LibraryItem;
 use serde::Deserialize;
+use tokio::process::Command;
 use tracing::info;
 
 use crate::{LaunchError, LaunchRequest, LaunchedGame, start_user_service};
@@ -47,7 +48,19 @@ pub(crate) async fn launch(
     config: &Config,
 ) -> Result<LaunchedGame, LaunchError> {
     let instance = instance_name(&request.executable, &config.ports_dir)?;
-    let unit_name = format!("{SERVICE_TEMPLATE}{instance}.service");
+
+    let escaped = Command::new("systemd-escape")
+        .args(["--template=portmaster@.service", &instance])
+        .output()
+        .await
+        .map_err(LaunchError::Spawn)?;
+    if !escaped.status.success() {
+        return Err(LaunchError::Systemd {
+            status: escaped.status.to_string(),
+            stderr: String::from_utf8_lossy(&escaped.stderr).trim().to_owned(),
+        });
+    }
+    let unit_name = String::from_utf8_lossy(&escaped.stdout).trim().to_owned();
     info!(unit = %unit_name, port = %instance, "starting contained PortMaster service");
     start_user_service(&unit_name, &request.title).await
 }
@@ -76,7 +89,7 @@ pub fn instance_name(executable: &Path, ports_dir: &Path) -> Result<String, Laun
         })?;
     if !instance
         .bytes()
-        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.'))
+        .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b' '))
     {
         return Err(LaunchError::InvalidPortLauncher {
             path: executable.display().to_string(),

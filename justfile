@@ -6,6 +6,13 @@ package := "marina-ui-slint"
 binary := "marina-ui-slint"
 service := "systemd/marina-shell.service"
 service_name := "marina-shell.service"
+portmaster_service := "systemd/portmaster@.service"
+portmaster_mount_helper := "scripts/portmaster/usr/local/libexec/portmaster-mount-stack"
+portmaster_unmount_helper := "scripts/portmaster/usr/local/libexec/portmaster-unmount-stack"
+portmaster_control := "scripts/portmaster/compat/control.txt"
+portmaster_mod := "scripts/portmaster/compat/mod_MARINA.txt"
+portmaster_libgl := "scripts/portmaster/compat/libgl_default.txt"
+portmaster_chmod := "scripts/portmaster/compat/bin/chmod"
 deploy_target := env_var_or_default("DEPLOY_TARGET", "root@handheld")
 user_target := env_var_or_default("USER_TARGET", "ultramarine@handheld")
 deploy_path := env_var_or_default("DEPLOY_PATH", "/opt/marina/marina-ui-slint")
@@ -22,7 +29,7 @@ cross-build:
     CARGO_INCREMENTAL=1 cross build --config 'build.rustc-wrapper=""' --target {{target}} -p {{package}} --release
 
 # Upload the cross-compiled binary and user service to the configured handheld.
-deploy: cross-build deploy-service
+deploy: cross-build deploy-service deploy-portmaster
     ssh {{ssh_opts}} {{deploy_target}} "mkdir -p \"$(dirname '{{deploy_path}}')\""
     rsync -e "ssh {{ssh_opts}}" --archive --compress --progress --stats "target/{{target}}/release/{{binary}}" "{{deploy_target}}:{{deploy_path}}"
     ssh {{ssh_opts}} {{deploy_target}} "chmod +x '{{deploy_path}}'"
@@ -31,6 +38,18 @@ deploy-service:
     ssh {{ssh_opts}} {{deploy_target}} "mkdir -p \"$(dirname '{{deploy_service_path}}')\""
     scp {{ssh_opts}} "{{service}}" "{{deploy_target}}:{{deploy_service_path}}.new"
     ssh {{ssh_opts}} {{deploy_target}} "mv '{{deploy_service_path}}.new' '{{deploy_service_path}}'"
+
+# Deploy the PortMaster user template and namespace mount helpers.
+deploy-portmaster:
+    ssh {{ssh_opts}} {{deploy_target}} "mkdir -p /etc/systemd/user /usr/local/libexec /var/games/ports/PortMaster/bin"
+    scp {{ssh_opts}} "{{portmaster_service}}" "{{deploy_target}}:/etc/systemd/user/portmaster@.service.new"
+    scp {{ssh_opts}} "{{portmaster_mount_helper}}" "{{deploy_target}}:/usr/local/libexec/portmaster-mount-stack.new"
+    scp {{ssh_opts}} "{{portmaster_unmount_helper}}" "{{deploy_target}}:/usr/local/libexec/portmaster-unmount-stack.new"
+    scp {{ssh_opts}} "{{portmaster_control}}" "{{deploy_target}}:/var/games/ports/PortMaster/control.txt.new"
+    scp {{ssh_opts}} "{{portmaster_mod}}" "{{deploy_target}}:/var/games/ports/PortMaster/mod_MARINA.txt.new"
+    scp {{ssh_opts}} "{{portmaster_libgl}}" "{{deploy_target}}:/var/games/ports/PortMaster/libgl_default.txt.new"
+    scp {{ssh_opts}} "{{portmaster_chmod}}" "{{deploy_target}}:/var/games/ports/PortMaster/bin/chmod.new"
+    ssh {{ssh_opts}} {{deploy_target}} "mv /etc/systemd/user/portmaster@.service.new /etc/systemd/user/portmaster@.service && mv /usr/local/libexec/portmaster-mount-stack.new /usr/local/libexec/portmaster-mount-stack && mv /usr/local/libexec/portmaster-unmount-stack.new /usr/local/libexec/portmaster-unmount-stack && mv /var/games/ports/PortMaster/control.txt.new /var/games/ports/PortMaster/control.txt && mv /var/games/ports/PortMaster/mod_MARINA.txt.new /var/games/ports/PortMaster/mod_MARINA.txt && rm -f /var/games/ports/PortMaster/mod_ROCKNIX.txt && mv /var/games/ports/PortMaster/libgl_default.txt.new /var/games/ports/PortMaster/libgl_default.txt && mv /var/games/ports/PortMaster/bin/chmod.new /var/games/ports/PortMaster/bin/chmod && chmod 0755 /usr/local/libexec/portmaster-mount-stack /usr/local/libexec/portmaster-unmount-stack /var/games/ports/PortMaster/control.txt /var/games/ports/PortMaster/mod_MARINA.txt /var/games/ports/PortMaster/bin/chmod /var/games/ports/PortMaster/gptokeyb"
 
 # Deploy, restart the graphical user service, and follow its logs over SSH.
 run-remote: deploy
