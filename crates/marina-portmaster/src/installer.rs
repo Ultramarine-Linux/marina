@@ -51,7 +51,7 @@ pub async fn install_port(
     expected_md5: Option<&str>,
     package: String,
     items: Vec<String>,
-    ports_dir: PathBuf,
+    install_dir: PathBuf,
 ) -> Result<PathBuf, Error> {
     let bytes = client
         .get(url)
@@ -72,13 +72,13 @@ pub async fn install_port(
             });
         }
     }
-    let extract_root = ports_dir.clone();
+    let extract_root = install_dir.clone();
     task::spawn_blocking(move || extract_archive(&bytes, &extract_root, true)).await??;
-    let permission_root = ports_dir.clone();
+    let permission_root = install_dir.clone();
     let permission_items = items.clone();
     task::spawn_blocking(move || mark_declared_executables(&permission_root, &permission_items))
         .await??;
-    find_launcher(&ports_dir, &package, &items).await
+    find_launcher(&install_dir, &package, &items).await
 }
 
 fn extract_archive(bytes: &[u8], root: &Path, port_archive: bool) -> Result<(), Error> {

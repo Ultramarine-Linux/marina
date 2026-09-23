@@ -1,0 +1,60 @@
+#!/bin/sh
+# Run a PortMaster installation with a per-game overlay in a nested
+# unprivileged user/mount namespace owned by the systemd service.
+set -u
+
+encoded_port=${1:?missing port instance}
+case "$encoded_port" in
+    *\\x*) port="$(systemd-escape --unescape "$encoded_port")" ;;
+    *) port="$encoded_port" ;;
+esac
+
+lower=/var/games/ports
+install_dir="$lower/$port"
+if [ ! -d "$install_dir" ]; then
+    echo "PortMaster: nested install directory is missing: $install_dir" >&2
+    exit 127
+fi
+launcher="$(find "$install_dir" -maxdepth 1 -type f -name '*.sh' -printf '%f\n' | head -n 1)"
+[ -n "$launcher" ] || { echo "PortMaster: no launcher in $install_dir" >&2; exit 127; }
+
+export PORTMASTER_PORT="$port"
+export PORTMASTER_LAUNCHER="$launcher"
+export PORTMASTER_LOWER="$lower"
+export PORTMASTER_INSTALL_DIR="$install_dir"
+export PORTMASTER_SAVE_ROOT=/var/games/saves/ports
+export PORTMASTER_PORT_UPPER="$PORTMASTER_SAVE_ROOT/data/$port"
+export PORTMASTER_HOME_UPPER="$PORTMASTER_SAVE_ROOT/home/$port"
+export PORTMASTER_PORT_WORK="$PORTMASTER_SAVE_ROOT/.work/$port"
+export PORTMASTER_HOME_WORK="$PORTMASTER_SAVE_ROOT/.work/home-$port"
+export PORTMASTER_EMPTY="$PORTMASTER_SAVE_ROOT/.work/empty"
+export PORTMASTER_HOME="/run/user/1000/portmaster/home/$port"
+export HOME="$PORTMASTER_HOME"
+export XDG_DATA_HOME="$HOME/.local/share"
+export XDG_CONFIG_HOME="$HOME/.config"
+
+mkdir -p "$PORTMASTER_PORT_UPPER" "$PORTMASTER_HOME_UPPER" \
+    "$PORTMASTER_PORT_WORK" "$PORTMASTER_HOME_WORK" "$PORTMASTER_EMPTY"
+
+exec unshare -Urm /bin/sh -c '
+    : "${PORTMASTER_LAUNCHER:?}"
+    : "${PORTMASTER_INSTALL_DIR:?}"
+    : "${PORTMASTER_PORT_UPPER:?}"
+    : "${PORTMASTER_PORT_WORK:?}"
+    : "${PORTMASTER_EMPTY:?}"
+    : "${PORTMASTER_HOME_UPPER:?}"
+    : "${PORTMASTER_HOME_WORK:?}"
+    : "${PORTMASTER_HOME:?}"
+
+    mkdir -p /roms/ports "$PORTMASTER_HOME/.local/share"
+    mount -t overlay overlay \
+        -o "lowerdir=$PORTMASTER_INSTALL_DIR,upperdir=$PORTMASTER_PORT_UPPER,workdir=$PORTMASTER_PORT_WORK" \
+        /roms/ports
+    mkdir -p /roms/ports/PortMaster
+    mount --bind /var/games/ports/PortMaster /roms/ports/PortMaster
+    mount -t overlay overlay \
+        -o "lowerdir=$PORTMASTER_EMPTY,upperdir=$PORTMASTER_HOME_UPPER,workdir=$PORTMASTER_HOME_WORK" \
+        "$PORTMASTER_HOME"
+
+    exec "/roms/ports/$PORTMASTER_LAUNCHER"
+'

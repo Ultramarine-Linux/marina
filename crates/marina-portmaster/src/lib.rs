@@ -257,13 +257,17 @@ impl StoreBackend for PortMasterStore {
                     .collect()
             })
             .unwrap_or_default();
+        let install_dir = self
+            .config
+            .ports_dir
+            .join(safe_component(&request.entry.title));
         let launcher = installer::install_port(
             &self.client,
             install_target.to_owned(),
             expected_md5,
             package_id.clone(),
             items,
-            self.config.ports_dir.clone(),
+            install_dir,
         )
         .await
         .map_err(StoreError::backend)?;
@@ -305,6 +309,22 @@ fn extract_image(archive_path: &Path, member: &str, output: &Path) -> Result<(),
     let mut output_file = std::fs::File::create(output)?;
     std::io::copy(&mut image, &mut output_file)?;
     Ok(())
+}
+
+fn safe_component(value: &str) -> String {
+    let value: String = value
+        .chars()
+        .map(|character| match character {
+            '<' | '>' | '"' | '/' | '\\' | '|' | '?' | '*' => '_',
+            _ => character,
+        })
+        .collect();
+    let value = value.trim().trim_matches('.');
+    if value.is_empty() {
+        "unknown".to_owned()
+    } else {
+        value.to_owned()
+    }
 }
 
 fn parse_catalog(value: &Value) -> Result<Vec<StoreEntry>, Error> {

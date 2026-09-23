@@ -48,6 +48,18 @@ pub(crate) async fn launch(
     config: &Config,
 ) -> Result<LaunchedGame, LaunchError> {
     let instance = instance_name(&request.executable, &config.ports_dir)?;
+    for path in [
+        Path::new(DEFAULT_SAVES_DIR).join("data"),
+        Path::new(DEFAULT_SAVES_DIR).join("home"),
+        Path::new(DEFAULT_SAVES_DIR).join(".work"),
+    ] {
+        tokio::fs::create_dir_all(&path)
+            .await
+            .map_err(|source| LaunchError::PortmasterSetup {
+                path: path.display().to_string(),
+                source,
+            })?;
+    }
 
     let escaped = Command::new("systemd-escape")
         .args(["--template=portmaster@.service", &instance])
@@ -76,17 +88,24 @@ pub fn instance_name(executable: &Path, ports_dir: &Path) -> Result<String, Laun
         .and_then(|name| name.to_str())
         .ok_or(LaunchError::MissingLocalPath)?;
     let expected_dir = executable.parent().unwrap_or_else(|| Path::new("."));
-    if expected_dir != ports_dir || !file_name.ends_with(".sh") {
+    let instance = if expected_dir.parent() == Some(ports_dir) {
+        expected_dir
+            .file_name()
+            .and_then(|name| name.to_str())
+            .filter(|name| !name.is_empty())
+            .ok_or_else(|| LaunchError::InvalidPortLauncher {
+                path: executable.display().to_string(),
+            })?
+    } else {
+        return Err(LaunchError::InvalidPortLauncher {
+            path: executable.display().to_string(),
+        });
+    };
+    if !file_name.ends_with(".sh") {
         return Err(LaunchError::InvalidPortLauncher {
             path: executable.display().to_string(),
         });
     }
-    let instance = file_name
-        .strip_suffix(".sh")
-        .filter(|name| !name.is_empty())
-        .ok_or_else(|| LaunchError::InvalidPortLauncher {
-            path: executable.display().to_string(),
-        })?;
     if !instance
         .bytes()
         .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'-' | b'_' | b'.' | b' '))

@@ -10,10 +10,11 @@ PrivateTmp=yes
 PrivateDevices=yes
 ProtectSystem=strict
 ProtectHome=read-only
-RuntimeDirectory=portmaster/home/%I
+RuntimeDirectory=portmaster/home
 RuntimeDirectoryMode=0755
 TemporaryFileSystem=/roms
-BindPaths=/var/games/ports:/roms/ports
+BindPaths=/var/games/saves/ports
+
 BindPaths=/run/user/1000/wayland-1
 BindPaths=/dev/dri
 BindPaths=/dev/input
@@ -26,9 +27,9 @@ DeviceAllow=/dev/uinput rw
 DeviceAllow=char-input rw
 DeviceAllow=char-sound rw
 Environment=PATH=/roms/ports/PortMaster/bin:/usr/local/bin:/usr/bin:/bin
-Environment=HOME=/run/user/1000/portmaster/home/%I
-Environment=XDG_DATA_HOME=/run/user/1000/portmaster/home/%I/.local/share
-Environment=XDG_CONFIG_HOME=/run/user/1000/portmaster/home/%I/.config
+Environment=HOME=/run/user/1000/portmaster/home
+Environment=XDG_DATA_HOME=/run/user/1000/portmaster/home/.local/share
+Environment=XDG_CONFIG_HOME=/run/user/1000/portmaster/home/.config
 
 Environment=XDG_RUNTIME_DIR=/run/user/1000
 Environment=WAYLAND_DISPLAY=wayland-1
@@ -40,7 +41,7 @@ Environment=DISPLAY_WIDTH=720
 Environment=DISPLAY_HEIGHT=1280
 Environment=RUST_BACKTRACE=full
 
-ExecStart=/roms/ports/%I.sh
+ExecStart=/usr/local/libexec/portmaster-launch %i
 ExecStopPost=/usr/local/libexec/portmaster-restore-marina
 Restart=no
 
