@@ -50,7 +50,7 @@ type CardParts = (String, String, String, String);
 
 const CARD_ID_SEPARATOR: char = '\0';
 
-fn card_id(backend_id: &str, entry_id: &str) -> String {
+pub(crate) fn card_id(backend_id: &str, entry_id: &str) -> String {
     format!("{backend_id}{CARD_ID_SEPARATOR}{entry_id}")
 }
 
