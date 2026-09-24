@@ -5,8 +5,8 @@ After=local-fs.target
 [Service]
 Type=oneshot
 RemainAfterExit=yes
-ExecStart=/usr/local/libexec/portmaster-runtime-mount %i
-ExecStop=/usr/local/libexec/portmaster-runtime-unmount %i
+ExecStart=/usr/libexec/marina-portmaster/portmaster-runtime-mount %i
+ExecStop=/usr/libexec/marina-portmaster/portmaster-runtime-unmount %i
 
 [Install]
 WantedBy=multi-user.target

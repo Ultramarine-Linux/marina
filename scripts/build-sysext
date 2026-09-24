@@ -1,0 +1,58 @@
+#!/bin/sh
+# Assemble the AArch64 Marina system-extension root, then package it with mkosi.
+set -eu
+
+root=target/marina-sysext-root
+triple=aarch64-unknown-linux-gnu
+release=target/$triple/release
+
+rm -rf "$root"
+install -d \
+    "$root/usr/bin" \
+    "$root/usr/lib/extension-release.d" \
+    "$root/usr/libexec/marina-portmaster" \
+    "$root/usr/lib/systemd/system" \
+    "$root/usr/lib/systemd/user" \
+    "$root/usr/lib/tmpfiles.d" \
+    "$root/usr/libexec" \
+    "$root/usr/share/polkit-1/actions" \
+    "$root/usr/share/polkit-1/rules.d"
+
+install -m 0755 "$release/marina-ui-slint" "$root/usr/bin/marina-ui-slint"
+install -m 0755 "$release/marina-portmaster-runtime" "$root/usr/libexec/marina-portmaster-runtime"
+install -m 0755 "$release/marina-portmaster-launch" "$root/usr/libexec/marina-portmaster-launch"
+
+install -m 0644 systemd/marina-shell.service "$root/usr/lib/systemd/user/marina-shell.service"
+install -m 0644 systemd/portmaster@.service "$root/usr/lib/systemd/user/portmaster@.service"
+install -m 0644 systemd/portmaster-runtime@.service "$root/usr/lib/systemd/system/portmaster-runtime@.service"
+install -m 0644 scripts/portmaster/etc/tmpfiles.d/marina-portmaster.conf "$root/usr/lib/tmpfiles.d/marina-portmaster.conf"
+install -m 0644 scripts/portmaster/polkit/org.ultramarinelinux.MarinaShell.portmaster-runtime.policy "$root/usr/share/polkit-1/actions/org.ultramarinelinux.MarinaShell.portmaster-runtime.policy"
+install -m 0644 scripts/portmaster/polkit/49-marina-portmaster.rules "$root/usr/share/polkit-1/rules.d/49-marina-portmaster.rules"
+
+for helper in \
+    portmaster-mount-stack \
+    portmaster-launch \
+    portmaster-focus \
+    portmaster-unmount-stack \
+    portmaster-restore-marina \
+    portmaster-runtime-mount \
+    portmaster-runtime-unmount
+do
+    install -m 0755 "scripts/portmaster/usr/local/libexec/$helper" "$root/usr/libexec/marina-portmaster/$helper"
+done
+
+install -m 0755 scripts/portmaster/compat/control.txt "$root/usr/libexec/marina-portmaster/control.txt"
+install -m 0644 scripts/portmaster/compat/gamecontrollerdb.txt "$root/usr/libexec/marina-portmaster/gamecontrollerdb.txt"
+install -m 0755 scripts/portmaster/compat/mod_MARINA.txt "$root/usr/libexec/marina-portmaster/mod_MARINA.txt"
+install -m 0755 scripts/portmaster/compat/libgl_default.txt "$root/usr/libexec/marina-portmaster/libgl_default.txt"
+install -d "$root/usr/libexec/marina-portmaster/bin"
+install -m 0755 scripts/portmaster/compat/bin/chmod "$root/usr/libexec/marina-portmaster/bin/chmod"
+install -m 0755 scripts/portmaster/compat/bin/mount "$root/usr/libexec/marina-portmaster/bin/mount"
+
+cat >"$root/usr/lib/extension-release.d/extension-release.marina" <<'EOF'
+ID=_any
+ARCHITECTURE=arm64
+EXTENSION_RELOAD_MANAGER=1
+EOF
+
+mkosi -C packaging/mkosi -f build

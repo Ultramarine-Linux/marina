@@ -18,7 +18,7 @@ Environment=RUST_LOG=debug
 # released decode buffers do not leave one multi-megabyte arena per worker.
 Environment=MALLOC_ARENA_MAX=2
 Environment=MALLOC_TRIM_THRESHOLD_=131072
-ExecStart=/opt/marina/marina-ui-slint
+ExecStart=/usr/bin/marina-ui-slint
 Restart=on-failure
 RestartSec=2s
 Slice=graphical-shell.slice

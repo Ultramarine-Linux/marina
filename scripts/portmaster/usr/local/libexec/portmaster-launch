@@ -82,7 +82,7 @@ exec unshare -Urm /bin/sh -c '
         -o "userxattr,lowerdir=$PORTMASTER_INSTALL_DIR,upperdir=$PORTMASTER_PORT_UPPER,workdir=$PORTMASTER_PORT_WORK" \
         /roms/ports
     mkdir -p /roms/ports/PortMaster
-    mount --bind /var/games/ports/PortMaster /roms/ports/PortMaster
+    mount --bind /usr/libexec/marina-portmaster /roms/ports/PortMaster
     mount -t overlay overlay \
         -o "userxattr,lowerdir=$PORTMASTER_EMPTY,upperdir=$PORTMASTER_HOME_UPPER,workdir=$PORTMASTER_HOME_WORK" \
         "$PORTMASTER_HOME"

@@ -16,17 +16,20 @@ just cross-build
 This uses the `aarch64-unknown-linux-gnu` target and produces
 `target/aarch64-unknown-linux-gnu/release/marina-ui-slint`.
 
-Deploy it over SSH with the `DEPLOY_TARGET`, `USER_TARGET`, and `DEPLOY_PATH` values from `.env`:
+Package and deploy Marina over SSH with the `DEPLOY_TARGET` and `USER_TARGET` values from `.env`:
 
 ```sh
+just sysext-build
 just deploy
 just run-remote # deploy, restart the user service, and follow logs
-just logs      # follow logs without deploying
+just logs       # follow logs without deploying
 just status
 just stop
 ```
 
-The deploy recipe incrementally uploads the binary directly to `DEPLOY_PATH` with `rsync`, so each deployment can delta-transfer against the existing remote binary. The user service is uploaded to `DEPLOY_SERVICE_PATH` with `scp` using a temporary file and rename. If a binary transfer is interrupted, rsync leaves the existing deployed binary untouched and the next run can use it as the delta basis. `rsync` must be installed locally and on the handheld. `DEPLOY_SERVICE_PATH` defaults to the global user-unit directory, `/etc/systemd/user/marina-shell.service`. Override it when needed. Override the SSH options when needed:
+`just sysext-build` cross-compiles Marina and its PortMaster helpers for AArch64, stages them with their systemd units and policy files, and packages the result with `mkosi` as `target/marina-sysext/marina.raw`. The image contains `ARCHITECTURE=arm64` sysext metadata and is compatible with any host OS release.
+
+`just deploy` uploads that one image to `SYSEXT_PATH` (default: `/var/lib/extensions/marina.raw`) under a temporary name, atomically replaces the old image, and runs `systemd-sysext refresh`. The extension overlays `/usr`, installing the graphical application at `/usr/bin/marina-ui-slint`; installed PortMaster games, runtime images, and saves remain persistent under `/var/games`. Local builds require `mkosi`, `mkfs.erofs` (from `erofs-utils`), and `rsync`; the handheld requires `rsync` and `systemd-sysext`. Override the SSH options when needed:
 
 ```sh
 MARINA_SSH_OPTS="-i /home/user/.ssh/handheld" just deploy

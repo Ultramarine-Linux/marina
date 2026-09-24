@@ -18,7 +18,7 @@ use nix::{
 
 const PORTS_DIR: &str = "/var/games/ports";
 const SAVES_DIR: &str = "/var/games/saves/ports";
-const PORTMASTER_DIR: &str = "/var/games/ports/PortMaster";
+const PORTMASTER_DIR: &str = "/usr/libexec/marina-portmaster";
 const RUNTIME_DIR: &str = "/run/portmaster/runtimes";
 
 fn main() {
