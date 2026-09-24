@@ -12,7 +12,7 @@ use std::{
 
 use async_trait::async_trait;
 use marina_core::{LibraryItem, Platform};
-use marina_library::Library;
+use marina_library::{Library, query::SearchQuery};
 use marina_store::{
     InstallMode, InstallRequest, StoreBackend, StoreEntry, StoreError, StorePlatform, StoreQuery,
 };
@@ -239,6 +239,27 @@ impl StoreBackend for PortMasterStore {
             .payload_json
             .as_deref()
             .and_then(|json| serde_json::from_str::<Value>(json).ok());
+        let runtimes = payload
+            .as_ref()
+            .and_then(|port| port.pointer("/attr/runtime"))
+            .map(|runtime| match runtime {
+                Value::String(runtime) => vec![runtime.clone()],
+                Value::Array(runtimes) => runtimes
+                    .iter()
+                    .filter_map(Value::as_str)
+                    .map(str::to_owned)
+                    .collect(),
+                _ => Vec::new(),
+            })
+            .unwrap_or_default();
+        installer::ensure_runtimes(
+            &self.client,
+            self.asset_url("runtimes_zips.json"),
+            runtimes.clone(),
+            self.config.ports_dir.join("PortMaster/libs"),
+        )
+        .await
+        .map_err(StoreError::backend)?;
         let install_target = payload
             .as_ref()
             .and_then(|port| port.pointer("/source/url").and_then(Value::as_str))
@@ -267,10 +288,13 @@ impl StoreBackend for PortMasterStore {
             expected_md5,
             package_id.clone(),
             items,
-            install_dir,
+            install_dir.clone(),
         )
         .await
         .map_err(StoreError::backend)?;
+        installer::write_runtime_manifest(&install_dir, &runtimes)
+            .await
+            .map_err(StoreError::backend)?;
         let mut item = LibraryItem::new_game(request.entry.title.clone());
         item.platform_slug = Some("portmaster".into());
         item.local_path = Some(launcher.to_string_lossy().into_owned());
@@ -288,7 +312,21 @@ impl StoreBackend for PortMasterStore {
         let _ = library
             .add_platform(Platform::new("portmaster", "PortMaster"))
             .await;
-        library.add(item).await.map_err(StoreError::backend)
+        let existing = library
+            .search(SearchQuery::new().platform("portmaster").limit(usize::MAX))
+            .await
+            .map_err(StoreError::backend)?
+            .into_iter()
+            .find(|candidate| candidate.local_path == item.local_path);
+        if let Some(mut existing) = existing {
+            existing.title = item.title;
+            existing.assets = item.assets;
+            existing.provider_ids.extend(item.provider_ids);
+            existing.files = item.files;
+            library.update(existing).await.map_err(StoreError::backend)
+        } else {
+            library.add(item).await.map_err(StoreError::backend)
+        }
     }
 }
 

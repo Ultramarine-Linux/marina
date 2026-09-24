@@ -6,15 +6,16 @@ After=graphical-session.target
 [Service]
 Type=simple
 Slice=graphical-apps.slice
-PrivateUsers=yes
+PrivateUsers=no
 PrivateTmp=yes
 PrivateDevices=yes
 ProtectSystem=strict
 ProtectHome=read-only
-RuntimeDirectory=portmaster/home
+RuntimeDirectory=portmaster/home portmaster/runtimes
 RuntimeDirectoryMode=0755
 TemporaryFileSystem=/roms
 BindPaths=/var/games/saves/ports
+
 
 BindPaths=/run/user/1000/wayland-1
 BindPaths=/dev/dri
@@ -44,7 +45,7 @@ Environment=RUST_BACKTRACE=full
 
 ExecStart=/usr/local/libexec/portmaster-launch %i
 ExecStartPost=/usr/local/libexec/portmaster-focus %i
-ExecStopPost=/usr/local/libexec/portmaster-restore-marina
+ExecStopPost=/usr/local/libexec/portmaster-restore-marina %i
 Restart=no
 
 # The launcher is expected to clean up its own child processes via pm_finish.

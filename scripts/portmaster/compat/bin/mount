@@ -1,0 +1,16 @@
+#!/bin/sh
+# PortMaster launchers request squashfs mounts at private paths. The
+# system runtime unit mounts the image at /run/portmaster/runtimes; this
+# namespace-local operation only binds that stable mount into the requested
+# destination.
+if [ "$#" -ge 2 ] && case "$1" in *.squashfs) true;; *) false;; esac; then
+    runtime="$(basename "$1" .squashfs)"
+    source="/run/portmaster/runtimes/$runtime"
+    if ! mountpoint -q "$source"; then
+        echo "PortMaster: runtime mount is unavailable: $source" >&2
+        exit 1
+    fi
+    mkdir -p "$2"
+    exec /usr/bin/mount --bind "$source" "$2"
+fi
+exec /usr/bin/mount "$@"

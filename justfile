@@ -7,15 +7,23 @@ binary := "marina-ui-slint"
 service := "systemd/marina-shell.service"
 service_name := "marina-shell.service"
 portmaster_service := "systemd/portmaster@.service"
+portmaster_runtime_service := "systemd/portmaster-runtime@.service"
 portmaster_mount_helper := "scripts/portmaster/usr/local/libexec/portmaster-mount-stack"
 portmaster_launch_helper := "scripts/portmaster/usr/local/libexec/portmaster-launch"
 portmaster_focus_helper := "scripts/portmaster/usr/local/libexec/portmaster-focus"
 portmaster_unmount_helper := "scripts/portmaster/usr/local/libexec/portmaster-unmount-stack"
 portmaster_restore_helper := "scripts/portmaster/usr/local/libexec/portmaster-restore-marina"
+portmaster_runtime_mount_helper := "scripts/portmaster/usr/local/libexec/portmaster-runtime-mount"
+portmaster_runtime_unmount_helper := "scripts/portmaster/usr/local/libexec/portmaster-runtime-unmount"
+portmaster_tmpfiles := "scripts/portmaster/etc/tmpfiles.d/marina-portmaster.conf"
 portmaster_control := "scripts/portmaster/compat/control.txt"
 portmaster_mod := "scripts/portmaster/compat/mod_MARINA.txt"
 portmaster_libgl := "scripts/portmaster/compat/libgl_default.txt"
 portmaster_chmod := "scripts/portmaster/compat/bin/chmod"
+portmaster_mount := "scripts/portmaster/compat/bin/mount"
+portmaster_runtime_helper := "target/" + target + "/release/marina-portmaster-runtime"
+portmaster_policy := "scripts/portmaster/polkit/org.ultramarinelinux.MarinaShell.portmaster-runtime.policy"
+portmaster_polkit_rule := "scripts/portmaster/polkit/49-marina-portmaster.rules"
 deploy_target := env_var_or_default("DEPLOY_TARGET", "root@handheld")
 user_target := env_var_or_default("USER_TARGET", "ultramarine@handheld")
 deploy_path := env_var_or_default("DEPLOY_PATH", "/opt/marina/marina-ui-slint")
@@ -42,20 +50,32 @@ deploy-service:
     scp {{ssh_opts}} "{{service}}" "{{deploy_target}}:{{deploy_service_path}}.new"
     ssh {{ssh_opts}} {{deploy_target}} "mv '{{deploy_service_path}}.new' '{{deploy_service_path}}'"
 
+# Build the privileged PortMaster runtime helper for the handheld target.
+portmaster-helper-build:
+    cross build --config 'build.rustc-wrapper=""' --target {{target}} --release -p marina-portmaster --bin marina-portmaster-runtime
+
 # Deploy the PortMaster user template and namespace mount helpers.
-deploy-portmaster:
-    ssh {{ssh_opts}} {{deploy_target}} "mkdir -p /etc/systemd/user /usr/local/libexec /var/games/ports/PortMaster/bin"
+deploy-portmaster: portmaster-helper-build
+    ssh {{ssh_opts}} {{deploy_target}} "mkdir -p /etc/systemd/user /etc/systemd/system /usr/local/libexec /var/games/ports/PortMaster/bin /etc/polkit-1/actions /etc/polkit-1/rules.d /usr/libexec /usr/lib/tmpfiles.d"
     scp {{ssh_opts}} "{{portmaster_service}}" "{{deploy_target}}:/etc/systemd/user/portmaster@.service.new"
+    scp {{ssh_opts}} "{{portmaster_runtime_service}}" "{{deploy_target}}:/etc/systemd/system/portmaster-runtime@.service.new"
     scp {{ssh_opts}} "{{portmaster_mount_helper}}" "{{deploy_target}}:/usr/local/libexec/portmaster-mount-stack.new"
     scp {{ssh_opts}} "{{portmaster_launch_helper}}" "{{deploy_target}}:/usr/local/libexec/portmaster-launch.new"
     scp {{ssh_opts}} "{{portmaster_focus_helper}}" "{{deploy_target}}:/usr/local/libexec/portmaster-focus.new"
     scp {{ssh_opts}} "{{portmaster_unmount_helper}}" "{{deploy_target}}:/usr/local/libexec/portmaster-unmount-stack.new"
     scp {{ssh_opts}} "{{portmaster_restore_helper}}" "{{deploy_target}}:/usr/local/libexec/portmaster-restore-marina.new"
+    scp {{ssh_opts}} "{{portmaster_runtime_mount_helper}}" "{{deploy_target}}:/usr/local/libexec/portmaster-runtime-mount.new"
+    scp {{ssh_opts}} "{{portmaster_runtime_unmount_helper}}" "{{deploy_target}}:/usr/local/libexec/portmaster-runtime-unmount.new"
+    scp {{ssh_opts}} "{{portmaster_tmpfiles}}" "{{deploy_target}}:/usr/lib/tmpfiles.d/marina-portmaster.conf.new"
     scp {{ssh_opts}} "{{portmaster_control}}" "{{deploy_target}}:/var/games/ports/PortMaster/control.txt.new"
     scp {{ssh_opts}} "{{portmaster_mod}}" "{{deploy_target}}:/var/games/ports/PortMaster/mod_MARINA.txt.new"
     scp {{ssh_opts}} "{{portmaster_libgl}}" "{{deploy_target}}:/var/games/ports/PortMaster/libgl_default.txt.new"
     scp {{ssh_opts}} "{{portmaster_chmod}}" "{{deploy_target}}:/var/games/ports/PortMaster/bin/chmod.new"
-    ssh {{ssh_opts}} {{deploy_target}} "mv /etc/systemd/user/portmaster@.service.new /etc/systemd/user/portmaster@.service && mv /usr/local/libexec/portmaster-mount-stack.new /usr/local/libexec/portmaster-mount-stack && mv /usr/local/libexec/portmaster-launch.new /usr/local/libexec/portmaster-launch && mv /usr/local/libexec/portmaster-focus.new /usr/local/libexec/portmaster-focus && mv /usr/local/libexec/portmaster-unmount-stack.new /usr/local/libexec/portmaster-unmount-stack && mv /usr/local/libexec/portmaster-restore-marina.new /usr/local/libexec/portmaster-restore-marina && mv /var/games/ports/PortMaster/control.txt.new /var/games/ports/PortMaster/control.txt && mv /var/games/ports/PortMaster/mod_MARINA.txt.new /var/games/ports/PortMaster/mod_MARINA.txt && rm -f /var/games/ports/PortMaster/mod_ROCKNIX.txt && mv /var/games/ports/PortMaster/libgl_default.txt.new /var/games/ports/PortMaster/libgl_default.txt && mv /var/games/ports/PortMaster/bin/chmod.new /var/games/ports/PortMaster/bin/chmod && chmod 0755 /usr/local/libexec/portmaster-mount-stack /usr/local/libexec/portmaster-launch /usr/local/libexec/portmaster-focus /usr/local/libexec/portmaster-unmount-stack /usr/local/libexec/portmaster-restore-marina /var/games/ports/PortMaster/control.txt /var/games/ports/PortMaster/mod_MARINA.txt /var/games/ports/PortMaster/bin/chmod /var/games/ports/PortMaster/gptokeyb"
+    scp {{ssh_opts}} "{{portmaster_mount}}" "{{deploy_target}}:/var/games/ports/PortMaster/bin/mount.new"
+    scp {{ssh_opts}} "{{portmaster_runtime_helper}}" "{{deploy_target}}:/usr/libexec/marina-portmaster-runtime.new"
+    scp {{ssh_opts}} "{{portmaster_policy}}" "{{deploy_target}}:/etc/polkit-1/actions/org.ultramarinelinux.MarinaShell.portmaster-runtime.policy.new"
+    scp {{ssh_opts}} "{{portmaster_polkit_rule}}" "{{deploy_target}}:/etc/polkit-1/rules.d/49-marina-portmaster.rules.new"
+    ssh {{ssh_opts}} {{deploy_target}} "mv /etc/systemd/user/portmaster@.service.new /etc/systemd/user/portmaster@.service && mv /etc/systemd/system/portmaster-runtime@.service.new /etc/systemd/system/portmaster-runtime@.service && mv /usr/local/libexec/portmaster-mount-stack.new /usr/local/libexec/portmaster-mount-stack && mv /usr/local/libexec/portmaster-launch.new /usr/local/libexec/portmaster-launch && mv /usr/local/libexec/portmaster-focus.new /usr/local/libexec/portmaster-focus && mv /usr/local/libexec/portmaster-unmount-stack.new /usr/local/libexec/portmaster-unmount-stack && mv /usr/local/libexec/portmaster-restore-marina.new /usr/local/libexec/portmaster-restore-marina && mv /usr/local/libexec/portmaster-runtime-mount.new /usr/local/libexec/portmaster-runtime-mount && mv /usr/local/libexec/portmaster-runtime-unmount.new /usr/local/libexec/portmaster-runtime-unmount && mv /usr/lib/tmpfiles.d/marina-portmaster.conf.new /usr/lib/tmpfiles.d/marina-portmaster.conf && mv /var/games/ports/PortMaster/control.txt.new /var/games/ports/PortMaster/control.txt && mv /var/games/ports/PortMaster/mod_MARINA.txt.new /var/games/ports/PortMaster/mod_MARINA.txt && rm -f /var/games/ports/PortMaster/mod_ROCKNIX.txt /etc/polkit-1/actions/org.marina.portmaster.runtime.policy && mv /var/games/ports/PortMaster/libgl_default.txt.new /var/games/ports/PortMaster/libgl_default.txt && mv /var/games/ports/PortMaster/bin/chmod.new /var/games/ports/PortMaster/bin/chmod && mv /var/games/ports/PortMaster/bin/mount.new /var/games/ports/PortMaster/bin/mount && mv /usr/libexec/marina-portmaster-runtime.new /usr/libexec/marina-portmaster-runtime && mv /etc/polkit-1/actions/org.ultramarinelinux.MarinaShell.portmaster-runtime.policy.new /etc/polkit-1/actions/org.ultramarinelinux.MarinaShell.portmaster-runtime.policy && mv /etc/polkit-1/rules.d/49-marina-portmaster.rules.new /etc/polkit-1/rules.d/49-marina-portmaster.rules && chmod 0755 /usr/libexec/marina-portmaster-runtime && chmod 0755 /usr/local/libexec/portmaster-mount-stack /usr/local/libexec/portmaster-launch /usr/local/libexec/portmaster-focus /usr/local/libexec/portmaster-unmount-stack /usr/local/libexec/portmaster-restore-marina /usr/local/libexec/portmaster-runtime-mount /usr/local/libexec/portmaster-runtime-unmount /var/games/ports/PortMaster/control.txt /var/games/ports/PortMaster/mod_MARINA.txt /var/games/ports/PortMaster/bin/chmod /var/games/ports/PortMaster/bin/mount /var/games/ports/PortMaster/gptokeyb && systemd-tmpfiles --create /usr/lib/tmpfiles.d/marina-portmaster.conf && systemctl daemon-reload"
 
 # Deploy, restart the graphical user service, and follow its logs over SSH.
 run-remote: deploy

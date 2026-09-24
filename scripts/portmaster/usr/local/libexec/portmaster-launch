@@ -37,6 +37,36 @@ export XDG_CONFIG_HOME="$HOME/.config"
 mkdir -p "$PORTMASTER_PORT_UPPER" "$PORTMASTER_HOME_UPPER" \
     "$PORTMASTER_PORT_WORK" "$PORTMASTER_HOME_WORK" "$PORTMASTER_EMPTY"
 
+# Runtime mounts must be requested before entering the nested user namespace;
+# processes inside that namespace cannot contact the host system manager. New
+# installs carry an explicit manifest. The assignment scan keeps older installs
+# working because upstream launchers commonly set variables such as
+# weston_runtime="weston_pkg_0.2" before invoking mount.
+{
+    if [ -f "$install_dir/.marina-runtimes" ]; then
+        cat "$install_dir/.marina-runtimes"
+    fi
+    grep -E '^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*_runtime=' "$install_dir/$launcher" 2>/dev/null \
+        | tr -d "\"'" \
+        | sed -E 's/^[^=]+=//'
+    grep -oE '[A-Za-z0-9_.-]+\.squashfs' "$install_dir/$launcher" 2>/dev/null \
+        | sed 's/\.squashfs$//'
+} | sort -u | while IFS= read -r runtime; do
+    [ -n "$runtime" ] || continue
+    case "$runtime" in
+        */*|*'..'*|*[!A-Za-z0-9_.-]*)
+            echo "PortMaster: refusing invalid runtime name: $runtime" >&2
+            exit 1
+            ;;
+    esac
+    unit="$(systemd-escape --template=portmaster-runtime@.service "$runtime")"
+    echo "PortMaster: starting runtime unit $unit"
+    if ! systemctl start "$unit"; then
+        echo "PortMaster: failed to start runtime unit $unit" >&2
+        exit 1
+    fi
+done
+
 exec unshare -Urm /bin/sh -c '
     : "${PORTMASTER_LAUNCHER:?}"
     : "${PORTMASTER_INSTALL_DIR:?}"

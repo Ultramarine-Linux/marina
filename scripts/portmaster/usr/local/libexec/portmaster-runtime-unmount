@@ -1,0 +1,18 @@
+#!/bin/sh
+set -eu
+
+encoded_runtime=${1:?missing runtime instance}
+runtime="$(systemd-escape --unescape --path "$encoded_runtime")"
+runtime=${runtime#/}
+case "$runtime" in
+    ''|*/*|*'..'*|*[!A-Za-z0-9_.-]*)
+        echo "PortMaster: invalid runtime name: $runtime" >&2
+        exit 2
+        ;;
+esac
+
+mountpoint="/run/portmaster/runtimes/$runtime"
+if mountpoint -q "$mountpoint"; then
+    umount "$mountpoint"
+fi
+rmdir "$mountpoint" 2>/dev/null || true

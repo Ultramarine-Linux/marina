@@ -5,6 +5,7 @@
 
 ESUDO=""
 ESUDOKILL="-1"
+PM_CAN_MOUNT="N"
 directory="roms"
 controlfolder="/roms/ports/PortMaster"
 CFW_NAME="ROCKNIX"
