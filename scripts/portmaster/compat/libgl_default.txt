@@ -1,0 +1,4 @@
+# TG5050 uses Panfrost native Wayland GL. Do not force GL4ES or KMSDRM.
+LIBGL_FB=""
+LIBGL_GL=""
+export LIBGL_FB LIBGL_GL

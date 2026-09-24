@@ -1,7 +1,7 @@
 # marina
 
 a funny little emulation/gaming frontend, optimized for resource-constrained handhelds inspired by
-[Argosy Launcher](https://github.com/rommapp/argosy-launcher) designed for Ultramarine Handheld
+[Argosy Launcher](https://github.com/rommapp/argosy-launcher) designed for Ultramarine Embedded
 
 very VIP, doesnt even have a proper UI yet
 
@@ -31,3 +31,12 @@ The deploy recipe incrementally uploads the binary directly to `DEPLOY_PATH` wit
 ```sh
 MARINA_SSH_OPTS="-i /home/user/.ssh/handheld" just deploy
 ```
+
+## PortMaster Support
+
+Marina supports running ports from [PortMaster](https://portmaster.games).
+
+Unlike the official PortMaster runtime however, Marina's PortMaster implementation is sandboxed inside a Linux user namespace.
+This allows ports to be in a sandboxed environment mimicking a specific CFW stack
+without enforcing its userspace semantics from those CFWs.
+Currently Marina attempts to mimic ROCKNIX's userspace environment to accomplish this inside the sandbox.

@@ -39,6 +39,18 @@ pub struct StorePlatform {
     pub game_count: Option<u64>,
 }
 
+/// A local preview image supplied by a store backend.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct StoreImage {
+    pub path: std::path::PathBuf,
+}
+
+impl StoreImage {
+    pub fn new(path: impl Into<std::path::PathBuf>) -> Self {
+        Self { path: path.into() }
+    }
+}
+
 /// A lightweight catalog entry. Full backend payloads stay behind the
 /// backend; `payload_json` round-trips the raw record for the cache.
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -69,6 +81,16 @@ impl StoreQuery {
     }
 }
 
+/// How the store UI should collect an install request.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum InstallMode {
+    /// The entry is installed as one logical artifact without a selection sheet.
+    #[default]
+    SingleArtifact,
+    /// The entry exposes selectable artifacts, potentially more than one.
+    MultipleArtifacts,
+}
+
 /// Request to install a catalog entry into the local library.
 ///
 /// `file_ids` are backend-opaque artifact ids (selected in the UI); the
@@ -86,6 +108,12 @@ pub trait StoreBackend: Send + Sync + std::fmt::Debug {
     /// Stable backend identifier, also used as the cache namespace.
     fn id(&self) -> &str;
     fn display_name(&self) -> &str;
+    fn install_mode(&self) -> InstallMode {
+        InstallMode::SingleArtifact
+    }
+    async fn preview_image(&self, _entry: &StoreEntry) -> Result<Option<StoreImage>, StoreError> {
+        Ok(None)
+    }
     async fn list_platforms(&self) -> Result<Vec<StorePlatform>, StoreError>;
     async fn browse(&self, query: StoreQuery) -> Result<Vec<StoreEntry>, StoreError>;
     async fn get(&self, entry_id: &str) -> Result<Option<StoreEntry>, StoreError>;

@@ -1,0 +1,16 @@
+#!/bin/sh
+set -eu
+
+encoded_runtime=${1:?missing runtime instance}
+runtime="$(systemd-escape --unescape --path "$encoded_runtime")"
+runtime=${runtime#/}
+case "$runtime" in
+    ''|*/*|*'..'*|*[!A-Za-z0-9_.-]*)
+        echo "PortMaster: invalid runtime name: $runtime" >&2
+        exit 2
+        ;;
+esac
+
+image="/var/games/ports/PortMaster/libs/$runtime.squashfs"
+mountpoint="/run/portmaster/runtimes/$runtime"
+exec /usr/libexec/marina-portmaster-runtime mount-image "$image" "$mountpoint"

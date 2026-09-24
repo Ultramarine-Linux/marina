@@ -1,0 +1,9 @@
+#!/bin/sh
+# PortMaster compatibility shim: legacy CFW launchers chmod tty/uinput nodes.
+# The service owns device access policy; never let a port mutate /dev modes.
+for argument in "$@"; do
+    case "$argument" in
+        /dev/*) exit 0 ;;
+    esac
+done
+exec /usr/bin/chmod "$@"

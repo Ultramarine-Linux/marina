@@ -11,6 +11,7 @@ use marina_library::{
     read::{LibraryRead, PlatformRead},
     write::{LibraryWrite, PlatformWrite},
 };
+use marina_portmaster::PortMasterStore;
 use marina_romm::RommStore;
 use marina_scanner::scan;
 use marina_store::{StoreBackend, StoreCaches};
@@ -164,6 +165,10 @@ impl AppState {
         let mut stores: HashMap<String, Arc<dyn StoreBackend>> = HashMap::new();
         if let Some(base_url) = config.romm_url.clone() {
             let backend = RommStore::new(base_url, config.romm_token.as_deref());
+            stores.insert(backend.id().to_owned(), Arc::new(backend));
+        }
+        if let Some(portmaster) = config.portmaster_store.clone() {
+            let backend = PortMasterStore::new(portmaster);
             stores.insert(backend.id().to_owned(), Arc::new(backend));
         }
         tracing::info!(

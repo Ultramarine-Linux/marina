@@ -1,0 +1,15 @@
+#!/bin/sh
+# Mount the per-port overlay in systemd's private mount namespace.
+set -u
+
+port=${1:?missing port instance}
+base=/run/user/1000/portmaster
+lower="$base/lower"
+upper="$base/upper"
+work="$base/work/$port"
+merged=/roms/ports
+
+mkdir -p "$work" "$merged"
+mount -t overlay overlay \
+  -o "lowerdir=$lower,upperdir=$upper,workdir=$work" \
+  "$merged"

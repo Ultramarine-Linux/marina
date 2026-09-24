@@ -1,0 +1,91 @@
+#!/bin/sh
+# Run a PortMaster installation with a per-game overlay in a nested
+# unprivileged user/mount namespace owned by the systemd service.
+set -u
+
+encoded_port=${1:?missing port instance}
+case "$encoded_port" in
+    *\\x*) port="$(systemd-escape --unescape "$encoded_port")" ;;
+    *) port="$encoded_port" ;;
+esac
+
+lower=/var/games/ports
+install_dir="$lower/$port"
+if [ ! -d "$install_dir" ]; then
+    echo "PortMaster: nested install directory is missing: $install_dir" >&2
+    exit 127
+fi
+launcher="$(find "$install_dir" -maxdepth 1 -type f -name '*.sh' -printf '%f\n' | head -n 1)"
+[ -n "$launcher" ] || { echo "PortMaster: no launcher in $install_dir" >&2; exit 127; }
+
+export SWAYSOCK="${SWAYSOCK:-$(find /run/user/1000 -maxdepth 1 -type s -name 'sway-ipc.*.sock' -print -quit 2>/dev/null)}"
+export PORTMASTER_PORT="$port"
+export PORTMASTER_LAUNCHER="$launcher"
+export PORTMASTER_LOWER="$lower"
+export PORTMASTER_INSTALL_DIR="$install_dir"
+export PORTMASTER_SAVE_ROOT=/var/games/saves/ports
+export PORTMASTER_PORT_UPPER="$PORTMASTER_SAVE_ROOT/data/$port"
+export PORTMASTER_HOME_UPPER="$PORTMASTER_SAVE_ROOT/home/$port"
+export PORTMASTER_PORT_WORK="$PORTMASTER_SAVE_ROOT/.work/$port"
+export PORTMASTER_HOME_WORK="$PORTMASTER_SAVE_ROOT/.work/home-$port"
+export PORTMASTER_EMPTY="$PORTMASTER_SAVE_ROOT/.work/empty"
+export PORTMASTER_HOME="/run/user/1000/portmaster/home/$port"
+export HOME="$PORTMASTER_HOME"
+export XDG_DATA_HOME="$HOME/.local/share"
+export XDG_CONFIG_HOME="$HOME/.config"
+
+mkdir -p "$PORTMASTER_PORT_UPPER" "$PORTMASTER_HOME_UPPER" \
+    "$PORTMASTER_PORT_WORK" "$PORTMASTER_HOME_WORK" "$PORTMASTER_EMPTY"
+
+# Runtime mounts must be requested before entering the nested user namespace;
+# processes inside that namespace cannot contact the host system manager. New
+# installs carry an explicit manifest. The assignment scan keeps older installs
+# working because upstream launchers commonly set variables such as
+# weston_runtime="weston_pkg_0.2" before invoking mount.
+{
+    if [ -f "$install_dir/.marina-runtimes" ]; then
+        cat "$install_dir/.marina-runtimes"
+    fi
+    grep -E '^[[:space:]]*[A-Za-z_][A-Za-z0-9_]*_runtime=' "$install_dir/$launcher" 2>/dev/null \
+        | tr -d "\"'" \
+        | sed -E 's/^[^=]+=//'
+    grep -oE '[A-Za-z0-9_.-]+\.squashfs' "$install_dir/$launcher" 2>/dev/null \
+        | sed 's/\.squashfs$//'
+} | sort -u | while IFS= read -r runtime; do
+    [ -n "$runtime" ] || continue
+    case "$runtime" in
+        */*|*'..'*|*[!A-Za-z0-9_.-]*)
+            echo "PortMaster: refusing invalid runtime name: $runtime" >&2
+            exit 1
+            ;;
+    esac
+    unit="$(systemd-escape --template=portmaster-runtime@.service "$runtime")"
+    echo "PortMaster: starting runtime unit $unit"
+    if ! systemctl start "$unit"; then
+        echo "PortMaster: failed to start runtime unit $unit" >&2
+        exit 1
+    fi
+done
+
+exec unshare -Urm /bin/sh -c '
+    : "${PORTMASTER_LAUNCHER:?}"
+    : "${PORTMASTER_INSTALL_DIR:?}"
+    : "${PORTMASTER_PORT_UPPER:?}"
+    : "${PORTMASTER_PORT_WORK:?}"
+    : "${PORTMASTER_EMPTY:?}"
+    : "${PORTMASTER_HOME_UPPER:?}"
+    : "${PORTMASTER_HOME_WORK:?}"
+    : "${PORTMASTER_HOME:?}"
+
+    mkdir -p /roms/ports "$PORTMASTER_HOME/.local/share"
+    mount -t overlay overlay \
+        -o "userxattr,lowerdir=$PORTMASTER_INSTALL_DIR,upperdir=$PORTMASTER_PORT_UPPER,workdir=$PORTMASTER_PORT_WORK" \
+        /roms/ports
+    mkdir -p /roms/ports/PortMaster
+    mount --bind /var/games/ports/PortMaster /roms/ports/PortMaster
+    mount -t overlay overlay \
+        -o "userxattr,lowerdir=$PORTMASTER_EMPTY,upperdir=$PORTMASTER_HOME_UPPER,workdir=$PORTMASTER_HOME_WORK" \
+        "$PORTMASTER_HOME"
+
+    exec "/roms/ports/$PORTMASTER_LAUNCHER"
+'

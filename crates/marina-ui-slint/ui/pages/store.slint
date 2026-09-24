@@ -51,6 +51,7 @@ export global StoreState {
     in-out property <float> install-progress: 0;
     // Sheet/modal visibility lives here so Rust back-handling can dismiss.
     in-out property <bool> artifact-sheet-open;
+    in-out property <bool> direct-install;
     callback entered;
     callback search(string);
     callback platform-query(string);
@@ -82,6 +83,7 @@ export component StorePage inherits Rectangle {
     in-out property <string> install-status;
     in-out property <float> install-progress: 0;
     in-out property <bool> artifact-sheet-open: false;
+    in property <bool> direct-install: false;
 
     callback platform-query(string);
     callback game-selected(string, int);
@@ -358,7 +360,13 @@ export component StorePage inherits Rectangle {
         loading: root.details-loading;
         action-label: "Download";
         focus-request: root.details-focus-request;
-        action-requested => { root.artifact-sheet-open = true; }
+        action-requested => {
+            if root.direct-install {
+                root.install-requested(root.games[root.selected-game-index].id, []);
+            } else {
+                root.artifact-sheet-open = true;
+            }
+        }
     }
 
 

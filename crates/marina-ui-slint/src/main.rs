@@ -552,7 +552,8 @@ fn populate_store_details(
         regions: SharedString::from(item.regions.join(", ")),
         tags: SharedString::from(item.tags.join(", ")),
     };
-    let selected_rom_id = rom_id.clone();
+    let selected_rom_id = crate::ui::pages::store::card_id("romm", &rom_id);
+    let details_card_id = selected_rom_id.clone();
     let details_generation = generation_guard.clone();
     let _ = window.upgrade_in_event_loop(move |window| {
         if details_generation.load(Ordering::Relaxed) != generation {
@@ -565,7 +566,7 @@ fn populate_store_details(
             .max(0) as usize;
         if games
             .row_data(selected_index)
-            .is_none_or(|game| game.id.as_str() != selected_rom_id)
+            .is_none_or(|game| game.id.as_str() != details_card_id)
         {
             return;
         }
@@ -596,8 +597,8 @@ fn populate_store_details(
     }
 
     let preview_window = window.clone();
-    let preview_rom_id = rom_id.clone();
-    let row_rom_id = rom_id.clone();
+    let preview_rom_id = selected_rom_id.clone();
+    let row_rom_id = selected_rom_id.clone();
     if let Some(preview_source) = preview_source {
         let task = tokio::spawn(async move {
             let Some(decoded) = image::load_scaled(

@@ -15,6 +15,8 @@ use tokio::process::Command;
 use tracing::{debug, info, warn};
 use ulid::Ulid;
 
+pub mod portmaster;
+
 const SYSTEMD_RUN: &str = "systemd-run";
 const APP_SLICE: &str = "graphical-apps.slice";
 
@@ -74,6 +76,7 @@ pub enum PlatformBackendKind {
     #[default]
     Native,
     RetroArch,
+    Portmaster,
 }
 
 /// Per-platform runtime configuration. The template renders one commented
@@ -105,6 +108,7 @@ impl PlatformRuntimeConfig {
         if let Some(raw) = self.backend.as_deref().or(self.platform.as_deref()) {
             match raw.trim().to_ascii_lowercase().as_str() {
                 "retroarch" => return PlatformBackendKind::RetroArch,
+                "portmaster" => return PlatformBackendKind::Portmaster,
                 "native" | "" => return PlatformBackendKind::Native,
                 other => {
                     warn!(backend = %other, "unknown platform backend; falling back to native");
@@ -112,7 +116,9 @@ impl PlatformRuntimeConfig {
                 }
             }
         }
-        if self.retroarch.core.is_some() || platform_slug != "apps" {
+        if platform_slug == "portmaster" {
+            PlatformBackendKind::Portmaster
+        } else if self.retroarch.core.is_some() || platform_slug != "apps" {
             PlatformBackendKind::RetroArch
         } else {
             PlatformBackendKind::Native
@@ -258,6 +264,7 @@ pub enum RuntimeBackend {
     Native,
     Runtime(String),
     RetroArch(String),
+    Portmaster,
 }
 
 #[derive(Debug, Error)]
@@ -276,6 +283,14 @@ pub enum LaunchError {
     Systemd { status: String, stderr: String },
     #[error("runtime backend is not implemented: {0}")]
     UnsupportedBackend(String),
+    #[error("invalid PortMaster launcher path: {path}")]
+    InvalidPortLauncher { path: String },
+    #[error("failed to prepare PortMaster save directory {path}: {source}")]
+    PortmasterSetup {
+        path: String,
+        #[source]
+        source: std::io::Error,
+    },
 }
 
 /// Launches games as transient per-user systemd services in `graphical-apps.slice`.
@@ -283,6 +298,7 @@ pub enum LaunchError {
 pub struct GameLauncher {
     backend: RuntimeBackend,
     retroarch: RetroArchConfig,
+    portmaster: portmaster::Config,
     platforms: HashMap<String, PlatformRuntimeConfig>,
 }
 
@@ -308,6 +324,7 @@ impl RuntimeBackend {
         };
         let backend = match config.backend_kind(slug) {
             PlatformBackendKind::Native => Self::Native,
+            PlatformBackendKind::Portmaster => Self::Portmaster,
             PlatformBackendKind::RetroArch => {
                 let core = platforms
                     .get(slug)
@@ -342,6 +359,15 @@ impl GameLauncher {
     pub fn with_retroarch_config(mut self, config: RetroArchConfig) -> Self {
         self.retroarch = config;
         self
+    }
+
+    pub fn with_portmaster_config(mut self, config: portmaster::Config) -> Self {
+        self.portmaster = config;
+        self
+    }
+
+    pub fn portmaster_config(&self) -> &portmaster::Config {
+        &self.portmaster
     }
 
     pub fn with_platform_configs(
@@ -391,6 +417,11 @@ impl GameLauncher {
                 })?;
                 self.launch_native(request).await
             }
+            RuntimeBackend::Portmaster => {
+                let request =
+                    portmaster::request_for_item(item).ok_or(LaunchError::MissingLocalPath)?;
+                portmaster::launch(&request, &self.portmaster).await
+            }
             RuntimeBackend::RetroArch(core) => {
                 let rom = rom_path_for_item(item).ok_or_else(|| {
                     warn!(game_id = %item.id, "retroarch launch has no ROM path");
@@ -427,6 +458,7 @@ impl GameLauncher {
                     "Runtime({runtime})"
                 )))
             }
+            RuntimeBackend::Portmaster => portmaster::launch(&request, &self.portmaster).await,
             RuntimeBackend::RetroArch(core) => {
                 let core = resolve_core_path(Path::new(core), &self.retroarch.cores_dir)
                     .to_string_lossy()
@@ -502,6 +534,31 @@ fn retroarch_item_for_request(request: &LaunchRequest) -> LibraryItem {
     item.provider_ids
         .insert("xdg.desktop".to_owned(), request.application_id.clone());
     item
+}
+
+pub(crate) async fn start_user_service(
+    unit_name: &str,
+    title: &str,
+) -> Result<LaunchedGame, LaunchError> {
+    let output = Command::new("systemctl")
+        .args(["--user", "start", "--no-block", unit_name])
+        .stdin(Stdio::null())
+        .output()
+        .await
+        .map_err(LaunchError::Spawn)?;
+    if !output.status.success() {
+        return Err(LaunchError::Systemd {
+            status: output
+                .status
+                .code()
+                .map_or_else(|| "signal".to_owned(), |code| code.to_string()),
+            stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+        });
+    }
+    tracing::info!(unit = %unit_name, title = %title, "launched user service");
+    Ok(LaunchedGame {
+        unit_name: unit_name.to_owned(),
+    })
 }
 
 async fn run_transient(
@@ -687,6 +744,15 @@ mod tests {
     fn apps_platform_defaults_to_native() {
         let config = PlatformRuntimeConfig::default();
         assert_eq!(config.backend_kind("apps"), PlatformBackendKind::Native);
+    }
+
+    #[test]
+    fn portmaster_platform_defaults_to_portmaster() {
+        let config = PlatformRuntimeConfig::default();
+        assert_eq!(
+            config.backend_kind("portmaster"),
+            PlatformBackendKind::Portmaster
+        );
     }
 
     #[test]

@@ -1,0 +1,20 @@
+[package]
+name = "marina-portmaster"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+async-trait.workspace = true
+marina-core.workspace = true
+marina-library.workspace = true
+marina-store.workspace = true
+md-5.workspace = true
+nix.workspace = true
+infer.workspace = true
+reqwest.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+zip.workspace = true

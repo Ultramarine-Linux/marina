@@ -10,6 +10,7 @@ use std::sync::{
     atomic::{AtomicU64, Ordering},
 };
 
+use marina_store::InstallMode;
 use slint::{ComponentHandle, Image, Model, ModelRc, SharedString, VecModel};
 use tracing::{debug, error, info};
 
@@ -45,7 +46,17 @@ impl Drop for StorePlatformSession {
 }
 
 type ActiveStoreSession = Arc<Mutex<Option<StorePlatformSession>>>;
-type CardParts = (String, String, String);
+type CardParts = (String, String, String, String);
+
+const CARD_ID_SEPARATOR: char = '\0';
+
+pub(crate) fn card_id(backend_id: &str, entry_id: &str) -> String {
+    format!("{backend_id}{CARD_ID_SEPARATOR}{entry_id}")
+}
+
+fn split_card_id(id: &str) -> Option<(&str, &str)> {
+    id.split_once(CARD_ID_SEPARATOR)
+}
 
 fn session_is_active(session: &ActiveStoreSession, generation: u64) -> bool {
     session
@@ -103,6 +114,7 @@ fn register_selection_task(
 
 fn entry_card(entry: &marina_store::StoreEntry) -> CardParts {
     (
+        entry.backend_id.clone(),
         entry.entry_id.clone(),
         entry.title.clone(),
         entry
@@ -118,15 +130,17 @@ fn deduplicate_card_parts(parts: Vec<CardParts>) -> Vec<CardParts> {
     let mut seen = std::collections::HashSet::new();
     parts
         .into_iter()
-        .filter(|(_, title, _)| seen.insert(title.trim().to_lowercase()))
+        .filter(|(backend_id, _, title, _)| {
+            seen.insert(format!("{}\0{}", backend_id, title.trim().to_lowercase()))
+        })
         .collect()
 }
 
 fn cards_from(parts: Vec<CardParts>) -> Vec<GameCardData> {
     deduplicate_card_parts(parts)
         .into_iter()
-        .map(|(id, title, platform)| GameCardData {
-            id: SharedString::from(id),
+        .map(|(backend_id, entry_id, title, platform)| GameCardData {
+            id: SharedString::from(card_id(&backend_id, &entry_id)),
             title: SharedString::from(title),
             platform: SharedString::from(platform),
             cover: Image::default(),
@@ -169,7 +183,7 @@ pub(crate) fn install(
     library_state: &Arc<Mutex<Option<app::AppStateHandle>>>,
 ) {
     window.global::<StoreState>().on_search(|query| {
-        info!(query = %query, "Store search requested; RomM result loading is next");
+        info!(query = %query, "Store search requested; backend result loading is next");
     });
 
     let active_session: ActiveStoreSession = Arc::new(Mutex::new(None));
@@ -178,7 +192,10 @@ pub(crate) fn install(
     window
             .global::<StoreState>()
             .on_install_requested(move |id, selected| {
-        let Ok(id) = id.parse::<i32>() else { return };
+        let Some((backend_id, entry_id)) = split_card_id(id.as_str()) else {
+            error!(card_id = %id, "store card id is missing backend identity");
+            return;
+        };
         let Some(state) = install_state
             .lock()
             .expect("library state lock poisoned")
@@ -190,15 +207,17 @@ pub(crate) fn install(
             error!("cannot install Store game without MARINA_LIBRARY_ROOT");
             return;
         };
-        let selected = selected.iter().collect::<Vec<_>>();
-        if !selected.iter().any(|selected| *selected) {
-            return;
-        }
         let window = install_window.clone();
-        let Some(backend) = state.stores.get("romm").cloned() else {
+        let Some(backend) = state.stores.get(backend_id).cloned() else {
+            error!(backend_id, "store backend for install is no longer enabled");
             return;
         };
-        let entry_id = id.to_string();
+        let single_install = backend.install_mode() == InstallMode::SingleArtifact;
+        let selected = selected.iter().collect::<Vec<_>>();
+        if !single_install && !selected.iter().any(|selected| *selected) {
+            return;
+        }
+        let entry_id = entry_id.to_owned();
         tokio::spawn(async move {
             let entry = match backend.get(&entry_id).await {
                 Ok(Some(entry)) => entry,
@@ -211,25 +230,28 @@ pub(crate) fn install(
                     return;
                 }
             };
-            let Some(rom) = entry
-                .payload_json
-                .as_deref()
-                .and_then(|json| serde_json::from_str::<marina_romm::Rom>(json).ok())
-            else {
-                error!(entry_id = %entry_id, "store entry payload could not be decoded for install");
-                return;
+            let file_ids = if single_install {
+                Vec::new()
+            } else {
+                let Some(rom) = entry
+                    .payload_json
+                    .as_deref()
+                    .and_then(|json| serde_json::from_str::<marina_romm::Rom>(json).ok())
+                else {
+                    error!(entry_id = %entry_id, "store entry payload could not be decoded for install");
+                    return;
+                };
+                rom.files
+                    .files
+                    .iter()
+                    .zip(selected)
+                    .filter_map(|(file, selected)| selected.then_some(file.id.to_string()))
+                    .collect::<Vec<_>>()
             };
-            let file_ids = rom
-                .files
-                .files
-                .iter()
-                .zip(selected)
-                .filter_map(|(file, selected)| selected.then_some(file.id.to_string()))
-                .collect::<Vec<_>>();
-            if file_ids.is_empty() {
+            if !single_install && file_ids.is_empty() {
                 return;
             }
-            let selected_count = file_ids.len();
+            let selected_count = if single_install { 1 } else { file_ids.len() };
             let status_window = window.clone();
             let _ = status_window.upgrade_in_event_loop(move |window| {
                 window
@@ -335,87 +357,111 @@ pub(crate) fn install(
             .ok()
             .and_then(|state| state.clone());
         let Some(state) = state else { return };
-        let Some(backend) = state.stores.get("romm").cloned() else {
+        let backends = state.stores.values().cloned().collect::<Vec<_>>();
+        if backends.is_empty() {
             return;
-        };
+        }
         let window = store_refresh_window.clone();
         let _ = window.upgrade_in_event_loop(|window| {
             window.global::<StoreState>().set_loading(true);
         });
         tokio::spawn(async move {
-            match backend.list_platforms().await {
-                Ok(platforms) => {
-                    let icon_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                        .join("ui/assets/platforms/systematic");
-                    // Publish the list immediately; icons resolve
-                    // concurrently per row instead of blocking the list on
-                    // a sequential await chain.
-                    let icon_jobs = platforms
-                        .iter()
-                        .filter_map(|platform| {
-                            platform_asset_path(&icon_root, &platform.slug)
-                                .map(|path| (platform.slug.clone(), path))
-                        })
-                        .collect::<Vec<_>>();
-                    let count = platforms.len();
-                    let _ = window.upgrade_in_event_loop(move |window| {
-                        let cards = platforms
-                            .into_iter()
-                            .map(|platform| PlatformCardData {
-                                slug: SharedString::from(platform.slug),
-                                name: SharedString::from(platform.name),
-                                game_count: SharedString::from(
-                                    platform
-                                        .game_count
-                                        .map(|count| count.to_string())
-                                        .unwrap_or_default(),
-                                ),
-                                icon: Image::default(),
-                            })
-                            .collect::<Vec<_>>();
-                        window
-                            .global::<StoreState>()
-                            .set_platforms(ModelRc::from(std::rc::Rc::new(VecModel::from(cards))));
-                        window.global::<StoreState>().set_loading(false);
-                        window.global::<ToastQueue>().invoke_show(
-                            SharedString::from(format!("Loaded {count} store platforms")),
-                            ToastVariant::Success,
-                        );
-                    });
-                    for (slug, path) in icon_jobs {
-                        let icon_window = window.clone();
-                        tokio::spawn(async move {
-                            let Some(decoded) =
-                                image::load_path_scaled(path, "platform-icon", 256).await
-                            else {
-                                return;
-                            };
-                            let _ = icon_window.upgrade_in_event_loop(move |window| {
-                                let platforms = window.global::<StoreState>().get_platforms();
-                                if let Some(index) = (0..platforms.row_count()).find(|&index| {
-                                    platforms
-                                        .row_data(index)
-                                        .is_some_and(|platform| platform.slug.as_str() == slug)
-                                }) {
-                                    if let Some(mut platform) = platforms.row_data(index) {
-                                        platform.icon = image::into_slint_image(decoded).0;
-                                        platforms.set_row_data(index, platform);
-                                    }
-                                }
-                            });
-                        });
+            let mut platform_map = std::collections::BTreeMap::new();
+            for backend in backends {
+                match backend.list_platforms().await {
+                    Ok(platforms) => {
+                        for platform in platforms {
+                            let entry = platform_map
+                                .entry(platform.slug.clone())
+                                .or_insert_with(|| (platform.name.clone(), None, 0_u64));
+                            if entry.1.is_none() {
+                                entry.1 = platform.backend_id.clone();
+                            }
+                            if let Some(game_count) = platform.game_count {
+                                entry.2 = entry.2.saturating_add(game_count);
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        error!(backend = %backend.id(), %error, "store platform refresh failed")
                     }
                 }
-                Err(error) => {
-                    error!(%error, "store platform refresh failed");
-                    let message = SharedString::from(format!("Store refresh failed: {error}"));
-                    let _ = window.upgrade_in_event_loop(move |window| {
-                        window.global::<StoreState>().set_loading(false);
-                        window
-                            .global::<ToastQueue>()
-                            .invoke_show(message, ToastVariant::Error);
+            }
+            let platforms = platform_map
+                .into_iter()
+                .map(
+                    |(slug, (name, backend_id, game_count))| marina_store::StorePlatform {
+                        slug,
+                        name,
+                        backend_id,
+                        game_count: (game_count > 0).then_some(game_count),
+                    },
+                )
+                .collect::<Vec<_>>();
+            if platforms.is_empty() {
+                let _ = window.upgrade_in_event_loop(|window| {
+                    window.global::<StoreState>().set_loading(false);
+                });
+                return;
+            }
+            let icon_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                .join("ui/assets/platforms/systematic");
+            // Publish the list immediately; icons resolve
+            // concurrently per row instead of blocking the list on
+            // a sequential await chain.
+            let icon_jobs = platforms
+                .iter()
+                .filter_map(|platform| {
+                    platform_asset_path(&icon_root, &platform.slug)
+                        .map(|path| (platform.slug.clone(), path))
+                })
+                .collect::<Vec<_>>();
+            let count = platforms.len();
+            let _ = window.upgrade_in_event_loop(move |window| {
+                let cards = platforms
+                    .into_iter()
+                    .map(|platform| PlatformCardData {
+                        slug: SharedString::from(platform.slug),
+                        name: SharedString::from(platform.name),
+                        game_count: SharedString::from(
+                            platform
+                                .game_count
+                                .map(|count| count.to_string())
+                                .unwrap_or_default(),
+                        ),
+                        icon: Image::default(),
+                    })
+                    .collect::<Vec<_>>();
+                window
+                    .global::<StoreState>()
+                    .set_platforms(ModelRc::from(std::rc::Rc::new(VecModel::from(cards))));
+                window.global::<StoreState>().set_loading(false);
+                window.global::<ToastQueue>().invoke_show(
+                    SharedString::from(format!("Loaded {count} store platforms")),
+                    ToastVariant::Success,
+                );
+            });
+            for (slug, path) in icon_jobs {
+                let icon_window = window.clone();
+                tokio::spawn(async move {
+                    let Some(decoded) = image::load_path_scaled(path, "platform-icon", 256).await
+                    else {
+                        return;
+                    };
+                    let _ = icon_window.upgrade_in_event_loop(move |window| {
+                        let platforms = window.global::<StoreState>().get_platforms();
+                        if let Some(index) = (0..platforms.row_count()).find(|&index| {
+                            platforms
+                                .row_data(index)
+                                .is_some_and(|platform| platform.slug.as_str() == slug)
+                        }) {
+                            if let Some(mut platform) = platforms.row_data(index) {
+                                platform.icon = image::into_slint_image(decoded).0;
+                                platforms.set_row_data(index, platform);
+                            }
+                        }
                     });
-                }
+                });
             }
         });
     });
@@ -431,9 +477,10 @@ pub(crate) fn install(
                 .expect("library state lock poisoned")
                 .clone();
             let Some(state) = state else { return };
-            let Some(backend) = state.stores.get("romm").cloned() else {
+            let backends = state.stores.values().cloned().collect::<Vec<_>>();
+            if backends.is_empty() {
                 return;
-            };
+            }
             let query_window = store_query_window.clone();
             let generation = store_query_generation.fetch_add(1, Ordering::Relaxed) + 1;
             {
@@ -450,117 +497,59 @@ pub(crate) fn install(
             let query_session = store_query_session.clone();
             let task_session = query_session.clone();
             let task = tokio::spawn(async move {
-                // Cached-first: each backend owns its own `<backend>.db` file.
-                // The cache may hold a partial platform (e.g. only the first
-                // page from an older fetch), so a non-empty cache is shown
-                // immediately but never ends the stream: below we compare
-                // against the advertised total and top up what's missing.
-                let mut cache_shown = false;
-                let mut cached_len = 0_usize;
-                if let Ok(cache) = state.store_caches.cache_for(backend.id()) {
-                    if let Ok(entries) = cache.browse_cards(Some(&slug), None, usize::MAX, 0) {
-                        cached_len = entries.len();
-                        let cached_cards = entries.iter().map(entry_card).collect::<Vec<_>>();
-                        if !cached_cards.is_empty() {
-                            publish_cards(
-                                &query_window,
-                                query_session.clone(),
-                                generation,
-                                cached_cards,
-                                true,
-                            );
-                            cache_shown = true;
-                        }
-                    }
-                }
-                // Advertised platform size decides whether the cache is
-                // already complete. Unknown totals always stream.
-                let total = backend
-                    .list_platforms()
-                    .await
-                    .ok()
-                    .and_then(|platforms| {
-                        platforms
-                            .into_iter()
-                            .find(|platform| platform.slug == slug.as_str())
-                    })
-                    .and_then(|platform| platform.game_count);
-                if let Some(total) = total {
-                    let total = total as usize;
-                    if cached_len >= total {
-                        let active_session = query_session.clone();
-                        let _ = query_window.upgrade_in_event_loop(move |window| {
-                            if session_is_active(&active_session, generation) {
-                                window.global::<StoreState>().set_loading(false);
-                            }
-                        });
-                        return;
-                    }
-                    info!(platform = %slug, cached = cached_len, total, "store cache incomplete; streaming platform");
-                }
-                let loading_session = query_session.clone();
-                let _ = query_window.upgrade_in_event_loop(move |window| {
-                    if session_is_active(&loading_session, generation) {
-                        window.global::<StoreState>().set_loading(true);
-                    }
-                });
-                // Stream the platform page by page: every page is upserted
-                // into the backend's cache file first, then the visible list
-                // is republished from the accumulated rows.
                 const PAGE_SIZE: usize = 100;
-                let mut offset = 0_usize;
-                let mut streamed: Vec<CardParts> = Vec::new();
-                loop {
-                    if !session_is_active(&query_session, generation) {
-                        return;
+                let mut cards = Vec::new();
+                for backend in backends {
+                    let mut cached_len = 0;
+                    if let Ok(cache) = state.store_caches.cache_for(backend.id())
+                        && let Ok(entries) = cache.browse_cards(Some(&slug), None, usize::MAX, 0)
+                    {
+                        cached_len = entries.len();
+                        cards.extend(entries.iter().map(entry_card));
                     }
-                    let entries = match backend
-                        .browse(marina_store::StoreQuery {
+                    if !cards.is_empty() {
+                        publish_cards(&query_window, query_session.clone(), generation, cards.clone(), true);
+                    }
+
+                    let total = backend.list_platforms().await.ok().and_then(|platforms| {
+                        platforms.into_iter().find(|platform| platform.slug == slug.as_str())
+                    }).and_then(|platform| platform.game_count).map(|count| count as usize);
+                    if total.is_some_and(|total| cached_len >= total) {
+                        continue;
+                    }
+                    let mut offset = 0;
+                    loop {
+                        if !session_is_active(&query_session, generation) {
+                            return;
+                        }
+                        let entries = match backend.browse(marina_store::StoreQuery {
                             platform_slug: Some(slug.to_string()),
                             limit: PAGE_SIZE,
                             offset,
                             ..Default::default()
-                        })
-                        .await
-                    {
-                        Ok(entries) => entries,
-                        Err(error) => {
-                            error!(%error, platform = %slug, "Store game loading failed");
-                            let error_session = query_session.clone();
-                            let _ = query_window.upgrade_in_event_loop(move |window| {
-                                if session_is_active(&error_session, generation) {
-                                    window.global::<StoreState>().set_loading(false);
-                                }
-                            });
-                            return;
+                        }).await {
+                            Ok(entries) => entries,
+                            Err(error) => {
+                                error!(%error, backend = %backend.id(), platform = %slug, "store game loading failed");
+                                break;
+                            }
+                        };
+                        if entries.is_empty() {
+                            break;
                         }
-                    };
-                    if entries.is_empty() {
-                        break;
-                    }
-                    if let Ok(cache) = state.store_caches.cache_for(backend.id()) {
-                        if let Err(error) = cache.upsert_entries(&entries) {
-                            error!(%error, "store catalog cache write failed");
+                        if let Ok(cache) = state.store_caches.cache_for(backend.id())
+                            && let Err(error) = cache.upsert_entries(&entries)
+                        {
+                            error!(%error, backend = %backend.id(), "store catalog cache write failed");
                         }
+                        let fetched = entries.len();
+                        cards.extend(entries.iter().map(entry_card));
+                        publish_cards(&query_window, query_session.clone(), generation, cards.clone(), false);
+                        if fetched < PAGE_SIZE {
+                            break;
+                        }
+                        offset += fetched;
                     }
-                    let fetched = entries.len();
-                    if !session_is_active(&query_session, generation) {
-                        return;
-                    }
-                    streamed.extend(entries.iter().map(entry_card));
-                    publish_cards(
-                        &query_window,
-                        query_session.clone(),
-                        generation,
-                        streamed.clone(),
-                        !cache_shown,
-                    );
-                    cache_shown = true;
-                    info!(platform = %slug, offset, rows = fetched, "store catalog page streamed");
-                    if fetched < PAGE_SIZE {
-                        break;
-                    }
-                    offset += fetched;
                 }
                 let complete_session = query_session.clone();
                 let _ = query_window.upgrade_in_event_loop(move |window| {
@@ -627,21 +616,27 @@ pub(crate) fn install(
             else {
                 return;
             };
-            let Some(backend) = state.stores.get("romm").cloned() else {
+            let Some((backend_id, entry_id)) = split_card_id(id.as_str()) else {
+                return;
+            };
+            let backend_id = backend_id.to_owned();
+            let entry_id = entry_id.to_owned();
+            let Some(backend) = state.stores.get(&backend_id).cloned() else {
                 return;
             };
             // Cover URLs need the backend's native base URL, which the trait
             // doesn't cover: downcast back to RomM for that one value.
             // Detail hydration itself (`get`) stays on the trait.
-            let Some(romm) = backend.as_any().downcast_ref::<marina_romm::RommStore>() else {
-                return;
-            };
-            let base_url = romm.base_url().to_owned();
+            let base_url = backend
+                .as_any()
+                .downcast_ref::<marina_romm::RommStore>()
+                .map(|romm| romm.base_url().to_owned());
             // Unload the pane first: stale text, tags, artifacts, and cover
             // from the previous entry must not linger while the new one
             // hydrates. An empty pane beats a stale one.
             if let Some(window) = detail_window.upgrade() {
                 let store = window.global::<StoreState>();
+                store.set_direct_install(backend.install_mode() == InstallMode::SingleArtifact);
                 let games = store.get_games();
                 for index in 0..games.row_count() {
                     if let Some(mut game) = games.row_data(index)
@@ -673,15 +668,16 @@ pub(crate) fn install(
             let generation_guard = detail_generation.clone();
             let task = tokio::spawn(async move {
                 if let Ok(cache) = state.store_caches.cache_for(backend.id())
-                    && let Ok(Some(entry)) = cache.get(id.as_str())
+                    && let Ok(Some(entry)) = cache.get(&entry_id)
                     && let Some(json) = entry.payload_json
                     && let Ok(rom) = serde_json::from_str::<marina_romm::Rom>(&json)
+                    && let Some(base_url) = base_url.as_deref()
                     && session_is_active(&active_session, generation)
                 {
                     if let Some(task) = crate::populate_store_details(
                         &detail_window,
                         rom,
-                        &base_url,
+                        base_url,
                         generation_guard.clone(),
                         generation,
                         false,
@@ -693,8 +689,109 @@ pub(crate) fn install(
                 if !session_is_active(&active_session, generation) {
                     return;
                 }
-                match backend.get(&id).await {
+                match backend.get(&entry_id).await {
                     Ok(Some(entry)) => {
+                        if base_url.is_none() {
+                            let payload = entry.payload_json.as_deref().and_then(|json| {
+                                serde_json::from_str::<serde_json::Value>(json).ok()
+                            });
+                            let summary = payload
+                                .as_ref()
+                                .and_then(|payload| payload.pointer("/attr/desc"))
+                                .and_then(serde_json::Value::as_str)
+                                .unwrap_or_default()
+                                .to_owned();
+                            let tags = payload
+                                .as_ref()
+                                .and_then(|payload| payload.pointer("/attr/genres"))
+                                .and_then(serde_json::Value::as_array)
+                                .map(|genres| {
+                                    genres
+                                        .iter()
+                                        .filter_map(serde_json::Value::as_str)
+                                        .map(str::to_owned)
+                                        .collect::<Vec<_>>()
+                                })
+                                .unwrap_or_default();
+                            let image_path = backend
+                                .preview_image(&entry)
+                                .await
+                                .ok()
+                                .flatten()
+                                .map(|image| image.path);
+                            let selected_card_id = card_id(&backend_id, &entry_id);
+                            let details = PreviewDetailsData {
+                                title: SharedString::from(entry.title),
+                                summary: SharedString::from(summary),
+                                released_at: SharedString::default(),
+                                languages: SharedString::default(),
+                                regions: SharedString::default(),
+                                tags: SharedString::from(tags.join(", ")),
+                            };
+                            let details_session = active_session.clone();
+                            let _ = detail_window.upgrade_in_event_loop({
+                                let tags = tags.clone();
+                                move |window| {
+                                    if session_is_active(&details_session, generation) {
+                                        window.global::<StoreState>().set_details(details);
+                                        window
+                                            .global::<StoreState>()
+                                            .set_tags(crate::string_model(tags));
+                                        window.global::<StoreState>().set_details_loading(false);
+                                    }
+                                }
+                            });
+                            if let Some(image_path) = image_path {
+                                let image_window = detail_window.clone();
+                                let image_session = active_session.clone();
+                                let image_generation = generation_guard.clone();
+                                let image_task = tokio::spawn(async move {
+                                    let image_path = image_path.to_string_lossy().into_owned();
+                                    let source =
+                                        crate::covers::source_for(None, Some(&image_path), None);
+                                    let Some(decoded) = crate::image::load_scaled(
+                                        &source,
+                                        "store-preview",
+                                        crate::image::PREVIEW_MAX_DIMENSION,
+                                    )
+                                    .await
+                                    else {
+                                        return;
+                                    };
+                                    let _ = image_window.upgrade_in_event_loop(move |window| {
+                                        if !session_is_active(&image_session, generation)
+                                            || image_generation.load(Ordering::Relaxed)
+                                                != generation
+                                        {
+                                            return;
+                                        }
+                                        let (preview, ratio) =
+                                            crate::image::into_slint_image(decoded);
+                                        window
+                                            .global::<StoreState>()
+                                            .set_preview_image(preview.clone());
+                                        let games = window.global::<StoreState>().get_games();
+                                        if let Some(index) = (0..games.row_count()).find(|&index| {
+                                            games.row_data(index).is_some_and(|game| {
+                                                game.id.as_str() == selected_card_id
+                                            })
+                                        }) {
+                                            if let Some(mut game) = games.row_data(index) {
+                                                game.cover = preview;
+                                                game.cover_ratio = ratio;
+                                                games.set_row_data(index, game);
+                                            }
+                                        }
+                                    });
+                                });
+                                register_selection_task(
+                                    &active_session,
+                                    generation,
+                                    image_task.abort_handle(),
+                                );
+                            }
+                            return;
+                        }
                         if let Some(json) = entry.payload_json
                             && let Ok(rom) = serde_json::from_str::<marina_romm::Rom>(&json)
                             && session_is_active(&active_session, generation)
@@ -702,7 +799,7 @@ pub(crate) fn install(
                             if let Some(task) = crate::populate_store_details(
                                 &detail_window,
                                 rom,
-                                &base_url,
+                                base_url.as_deref().unwrap_or_default(),
                                 generation_guard,
                                 generation,
                                 true,
@@ -713,7 +810,7 @@ pub(crate) fn install(
                     }
                     Ok(None) => {}
                     Err(error) => {
-                        error!(%error, entry_id = %id, "store game detail hydration failed")
+                        error!(%error, entry_id, "store game detail hydration failed")
                     }
                 }
             });
@@ -728,15 +825,30 @@ mod tests {
     #[test]
     fn duplicate_titles_are_grouped_case_insensitively() {
         let cards: Vec<CardParts> = vec![
-            ("1".into(), "Final Fight 3".into(), "SNES".into()),
-            ("2".into(), " final fight 3 ".into(), "SNES".into()),
-            ("3".into(), "Final Fight 2".into(), "SNES".into()),
+            (
+                "romm".into(),
+                "1".into(),
+                "Final Fight 3".into(),
+                "SNES".into(),
+            ),
+            (
+                "romm".into(),
+                "2".into(),
+                " final fight 3 ".into(),
+                "SNES".into(),
+            ),
+            (
+                "romm".into(),
+                "3".into(),
+                "Final Fight 2".into(),
+                "SNES".into(),
+            ),
         ];
 
         let grouped = deduplicate_card_parts(cards);
 
         assert_eq!(grouped.len(), 2);
-        assert_eq!(grouped[0].0, "1");
-        assert_eq!(grouped[1].0, "3");
+        assert_eq!(grouped[0].1, "1");
+        assert_eq!(grouped[1].1, "3");
     }
 }

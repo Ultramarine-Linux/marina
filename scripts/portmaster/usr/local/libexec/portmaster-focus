@@ -1,0 +1,30 @@
+#!/bin/sh
+# Focus/fullscreen the first Sway window belonging to this PortMaster unit.
+set -u
+
+if [ -z "${SWAYSOCK:-}" ]; then
+    SWAYSOCK="$(find /run/user/1000 -maxdepth 1 -type s -name 'sway-ipc.*.sock' -print -quit 2>/dev/null)"
+fi
+[ -n "${SWAYSOCK:-}" ] || exit 0
+
+attempts=0
+while [ "$attempts" -lt 80 ]; do
+    cgroup="$(systemctl --user show "${PORTMASTER_UNIT:-}" -p ControlGroup --value 2>/dev/null || true)"
+    if [ -n "$cgroup" ] && [ -f "/sys/fs/cgroup$cgroup/cgroup.procs" ]; then
+        while read -r candidate; do
+            [ -r "/proc/$candidate/comm" ] || continue
+            if swaymsg -s "$SWAYSOCK" "[pid=$candidate] focus" >/dev/null 2>&1; then
+                swaymsg -s "$SWAYSOCK" '[app_id="org.ultramarinelinux.MarinaShell"] move scratchpad' >/dev/null 2>&1 || true
+                if swaymsg -s "$SWAYSOCK" "[pid=$candidate] focus, fullscreen enable" >/dev/null 2>&1; then
+                    echo "PortMaster: systemd post-start fullscreened service pid $candidate"
+                    exit 0
+                fi
+            fi
+        done < "/sys/fs/cgroup$cgroup/cgroup.procs"
+    fi
+    attempts=$((attempts + 1))
+    sleep 0.25
+done
+
+echo "PortMaster: no Sway window found in service cgroup" >&2
+exit 0

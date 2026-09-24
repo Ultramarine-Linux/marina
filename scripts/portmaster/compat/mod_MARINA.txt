@@ -1,0 +1,60 @@
+#!/bin/bash
+# Marina platform hooks consumed by upstream PortMaster launchers.
+
+# The Sway IPC socket name changes with the compositor PID. Discover it at
+# runtime instead of baking in a boot-specific socket name.
+if [ -z "${SWAYSOCK:-}" ]; then
+    SWAYSOCK="$(find /run/user/1000 -maxdepth 1 -type s -name 'sway-ipc.*.sock' -print -quit 2>/dev/null)"
+    export SWAYSOCK
+fi
+
+pm_platform_helper() {
+    # Upstream launchers call this before starting the game binary. Scope
+    # process discovery to this systemd service, then match the Sway window
+    # by the discovered PID rather than the globally focused container.
+    command -v swaymsg >/dev/null 2>&1 || return 0
+    game_binary="$(basename "$1")"
+    (
+        attempts=0
+        while [ "$attempts" -lt 40 ]; do
+            pid=""
+            cgroup="$(systemctl --user show "${PORTMASTER_UNIT:-}" -p ControlGroup --value 2>/dev/null || true)"
+            if [ -n "$cgroup" ] && [ -f "/sys/fs/cgroup$cgroup/cgroup.procs" ]; then
+                while read -r candidate; do
+                    [ -r "/proc/$candidate/comm" ] || continue
+                    comm="$(tr -d '\n' < "/proc/$candidate/comm")"
+                    if [ "$comm" = "$game_binary" ]; then
+                        pid="$candidate"
+                        break
+                    fi
+                done < "/sys/fs/cgroup$cgroup/cgroup.procs"
+            fi
+            if [ -z "$pid" ]; then
+                # Nested user namespaces may hide the service cgroup mount;
+                # fall back to the exact executable name, never a substring.
+                pid="$(pgrep -x "$game_binary" | head -n 1)"
+            fi
+            if [ -n "$pid" ] && swaymsg -s "$SWAYSOCK" '[app_id="org.ultramarinelinux.MarinaShell"] move scratchpad' >/dev/null 2>&1 \
+                && swaymsg -s "$SWAYSOCK" "[pid=$pid] focus, fullscreen enable" >/dev/null 2>&1; then
+                echo "PortMaster: moved Marina to scratchpad and fullscreened service pid $pid"
+                exit 0
+            fi
+            attempts=$((attempts + 1))
+            sleep 0.25
+        done
+        echo "PortMaster: game window was not found in service cgroup for $game_binary"
+    ) &
+}
+
+# Focus restoration is owned by the systemd ExecStopPost helper, which also
+# runs when a port crashes before reaching this callback.
+pm_finish() { :; }
+
+# Compatibility hooks used by some newer ports. They are intentionally
+# harmless until Marina implements the corresponding lifecycle integration.
+pm_reload() { :; }
+pm_cleanup() { :; }
+pm_run() { "$@"; }
+pm_set_gamedir() { :; }
+pm_prelaunch() { :; }
+pm_postlaunch() { :; }
