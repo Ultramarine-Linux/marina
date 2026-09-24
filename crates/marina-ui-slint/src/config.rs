@@ -788,28 +788,32 @@ twelve_hour = true
         std::fs::create_dir_all(primary.parent().unwrap()).unwrap();
         std::fs::write(
             shared_dropins.join("20-later.toml"),
-            "[retroarch]\nbinary = \"/shared-20\"\n",
+            "[runtime.retroarch]\nbinary = \"/shared-20\"\n",
         )
         .unwrap();
         std::fs::write(
             shared_dropins.join("10-earlier.toml"),
-            "[retroarch]\nbinary = \"/shared-10\"\ncores_dir = \"/shared/cores\"\n",
+            "[runtime.retroarch]\nbinary = \"/shared-10\"\ncores_dir = \"/shared/cores\"\n",
         )
         .unwrap();
         std::fs::write(shared_dropins.join("README"), "not TOML").unwrap();
-        std::fs::write(&shared_config, "[retroarch]\nbinary = \"/shared-main\"\n").unwrap();
+        std::fs::write(
+            &shared_config,
+            "[runtime.retroarch]\nbinary = \"/shared-main\"\n",
+        )
+        .unwrap();
         std::fs::write(
             etc_dropins.join("10-admin.toml"),
-            "[retroarch]\nbinary = \"/etc-dropin\"\n",
+            "[runtime.retroarch]\nbinary = \"/etc-dropin\"\n",
         )
         .unwrap();
-        std::fs::write(&etc_config, "[retroarch]\nbinary = \"/etc-main\"\n").unwrap();
+        std::fs::write(&etc_config, "[runtime.retroarch]\nbinary = \"/etc-main\"\n").unwrap();
         std::fs::write(
             user_dropins.join("10-user.toml"),
-            "[retroarch]\nbinary = \"/user-dropin\"\n",
+            "[runtime.retroarch]\nbinary = \"/user-dropin\"\n",
         )
         .unwrap();
-        std::fs::write(&primary, "[retroarch]\nbinary = \"/primary\"\n").unwrap();
+        std::fs::write(&primary, "[runtime.retroarch]\nbinary = \"/primary\"\n").unwrap();
 
         let sources = config_sources_from(
             &shared_dropins,
