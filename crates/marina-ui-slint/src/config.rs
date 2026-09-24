@@ -26,13 +26,21 @@
 //! core = "mgba_libretro.so"
 //! ```
 //!
-//! Reads go through figment: the TOML file is the base layer and each
-//! environment variable merges over it as a key-path tuple, so precedence
-//! per field is: environment variable > config file > default. The file is
-//! looked up at `$MARINA_CONFIG`, then `./marina.toml`, then
-//! `$XDG_CONFIG_HOME/marina/config.toml` (`~/.config/marina/config.toml`).
-//! When none exists, [`ensure_config_file`] writes [`default_config_template`]
-//! (rendered from the config structs' defaults and `///` doc comments via
+//! Reads go through figment. TOML sources are merged in this order, with
+//! later sources overriding earlier fields:
+//!
+//! 1. `/usr/share/marina/config.toml.d/*.toml`
+//! 2. `/usr/share/marina/config.toml`
+//! 3. `/etc/marina/config.toml.d/*.toml`
+//! 4. `/etc/marina/config.toml`
+//! 5. `$XDG_CONFIG_HOME/marina/config.toml.d/*.toml`
+//! 6. The primary config file: `$MARINA_CONFIG`, `./marina.toml`, or
+//!    `$XDG_CONFIG_HOME/marina/config.toml` (`~/.config/marina/config.toml`)
+//! 7. Environment variables
+//!
+//! Drop-ins are loaded lexicographically by filename. When no primary config
+//! exists, [`ensure_config_file`] writes [`default_config_template`] (rendered
+//! from the config structs' defaults and `///` doc comments via
 //! `ConfigTemplate`) to `$MARINA_CONFIG` or the XDG location on startup.
 //!
 //! Writes go through [`toml_edit`] (see [`upsert_toml_value`]) so in-UI
@@ -183,11 +191,7 @@ impl Config {
         if let Err(error) = ensure_config_file() {
             warn!(%error, "could not write default config file; continuing with defaults");
         }
-        let mut figment = Figment::new();
-        if let Some(path) = config_candidates().into_iter().find(|p| p.is_file()) {
-            tracing::info!(path = %path.display(), "loading config file");
-            figment = figment.merge(Toml::file(path));
-        }
+        let figment = merge_config_files(Figment::new(), config_sources());
         // Env vars merge over the file as key-path tuples: `(key, value)`
         // with a dotted path like "store.romm.url" nests like the TOML.
         // The bindings are generated from `#[template(env = "..")]`,
@@ -311,18 +315,88 @@ fn apply_env(figment: Figment) -> Figment {
     figment
 }
 
-fn config_candidates() -> Vec<PathBuf> {
-    if let Some(path) = env::var_os("MARINA_CONFIG").map(PathBuf::from) {
-        return vec![path];
+/// Returns all TOML files that form the file configuration layer, ordered
+/// from lowest to highest priority.
+fn config_sources() -> Vec<PathBuf> {
+    let xdg = xdg_config_dir();
+    config_sources_from(
+        std::path::Path::new("/usr/share/marina/config.toml.d"),
+        std::path::Path::new("/usr/share/marina/config.toml"),
+        std::path::Path::new("/etc/marina/config.toml.d"),
+        std::path::Path::new("/etc/marina/config.toml"),
+        xdg.as_deref()
+            .map(|base| base.join("marina").join("config.toml.d"))
+            .as_deref(),
+        primary_config_path().as_deref(),
+    )
+}
+
+/// Builds the source list independently of the fixed system locations so its
+/// ordering can be covered by unit tests.
+fn config_sources_from(
+    shared_dropins: &std::path::Path,
+    shared_config: &std::path::Path,
+    etc_dropins: &std::path::Path,
+    etc_config: &std::path::Path,
+    user_dropins: Option<&std::path::Path>,
+    primary_config: Option<&std::path::Path>,
+) -> Vec<PathBuf> {
+    let mut sources = dropin_files(shared_dropins);
+    if shared_config.is_file() {
+        sources.push(shared_config.to_path_buf());
     }
-    let mut candidates = vec![PathBuf::from("marina.toml")];
-    let xdg = env::var_os("XDG_CONFIG_HOME")
+    sources.extend(dropin_files(etc_dropins));
+    if etc_config.is_file() {
+        sources.push(etc_config.to_path_buf());
+    }
+    if let Some(directory) = user_dropins {
+        sources.extend(dropin_files(directory));
+    }
+    if let Some(path) = primary_config.filter(|path| path.is_file()) {
+        sources.push(path.to_path_buf());
+    }
+    sources
+}
+
+/// Lists immediate `*.toml` drop-ins in deterministic filename order.
+fn dropin_files(directory: &std::path::Path) -> Vec<PathBuf> {
+    let Ok(entries) = std::fs::read_dir(directory) else {
+        return Vec::new();
+    };
+
+    let mut files: Vec<_> = entries
+        .filter_map(Result::ok)
+        .map(|entry| entry.path())
+        .filter(|path| path.is_file() && path.extension().is_some_and(|ext| ext == "toml"))
+        .collect();
+    files.sort();
+    files
+}
+
+fn merge_config_files(figment: Figment, paths: impl IntoIterator<Item = PathBuf>) -> Figment {
+    paths.into_iter().fold(figment, |figment, path| {
+        tracing::info!(path = %path.display(), "loading config file");
+        figment.merge(Toml::file(path))
+    })
+}
+
+fn xdg_config_dir() -> Option<PathBuf> {
+    env::var_os("XDG_CONFIG_HOME")
         .map(PathBuf::from)
-        .or_else(|| dirs::home_dir().map(|home| home.join(".config")));
-    if let Some(base) = xdg {
-        candidates.push(base.join("marina").join("config.toml"));
+        .or_else(|| dirs::home_dir().map(|home| home.join(".config")))
+}
+
+/// Selects the config file that users edit directly. It is intentionally
+/// separate from the lower-priority, system-managed configuration sources.
+fn primary_config_path() -> Option<PathBuf> {
+    if let Some(path) = env::var_os("MARINA_CONFIG").map(PathBuf::from) {
+        return Some(path);
     }
-    candidates
+    let local = PathBuf::from("marina.toml");
+    if local.is_file() {
+        return Some(local);
+    }
+    xdg_config_dir().map(|base| base.join("marina").join("config.toml"))
 }
 
 /// Where a missing config file gets created: an explicit `$MARINA_CONFIG`
@@ -336,10 +410,7 @@ fn config_write_path() -> Option<PathBuf> {
     if PathBuf::from("marina.toml").is_file() {
         return Some(PathBuf::from("marina.toml"));
     }
-    env::var_os("XDG_CONFIG_HOME")
-        .map(PathBuf::from)
-        .or_else(|| dirs::home_dir().map(|home| home.join(".config")))
-        .map(|base| base.join("marina").join("config.toml"))
+    xdg_config_dir().map(|base| base.join("marina").join("config.toml"))
 }
 
 /// Renders the default configuration file. Values come from the config
@@ -488,6 +559,79 @@ twelve_hour = true
             config.romm_url.as_deref(),
             Some("https://override.example.com")
         );
+    }
+
+    #[test]
+    fn config_file_layers_are_ordered_and_primary_wins() {
+        let root = std::env::temp_dir().join(format!(
+            "marina-config-layers-{}",
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        let shared_dropins = root.join("usr/share/marina/config.toml.d");
+        let shared_config = root.join("usr/share/marina/config.toml");
+        let etc_dropins = root.join("etc/marina/config.toml.d");
+        let etc_config = root.join("etc/marina/config.toml");
+        let user_dropins = root.join("config/marina/config.toml.d");
+        let primary = root.join("config/marina/config.toml");
+
+        for directory in [&shared_dropins, &etc_dropins, &user_dropins] {
+            std::fs::create_dir_all(directory).unwrap();
+        }
+        std::fs::create_dir_all(primary.parent().unwrap()).unwrap();
+        std::fs::write(
+            shared_dropins.join("20-later.toml"),
+            "[retroarch]\nbinary = \"/shared-20\"\n",
+        )
+        .unwrap();
+        std::fs::write(
+            shared_dropins.join("10-earlier.toml"),
+            "[retroarch]\nbinary = \"/shared-10\"\ncores_dir = \"/shared/cores\"\n",
+        )
+        .unwrap();
+        std::fs::write(shared_dropins.join("README"), "not TOML").unwrap();
+        std::fs::write(&shared_config, "[retroarch]\nbinary = \"/shared-main\"\n").unwrap();
+        std::fs::write(
+            etc_dropins.join("10-admin.toml"),
+            "[retroarch]\nbinary = \"/etc-dropin\"\n",
+        )
+        .unwrap();
+        std::fs::write(&etc_config, "[retroarch]\nbinary = \"/etc-main\"\n").unwrap();
+        std::fs::write(
+            user_dropins.join("10-user.toml"),
+            "[retroarch]\nbinary = \"/user-dropin\"\n",
+        )
+        .unwrap();
+        std::fs::write(&primary, "[retroarch]\nbinary = \"/primary\"\n").unwrap();
+
+        let sources = config_sources_from(
+            &shared_dropins,
+            &shared_config,
+            &etc_dropins,
+            &etc_config,
+            Some(&user_dropins),
+            Some(&primary),
+        );
+        assert_eq!(
+            sources,
+            vec![
+                shared_dropins.join("10-earlier.toml"),
+                shared_dropins.join("20-later.toml"),
+                shared_config.clone(),
+                etc_dropins.join("10-admin.toml"),
+                etc_config.clone(),
+                user_dropins.join("10-user.toml"),
+                primary.clone(),
+            ]
+        );
+
+        let config = Config::from_figment(merge_config_files(Figment::new(), sources));
+        assert_eq!(config.retroarch.binary, PathBuf::from("/primary"));
+        assert_eq!(config.retroarch.cores_dir, PathBuf::from("/shared/cores"));
+
+        std::fs::remove_dir_all(root).ok();
     }
 
     #[test]
