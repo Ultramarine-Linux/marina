@@ -1812,6 +1812,12 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cd417de3d1d015fc3bfd2b1ea46dfc7bab72ef86f1cc7cc9c78e728b34a6d1fd"
 
 [[package]]
+name = "futures-timer"
+version = "3.0.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "af43fadb8a98512d547e37b4e92e0ced13e205c061b87b4623eff01d918d6968"
+
+[[package]]
 name = "futures-util"
 version = "0.3.34"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3457,9 +3463,11 @@ name = "marina-power"
 version = "0.1.0"
 dependencies = [
  "futures-util",
+ "nmrs",
  "tokio",
  "tracing",
  "zbus",
+ "zbus_systemd",
 ]
 
 [[package]]
@@ -3799,6 +3807,26 @@ dependencies = [
  "cfg-if",
  "cfg_aliases",
  "libc",
+]
+
+[[package]]
+name = "nmrs"
+version = "3.5.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "83ad7c7fb5d3552a6b08801a6fe858ec4e3af49be51b53cba51fa6615155f3f3"
+dependencies = [
+ "async-trait",
+ "base64 0.22.1",
+ "bitflags 2.13.1",
+ "futures",
+ "futures-timer",
+ "log",
+ "serde",
+ "thiserror 2.0.20",
+ "tokio",
+ "uuid",
+ "zbus",
+ "zvariant",
 ]
 
 [[package]]
@@ -6351,6 +6379,7 @@ dependencies = [
  "signal-hook-registry",
  "socket2",
  "tokio-macros",
+ "tracing",
  "windows-sys 0.61.2",
 ]
 
@@ -7792,6 +7821,7 @@ dependencies = [
  "rustix 1.1.4",
  "serde",
  "serde_repr",
+ "tokio",
  "tracing",
  "uds_windows",
  "uuid",
@@ -7850,6 +7880,16 @@ dependencies = [
  "serde",
  "winnow 1.0.4",
  "zvariant",
+]
+
+[[package]]
+name = "zbus_systemd"
+version = "0.26100.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "4508893b3fc7829cbd654a318942b0716fb08da8a272a646a970f382cfb7d27e"
+dependencies = [
+ "serde",
+ "zbus",
 ]
 
 [[package]]

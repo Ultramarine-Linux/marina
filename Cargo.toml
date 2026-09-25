@@ -64,6 +64,8 @@ tracing-journald = "0.3"
 uuid = { version = "1", features = ["v4", "v5"] }
 ulid = "1"
 zbus = "5"
+zbus_systemd = { version = "0.26100.0", features = ["hostname1", "locale1", "login1", "resolve1", "systemd1", "sysupdate1", "timedate1", "timesync1", "zbus-async-tokio"] }
+nmrs = "3.5.3"
 
 # marina
 marina-apps = { path = "crates/marina-apps" }

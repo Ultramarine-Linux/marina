@@ -1,0 +1,14 @@
+// Marina is the trusted graphical shell on a single-purpose kiosk. The kiosk
+// account is deliberately a member of wheel, which grants its active session
+// access to the power and network controls exposed by the system bus.
+polkit.addRule(function(action, subject) {
+    if (!subject.active || !subject.local || !subject.isInGroup("wheel")) {
+        return polkit.Result.NOT_HANDLED;
+    }
+
+    if (action.id == "org.freedesktop.systemd1.manage-units"
+        || action.id.indexOf("org.freedesktop.NetworkManager.") == 0
+        || action.id.indexOf("org.freedesktop.tuned.") == 0) {
+        return polkit.Result.YES;
+    }
+});

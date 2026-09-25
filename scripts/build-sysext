@@ -27,7 +27,7 @@ install -m 0644 systemd/portmaster@.service "$root/usr/lib/systemd/user/portmast
 install -m 0644 systemd/portmaster-runtime@.service "$root/usr/lib/systemd/system/portmaster-runtime@.service"
 install -m 0644 scripts/portmaster/etc/tmpfiles.d/marina-portmaster.conf "$root/usr/lib/tmpfiles.d/marina-portmaster.conf"
 install -m 0644 scripts/portmaster/polkit/org.ultramarinelinux.MarinaShell.portmaster-runtime.policy "$root/usr/share/polkit-1/actions/org.ultramarinelinux.MarinaShell.portmaster-runtime.policy"
-install -m 0644 scripts/portmaster/polkit/49-marina-portmaster.rules "$root/usr/share/polkit-1/rules.d/49-marina-portmaster.rules"
+install -m 0644 scripts/portmaster/polkit/49-marina-system-bus.rules "$root/usr/share/polkit-1/rules.d/49-marina-system-bus.rules"
 
 for helper in \
     portmaster-mount-stack \

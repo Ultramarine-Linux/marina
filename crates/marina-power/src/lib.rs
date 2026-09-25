@@ -1,17 +1,20 @@
 //! System power state for Marina.
 //!
-//! This crate owns the UPower D-Bus backend and exposes only plain battery
-//! snapshots. UI crates should depend on [`BatteryStatus`] and
-//! [`monitor_battery_status`] rather than touching D-Bus types directly.
+//! This crate owns Marina's system-bus integrations. It exposes plain battery
+//! snapshots, TuneD profile controls, and typed systemd/NetworkManager bindings
+//! for future power and connectivity UI work.
 //!
 //! The composite DisplayDevice (`org.freedesktop.UPower.GetDisplayDevice` +
 //! `org.freedesktop.UPower.Device` properties) aggregates the system battery.
 //! A missing daemon, missing system bus, or absent battery all resolve to an
 //! unavailable status so callers can hide their indicator.
 
-use std::time::Duration;
+use std::{collections::BTreeMap, time::Duration};
 
 use futures_util::StreamExt;
+
+pub use nmrs::NetworkManager;
+pub use zbus_systemd;
 
 /// Interval for the fallback re-read. Live `PropertiesChanged` /
 /// `DeviceAdded` / `DeviceRemoved` signals normally deliver updates instantly;
@@ -164,19 +167,68 @@ enum SessionOutcome {
     Backoff,
 }
 
-#[zbus::proxy(
-    interface = "org.freedesktop.login1.Manager",
-    default_service = "org.freedesktop.login1",
-    default_path = "/org/freedesktop/login1"
-)]
-trait LoginManager {
-    fn power_off(&self, interactive: bool) -> zbus::Result<()>;
-}
-
+/// Requests a non-interactive system shutdown through systemd-logind.
 pub async fn power_off() -> Result<(), zbus::Error> {
     let connection = zbus::Connection::system().await?;
-    let manager = LoginManagerProxy::new(&connection).await?;
+    let manager = zbus_systemd::login1::ManagerProxy::new(&connection).await?;
     manager.power_off(false).await
+}
+
+/// A TuneD profile available on the system.
+///
+/// TuneD provides the profile name as the stable identifier and a human-facing
+/// summary suitable for a future settings UI.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TunedProfile {
+    pub name: String,
+    pub summary: String,
+}
+
+#[zbus::proxy(
+    interface = "com.redhat.tuned",
+    default_service = "com.redhat.tuned",
+    default_path = "/Tuned"
+)]
+trait Tuned {
+    fn active_profile(&self) -> zbus::Result<String>;
+    fn profiles(&self) -> zbus::Result<BTreeMap<String, String>>;
+    fn switch_profile(&self, profile: &str) -> zbus::Result<bool>;
+}
+
+/// Returns the profile currently active in TuneD.
+///
+/// A missing TuneD daemon or a denied system-bus request is returned to the
+/// caller so the UI can distinguish unavailable power-profile controls from a
+/// profile name.
+pub async fn active_tuned_profile() -> Result<String, zbus::Error> {
+    let connection = zbus::Connection::system().await?;
+    let tuned = TunedProxy::new(&connection).await?;
+    tuned.active_profile().await
+}
+
+/// Lists the TuneD profiles installed on the system, ordered by profile name.
+pub async fn tuned_profiles() -> Result<Vec<TunedProfile>, zbus::Error> {
+    let connection = zbus::Connection::system().await?;
+    let tuned = TunedProxy::new(&connection).await?;
+    Ok(profiles_from_tuned(tuned.profiles().await?))
+}
+
+fn profiles_from_tuned(profiles: BTreeMap<String, String>) -> Vec<TunedProfile> {
+    profiles
+        .into_iter()
+        .map(|(name, summary)| TunedProfile { name, summary })
+        .collect()
+}
+
+/// Requests that TuneD activate `profile`.
+///
+/// `Ok(false)` means TuneD received the request but declined the profile (for
+/// example, because it is unavailable); D-Bus and authorization failures are
+/// returned as errors.
+pub async fn switch_tuned_profile(profile: &str) -> Result<bool, zbus::Error> {
+    let connection = zbus::Connection::system().await?;
+    let tuned = TunedProxy::new(&connection).await?;
+    tuned.switch_profile(profile).await
 }
 
 /// Continuously reports battery status: an immediate initial read, live
@@ -368,5 +420,20 @@ mod tests {
             .is_low()
         );
         assert!(!BatteryStatus::unavailable().is_low());
+    }
+
+    #[test]
+    fn tuned_profiles_are_ordered_by_name() {
+        let profiles = BTreeMap::from([
+            ("balanced".to_owned(), "Balanced".to_owned()),
+            (
+                "throughput-performance".to_owned(),
+                "Performance".to_owned(),
+            ),
+        ]);
+        let profiles = profiles_from_tuned(profiles);
+
+        assert_eq!(profiles[0].name, "balanced");
+        assert_eq!(profiles[1].name, "throughput-performance");
     }
 }
