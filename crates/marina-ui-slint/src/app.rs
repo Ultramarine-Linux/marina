@@ -17,12 +17,15 @@ use marina_scanner::scan;
 use marina_store::{StoreBackend, StoreCaches};
 use marina_store_sqlite::SqliteLibrary;
 
-use crate::{config::Config, storage};
+use crate::{
+    config::{self, ConfigHandle},
+    storage,
+};
 
 /// Long-lived services and configuration shared by the application.
 #[derive(Debug)]
 pub(crate) struct AppState {
-    pub(crate) config: Config,
+    pub(crate) config: ConfigHandle,
     pub(crate) library: SqliteLibrary,
     pub(crate) store_caches: StoreCaches,
     /// Pluggable store backends by stable id ("romm", …). Access through
@@ -35,11 +38,12 @@ pub(crate) struct AppState {
 pub(crate) type AppStateHandle = Arc<AppState>;
 
 pub(crate) async fn reconcile_local_games(state: &AppStateHandle) {
-    if !state.config.scan_on_startup {
+    let config = state.config.snapshot();
+    if !config.scan_on_startup {
         return;
     }
 
-    let Some(root) = state.config.library_root.clone() else {
+    let Some(root) = config.library_root else {
         return;
     };
 
@@ -148,26 +152,27 @@ impl AppState {
     -> Result<AppStateHandle, Box<dyn std::error::Error + Send + Sync>> {
         let started = std::time::Instant::now();
         tracing::info!("initializing application state");
-        let config = Config::from_env();
+        let config = config::shared();
+        let startup_config = config.snapshot();
 
         tracing::info!(
-            uri = %config.storage_uri,
+            uri = %startup_config.storage_uri,
             "connecting to library store"
         );
-        if let Some(root) = &config.library_root {
+        if let Some(root) = &startup_config.library_root {
             tracing::info!(path = %root.display(), "configured local library root");
         } else {
             tracing::warn!("MARINA_LIBRARY_ROOT not set; local installation discovery is disabled");
         }
         tracing::info!("opening library store");
-        let library = storage::connect(&config).await?;
-        let store_caches = storage::connect_store_caches(&config);
+        let library = storage::connect(&startup_config).await?;
+        let store_caches = storage::connect_store_caches(&startup_config);
         let mut stores: HashMap<String, Arc<dyn StoreBackend>> = HashMap::new();
-        if let Some(base_url) = config.romm_url.clone() {
-            let backend = RommStore::new(base_url, config.romm_token.as_deref());
+        if let Some(base_url) = startup_config.romm_url.clone() {
+            let backend = RommStore::new(base_url, startup_config.romm_token.as_deref());
             stores.insert(backend.id().to_owned(), Arc::new(backend));
         }
-        if let Some(portmaster) = config.portmaster_store.clone() {
+        if let Some(portmaster) = startup_config.portmaster_store.clone() {
             let backend = PortMasterStore::new(portmaster);
             stores.insert(backend.id().to_owned(), Arc::new(backend));
         }

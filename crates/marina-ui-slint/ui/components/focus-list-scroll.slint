@@ -1,0 +1,46 @@
+// Keeps a fixed-height ListView row selected by controller input visible.
+// Bind `viewport-y` to the list's viewport and give this controller the
+// selected index, row count, and rendered ListView height.
+export component FocusListScroll inherits Rectangle {
+    in property <int> selected-index: 0;
+    in property <int> item-count: 0;
+    in property <length> item-height: 1px;
+    in property <bool> use-explicit-focus: false;
+    in property <length> focus-y: 0px;
+    in property <length> focus-height: 0px;
+    in property <length> content-height: 0px;
+    in property <length> viewport-height: 0px;
+    in-out property <length> viewport-y: 0px;
+
+    width: 0px;
+    height: 0px;
+
+    function ensure-visible() {
+        if (root.viewport-height <= 0px || (!root.use-explicit-focus && (root.item-count <= 0 || root.item-height <= 0px))) {
+            root.viewport-y = 0px;
+            return;
+        }
+
+        let index = min(max(root.selected-index, 0), root.item-count - 1);
+        let item-top = root.use-explicit-focus ? root.focus-y : index * root.item-height;
+        let item-bottom = item-top + (root.use-explicit-focus ? root.focus-height : root.item-height);
+        let viewport-top = -root.viewport-y;
+        let content-height = root.use-explicit-focus ? root.content-height : root.item-count * root.item-height;
+        let minimum-viewport-y = min(0px, root.viewport-height - content-height);
+
+        if (item-top < viewport-top) {
+            root.viewport-y = min(0px, max(minimum-viewport-y, -item-top));
+        } else if (item-bottom > viewport-top + root.viewport-height) {
+            root.viewport-y = min(0px, max(minimum-viewport-y, root.viewport-height - item-bottom));
+        }
+    }
+
+    changed selected-index => { root.ensure-visible(); }
+    changed item-count => { root.ensure-visible(); }
+    changed item-height => { root.ensure-visible(); }
+    changed use-explicit-focus => { root.ensure-visible(); }
+    changed focus-y => { root.ensure-visible(); }
+    changed focus-height => { root.ensure-visible(); }
+    changed content-height => { root.ensure-visible(); }
+    changed viewport-height => { root.ensure-visible(); }
+}

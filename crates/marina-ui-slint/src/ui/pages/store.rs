@@ -203,7 +203,7 @@ pub(crate) fn install(
         else {
             return;
         };
-        let Some(root) = state.config.library_root.clone() else {
+        let Some(root) = state.config.snapshot().library_root else {
             error!("cannot install Store game without MARINA_LIBRARY_ROOT");
             return;
         };

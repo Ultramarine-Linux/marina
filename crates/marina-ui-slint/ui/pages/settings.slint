@@ -7,6 +7,7 @@ import { Input } from "../slintcn/components/input.slint";
 import { Switch } from "../slintcn/components/switch.slint";
 import { CrumbHeader } from "../components/crumb-header.slint";
 import { ShellState } from "../components/app-shell.slint";
+import { FocusListScroll } from "../components/focus-list-scroll.slint";
 
 export struct SettingsEntry {
     path: string,
@@ -29,8 +30,25 @@ export struct SettingsSection {
     panels: [SettingsPanel],
 }
 
+export struct SettingsPanelItem {
+    section-index: int,
+    panel-index: int,
+    navigation-index: int,
+}
+
+export struct SettingsNavigationItem {
+    title: string,
+    is-section: bool,
+    panel-selection-index: int,
+    scroll-y: length,
+    height: length,
+}
+
 export global SettingsState {
     in-out property <[SettingsSection]> sections;
+    in-out property <[SettingsPanelItem]> panels;
+    in-out property <[SettingsNavigationItem]> navigation;
+    in-out property <length> navigation-content-height;
     in-out property <[string]> platform-names;
     callback setting-changed(string, string, string, bool);
 }
@@ -40,11 +58,19 @@ export component SettingsPage inherits Rectangle {
     callback focus-header;
 
     private property <[SettingsSection]> sections: SettingsState.sections;
+    private property <[SettingsPanelItem]> panels: SettingsState.panels;
+    private property <[SettingsNavigationItem]> navigation: SettingsState.navigation;
+    private property <length> navigation-content-height: SettingsState.navigation-content-height;
     property <int> selected-section: 0;
     property <int> selected-panel: 0;
+    private property <int> selected-panel-index: 0;
+    private property <int> selected-navigation-index: 1;
     private property <int> active-pane: 0;
     private property <int> selected-entry: 0;
     private property <int> selected-platform: 0;
+    private property <length> panel-list-scroll-y: 0px;
+    private property <length> entry-list-scroll-y: 0px;
+    private property <length> platform-list-scroll-y: 0px;
     private property <[string]> menu-stack: [];
     private property <string> menu-open-target: "";
     private property <[string]> platform-names: SettingsState.platform-names;
@@ -70,11 +96,15 @@ export component SettingsPage inherits Rectangle {
         }
     }
 
-    function select-panel(section: int, panel: int) {
-        if (root.sections.length <= 0) { return; }
-        root.selected-section = min(max(section, 0), root.sections.length - 1);
-        root.selected-panel = min(max(panel, 0), root.sections[root.selected-section].panels.length - 1);
+    function select-panel(index: int) {
+        if (root.panels.length <= 0) { return; }
+        root.selected-panel-index = min(max(index, 0), root.panels.length - 1);
+        let selected = root.panels[root.selected-panel-index];
+        root.selected-section = selected.section-index;
+        root.selected-panel = selected.panel-index;
+        root.selected-navigation-index = selected.navigation-index;
         root.selected-entry = 0;
+        root.entry-list-scroll-y = 0px;
     }
 
     function open-menu(target: string) {
@@ -82,15 +112,22 @@ export component SettingsPage inherits Rectangle {
         root.menu-open-target = target;
         root.menu-stack = [target];
         root.selected-platform = 0;
+        root.platform-list-scroll-y = 0px;
         root.active-pane = 1;
     }
 
-    function open-selected-menu() {
-        if (root.current-panel.entries.length <= 0) { return; }
-        let entry = root.current-panel.entries[root.selected-entry];
+    function activate-entry(index: int) {
+        if (index < 0 || index >= root.current-panel.entries.length) { return; }
+        let entry = root.current-panel.entries[index];
         if (entry.control == "menu") {
             root.open-menu(entry.path);
+        } else if (entry.control == "toggle" && !entry.environment-overridden) {
+            SettingsState.setting-changed(entry.path, entry.control, "", !entry.bool-value);
         }
+    }
+
+    function activate-selected-entry() {
+        root.activate-entry(root.selected-entry);
     }
 
     function open-platform(index: int) {
@@ -121,18 +158,7 @@ export component SettingsPage inherits Rectangle {
     }
 
     function move-panel(delta: int) {
-        if (root.sections.length <= 0) { return; }
-        if (delta > 0) {
-            if (root.selected-panel + 1 < root.current-section.panels.length) {
-                root.selected-panel += 1;
-            } else if (root.selected-section + 1 < root.sections.length) {
-                root.select-panel(root.selected-section + 1, 0);
-            }
-        } else if (root.selected-panel > 0) {
-            root.selected-panel -= 1;
-        } else if (root.selected-section > 0) {
-            root.select-panel(root.selected-section - 1, root.sections[root.selected-section - 1].panels.length - 1);
-        }
+        root.select-panel(root.selected-panel-index + delta);
     }
 
     page-focus := FocusScope {
@@ -165,7 +191,7 @@ export component SettingsPage inherits Rectangle {
             if (event.text == Key.UpArrow) {
                 if (root.active-pane == 1) {
                     root.move-entry(-1);
-                } else if (root.selected-section == 0 && root.selected-panel == 0) {
+                } else if (root.selected-panel-index == 0) {
                     root.focus-header();
                 } else {
                     root.move-panel(-1);
@@ -189,7 +215,7 @@ export component SettingsPage inherits Rectangle {
                 return accept;
             }
             if (event.text == Key.Return && root.active-pane == 1) {
-                root.open-selected-menu();
+                root.activate-selected-entry();
                 return accept;
             }
             return reject;
@@ -215,55 +241,56 @@ export component SettingsPage inherits Rectangle {
                 border-radius: Tokens.radius-md;
                 clip: true;
 
-                ListView {
+                panel-list-scroll := FocusListScroll {
+                    use-explicit-focus: true;
+                    focus-y: root.navigation[root.selected-navigation-index].scroll-y;
+                    focus-height: root.navigation[root.selected-navigation-index].height;
+                    content-height: root.navigation-content-height;
+                    viewport-height: panel-list.height;
+                    viewport-y <=> root.panel-list-scroll-y;
+                }
+
+                panel-list := ListView {
                     width: parent.width;
                     height: parent.height;
-                    for section[section-index] in root.sections: Rectangle {
+                    viewport-y <=> root.panel-list-scroll-y;
+                    for item[index] in root.navigation: Rectangle {
                         width: parent.width;
-                        height: section.panels.length * 58px + 34px;
-                        background: transparent;
+                        height: item.height;
+                        background: !item.is-section && index == root.selected-navigation-index
+                            ? Tokens.color-surface-3
+                            : (panel-touch.has-hover && !item.is-section ? Tokens.color-surface-2 : transparent);
+                        border-radius: Tokens.radius-sm;
+                        border-width: !item.is-section && page-focus.has-focus && index == root.selected-navigation-index
+                            ? Tokens.focus-ring-width : 0px;
+                        border-color: Tokens.color-ring-muted;
 
-                        Typography {
+                        if item.is-section: Typography {
                             x: Tokens.spacing-2xl;
-                            y: 4px;
                             width: parent.width - 2 * Tokens.spacing-2xl;
-                            height: 26px;
-                            text: section.title;
+                            height: parent.height;
+                            text: item.title;
                             variant: TextVariant.caption;
                             tone: TextTone.muted;
                             vertical-alignment: center;
+                            overflow: elide;
+                        }
+                        if !item.is-section: Typography {
+                            x: Tokens.spacing-2xl;
+                            width: parent.width - 2 * Tokens.spacing-2xl;
+                            height: parent.height;
+                            text: item.title;
+                            variant: TextVariant.body-lg;
+                            vertical-alignment: center;
+                            overflow: elide;
                         }
 
-                        VerticalLayout {
-                            y: 34px;
-                            height: parent.height - 34px;
-                            for panel[panel-index] in section.panels: Rectangle {
-                                height: 58px;
-                                background: section-index == root.selected-section && panel-index == root.selected-panel
-                                    ? Tokens.color-surface-3
-                                    : (panel-touch.has-hover ? Tokens.color-surface-2 : transparent);
-                                border-radius: Tokens.radius-sm;
-                                border-width: page-focus.has-focus && section-index == root.selected-section && panel-index == root.selected-panel
-                                    ? Tokens.focus-ring-width : 0px;
-                                border-color: Tokens.color-ring-muted;
-
-                                Typography {
-                                    x: Tokens.spacing-2xl;
-                                    width: parent.width - 2 * Tokens.spacing-2xl;
-                                    height: parent.height;
-                                    text: panel.title;
-                                    variant: TextVariant.body-lg;
-                                    vertical-alignment: center;
-                                    overflow: elide;
-                                }
-
-                                panel-touch := TouchArea {
-                                    mouse-cursor: pointer;
-                                    clicked => {
-                                        page-focus.focus();
-                                        root.select-panel(section-index, panel-index);
-                                    }
-                                }
+                        panel-touch := TouchArea {
+                            enabled: !item.is-section;
+                            mouse-cursor: item.is-section ? default : pointer;
+                            clicked => {
+                                page-focus.focus();
+                                root.select-panel(item.panel-selection-index);
                             }
                         }
                     }
@@ -280,11 +307,20 @@ export component SettingsPage inherits Rectangle {
                     padding: Tokens.spacing-xl;
                     spacing: Tokens.spacing-md;
 
-                    ListView {
+                    entry-list-scroll := FocusListScroll {
+                        selected-index: root.selected-entry;
+                        item-count: root.current-panel.entries.length;
+                        item-height: 142px;
+                        viewport-height: entry-list.height;
+                        viewport-y <=> root.entry-list-scroll-y;
+                    }
+
+                    entry-list := ListView {
                         vertical-stretch: 1;
+                        viewport-y <=> root.entry-list-scroll-y;
                         for entry[entry-index] in root.current-panel.entries: Rectangle {
                             width: parent.width;
-                            height: entry.control == "toggle" ? 118px : 142px;
+                            height: 142px;
                             background: entry-index == root.selected-entry && root.active-pane == 1
                                 ? Tokens.color-surface-3
                                 : Tokens.color-surface-2;
@@ -356,21 +392,15 @@ export component SettingsPage inherits Rectangle {
                             }
 
                             // The generated row's layout sits beneath the visual
-                            // switch on some backends, so keep a semantic hit
-                            // target above it for reliable pointer activation.
+                            // switch on some backends. Make the complete row a
+                            // semantic activation target, matching controller confirm.
                             if entry.control == "toggle" && !entry.environment-overridden: TouchArea {
-                                x: parent.width - 88px;
-                                y: 0px;
-                                width: 88px;
-                                height: parent.height;
                                 mouse-cursor: pointer;
                                 clicked => {
-                                    SettingsState.setting-changed(
-                                        entry.path,
-                                        entry.control,
-                                        "",
-                                        !entry.bool-value,
-                                    );
+                                    page-focus.focus();
+                                    root.selected-entry = entry-index;
+                                    root.active-pane = 1;
+                                    root.activate-entry(entry-index);
                                 }
                             }
 
@@ -400,8 +430,17 @@ export component SettingsPage inherits Rectangle {
                         variant: TextVariant.caption;
                         tone: TextTone.muted;
                     }
-                    ListView {
+                    platform-list-scroll := FocusListScroll {
+                        selected-index: root.selected-platform;
+                        item-count: root.platform-names.length;
+                        item-height: 58px;
+                        viewport-height: platform-list.height;
+                        viewport-y <=> root.platform-list-scroll-y;
+                    }
+
+                    platform-list := ListView {
                         vertical-stretch: 1;
+                        viewport-y <=> root.platform-list-scroll-y;
                         for platform[index] in root.platform-names: Rectangle {
                             width: parent.width;
                             height: 58px;

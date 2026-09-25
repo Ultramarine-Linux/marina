@@ -284,7 +284,8 @@ async fn hydrate_cached_home(
 ) {
     // The persisted card projection is the first usable Home model. Local
     // reconciliation refreshes it in its own phase afterward.
-    match shelf::load_games(&state.library, state.config.romm_url.as_deref()).await {
+    let config = state.config.snapshot();
+    match shelf::load_games(&state.library, config.romm_url.as_deref()).await {
         Ok((metadata, cover_sources)) => {
             apply_home_metadata(
                 &window,
@@ -338,7 +339,8 @@ async fn refresh_home(
     home_sources: CoverSourceStore,
 ) {
     info!("loading game metadata");
-    match shelf::load_games(&state.library, state.config.romm_url.as_deref()).await {
+    let config = state.config.snapshot();
+    match shelf::load_games(&state.library, config.romm_url.as_deref()).await {
         Ok((metadata, cover_sources)) => {
             info!(count = metadata.len(), "library loaded");
             apply_home_metadata(
@@ -385,8 +387,9 @@ async fn reconcile_stores(state: app::AppStateHandle) {
     // `<backend>.db` cache file — never into the main library database.
     // RomM import-on-startup stays opt-in, other backends sync
     // unconditionally once configured.
+    let config = state.config.snapshot();
     for backend in state.stores.values().cloned() {
-        if backend.id() == "romm" && !state.config.import_romm_on_startup {
+        if backend.id() == "romm" && !config.import_romm_on_startup {
             info!("RomM startup catalog import disabled by config");
             continue;
         }

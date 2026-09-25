@@ -49,6 +49,7 @@
 use std::collections::HashMap;
 use std::env;
 use std::path::PathBuf;
+use std::sync::{Arc, OnceLock, RwLock};
 
 use figment::{
     Figment,
@@ -117,6 +118,12 @@ struct LibrarySection {
     romm: RommConfig,
     #[serde(default)]
     #[template(table)]
+    #[setting(
+        section = "library",
+        panel = "portmaster",
+        panel_title = "PortMaster",
+        panel_order = "30"
+    )]
     portmaster: PortMasterStoreConfig,
 }
 
@@ -155,6 +162,12 @@ struct RuntimeSection {
     retroarch: RetroArchConfig,
     #[serde(default)]
     #[template(table)]
+    #[setting(
+        section = "runtime",
+        panel = "portmaster",
+        panel_title = "PortMaster",
+        panel_order = "20"
+    )]
     portmaster: PortMasterRuntimeConfig,
 }
 
@@ -269,7 +282,7 @@ fn default_portmaster_ports_dir() -> PathBuf {
     PathBuf::from(DEFAULT_PORTS_DIR)
 }
 
-#[derive(Debug)]
+#[derive(Clone, Debug)]
 pub struct Config {
     pub storage_uri: String,
     pub store_cache_dir: std::path::PathBuf,
@@ -285,6 +298,45 @@ pub struct Config {
     pub retroarch: EffectiveRetroArchConfig,
     pub portmaster: RuntimePortMasterConfig,
     pub platforms: HashMap<String, PlatformRuntimeConfig>,
+}
+
+/// A process-wide, reloadable configuration snapshot.
+///
+/// Readers clone a snapshot before starting work, so no lock is held across
+/// filesystem, network, or UI operations. Reloads replace the snapshot only
+/// after the edited TOML has been validated and atomically written.
+#[derive(Clone, Debug)]
+pub(crate) struct ConfigHandle(Arc<RwLock<Config>>);
+
+impl ConfigHandle {
+    pub(crate) fn snapshot(&self) -> Config {
+        self.0
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+
+    fn replace(&self, config: Config) {
+        *self
+            .0
+            .write()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = config;
+    }
+}
+
+static SHARED_CONFIG: OnceLock<ConfigHandle> = OnceLock::new();
+
+/// Returns the process-wide configuration, loading it on first use.
+pub(crate) fn shared() -> ConfigHandle {
+    SHARED_CONFIG
+        .get_or_init(|| ConfigHandle(Arc::new(RwLock::new(Config::from_env()))))
+        .clone()
+}
+
+/// Reloads every configuration source and publishes the new snapshot to all
+/// future readers.
+pub(crate) fn reload() {
+    shared().replace(Config::from_env());
 }
 
 impl Config {
@@ -699,6 +751,18 @@ mod tests {
     /// Serializes the tests that mutate process environment; Rust runs
     /// tests on threads sharing one environment.
     static ENV_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn config_handle_replaces_snapshots() {
+        let handle = ConfigHandle(Arc::new(RwLock::new(Config::from_figment(Figment::new()))));
+        assert!(!handle.snapshot().clock_twelve_hour);
+
+        handle.replace(Config::from_figment(
+            Figment::new().merge(("general.time_date.twelve_hour", true)),
+        ));
+
+        assert!(handle.snapshot().clock_twelve_hour);
+    }
 
     #[test]
     fn parses_library_sections() {

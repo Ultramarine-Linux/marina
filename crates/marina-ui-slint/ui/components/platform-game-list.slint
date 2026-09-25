@@ -6,6 +6,7 @@ import { TextVariant, TextTone } from "../slintcn/components/text.slint";
 
 import { GameCardData } from "card.slint";
 import { PreviewDetailsData } from "preview-details.slint";
+import { FocusListScroll } from "focus-list-scroll.slint";
 
 export component PlatformGameList inherits Rectangle {
     in property <[GameCardData]> games;
@@ -36,12 +37,6 @@ export component PlatformGameList inherits Rectangle {
         root.selected-index = min(max(index, 0), root.games.length - 1);
         root.details-loading = true;
         root.selected(root.games[root.selected-index].id, root.selected-index);
-
-        if (root.selected-index * 42px < -root.scroll-y) {
-            root.scroll-y = -root.selected-index * 42px;
-        } else if ((root.selected-index + 1) * 42px > -root.scroll-y + list.height) {
-            root.scroll-y = list.height - (root.selected-index + 1) * 42px;
-        }
     }
 
     list-focus := FocusScope {
@@ -87,6 +82,14 @@ export component PlatformGameList inherits Rectangle {
             background: Tokens.color-surface-1;
             border-radius: Tokens.radius-md;
             clip: true;
+
+            game-list-scroll := FocusListScroll {
+                selected-index: root.safe-index;
+                item-count: root.games.length;
+                item-height: 42px;
+                viewport-height: list.height;
+                viewport-y <=> root.scroll-y;
+            }
 
             list := ListView {
                 width: parent.width;

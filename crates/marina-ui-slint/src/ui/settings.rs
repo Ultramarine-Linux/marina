@@ -2,7 +2,10 @@
 
 use std::collections::HashMap;
 
-use crate::{MainWindow, SettingsEntry, SettingsPanel, SettingsSection, SettingsState};
+use crate::{
+    MainWindow, SettingsEntry, SettingsNavigationItem, SettingsPanel, SettingsPanelItem,
+    SettingsSection, SettingsState,
+};
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use tracing::warn;
 
@@ -49,6 +52,7 @@ pub(crate) fn configure(window: &MainWindow) {
             tokio::spawn(async move {
                 let result = tokio::task::spawn_blocking(move || {
                     crate::config::write_scalar_setting(&path, value)?;
+                    crate::config::reload();
                     crate::config::read_scalar_settings()
                 })
                 .await;
@@ -64,7 +68,8 @@ pub(crate) fn configure(window: &MainWindow) {
 }
 
 fn platform_names() -> Vec<String> {
-    let mut names = crate::config::Config::from_env()
+    let mut names = crate::config::shared()
+        .snapshot()
         .platforms
         .into_keys()
         .collect::<Vec<_>>();
@@ -142,6 +147,37 @@ fn publish(window: &MainWindow, values: HashMap<String, crate::config::ScalarSet
         });
     }
 
+    let mut panel_items = Vec::new();
+    let mut navigation = Vec::new();
+    let mut scroll_y = 0.0;
+    for (section_index, (_, section_title, panels)) in grouped.iter().enumerate() {
+        navigation.push(SettingsNavigationItem {
+            title: SharedString::from(section_title.as_str()),
+            is_section: true,
+            panel_selection_index: -1,
+            scroll_y,
+            height: 34.0,
+        });
+        scroll_y += 34.0;
+        for (panel_index, (_, panel_title, _)) in panels.iter().enumerate() {
+            let panel_selection_index = panel_items.len() as i32;
+            let navigation_index = navigation.len() as i32;
+            panel_items.push(SettingsPanelItem {
+                section_index: section_index as i32,
+                panel_index: panel_index as i32,
+                navigation_index,
+            });
+            navigation.push(SettingsNavigationItem {
+                title: SharedString::from(panel_title.as_str()),
+                is_section: false,
+                panel_selection_index,
+                scroll_y,
+                height: 58.0,
+            });
+            scroll_y += 58.0;
+        }
+    }
+
     let sections = grouped
         .into_iter()
         .map(|(_, title, panels)| SettingsSection {
@@ -158,7 +194,9 @@ fn publish(window: &MainWindow, values: HashMap<String, crate::config::ScalarSet
         })
         .collect::<Vec<_>>();
 
-    window
-        .global::<SettingsState>()
-        .set_sections(model(sections));
+    let state = window.global::<SettingsState>();
+    state.set_navigation_content_height(scroll_y);
+    state.set_navigation(model(navigation));
+    state.set_panels(model(panel_items));
+    state.set_sections(model(sections));
 }

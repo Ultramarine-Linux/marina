@@ -10,6 +10,7 @@ import { GameCardData } from "../components/card.slint";
 import { PlatformGameList } from "../components/platform-game-list.slint";
 import { PreviewDetailsData } from "../components/preview-details.slint";
 import { CrumbHeader } from "../components/crumb-header.slint";
+import { FocusListScroll } from "../components/focus-list-scroll.slint";
 import { ShellState } from "../components/app-shell.slint";
 
 export global LibraryState {
@@ -73,12 +74,6 @@ export component LibraryPage inherits Rectangle {
     function select-platform(index: int) {
         if (root.platforms.length <= 0) { return; }
         root.selected-platform-index = min(max(index, 0), root.platforms.length - 1);
-
-        if (root.selected-platform-index * 52px < -root.platform-list-scroll-y) {
-            root.platform-list-scroll-y = -root.selected-platform-index * 52px;
-        } else if ((root.selected-platform-index + 1) * 52px > -root.platform-list-scroll-y + root.height - 98px) {
-            root.platform-list-scroll-y = root.height - 98px - (root.selected-platform-index + 1) * 52px;
-        }
     }
 
     function open-platform(index: int) {
@@ -98,12 +93,6 @@ export component LibraryPage inherits Rectangle {
         root.selected-game-index = min(max(index, 0), root.games.length - 1);
         root.details-loading = true;
         root.game-selected(root.games[root.selected-game-index].id, root.selected-game-index);
-
-        if (root.selected-game-index * 42px < -root.game-list-scroll-y) {
-            root.game-list-scroll-y = -root.selected-game-index * 42px;
-        } else if ((root.selected-game-index + 1) * 42px > -root.game-list-scroll-y + root.height - 98px) {
-            root.game-list-scroll-y = root.height - 98px - (root.selected-game-index + 1) * 42px;
-        }
     }
 
     function activate-selected-game() {
@@ -194,10 +183,21 @@ export component LibraryPage inherits Rectangle {
             description: "Your library does not contain any platforms yet.";
             action-label: "";
         }
-        if !root.initial-loading && root.platforms.length > 0: ListView {
-            width: parent.width;
+        if !root.initial-loading && root.platforms.length > 0: Rectangle {
             vertical-stretch: 1;
-            viewport-y <=> root.platform-list-scroll-y;
+
+            platform-list-scroll := FocusListScroll {
+                selected-index: root.selected-platform-index;
+                item-count: root.platforms.length;
+                item-height: 52px;
+                viewport-height: platform-list.height;
+                viewport-y <=> root.platform-list-scroll-y;
+            }
+
+            platform-list := ListView {
+                width: parent.width;
+                height: parent.height;
+                viewport-y <=> root.platform-list-scroll-y;
             for platform[i] in root.platforms: Rectangle {
                 width: parent.width;
                 height: 52px;
@@ -259,6 +259,7 @@ export component LibraryPage inherits Rectangle {
                     }
                 }
             }
+        }
         }
     }
 
