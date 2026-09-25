@@ -1,10 +1,13 @@
 //! Generated settings model, current scalar values, and persistence bindings.
 
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    sync::{Arc, Mutex},
+};
 
 use crate::{
     MainWindow, SettingsEntry, SettingsNavigationItem, SettingsPanel, SettingsPanelItem,
-    SettingsSection, SettingsState,
+    SettingsSection, SettingsState, StoreState, app,
 };
 use slint::{ComponentHandle, ModelRc, SharedString, VecModel};
 use tracing::warn;
@@ -13,7 +16,14 @@ fn model<T: Clone + 'static>(items: Vec<T>) -> ModelRc<T> {
     ModelRc::from(std::rc::Rc::new(VecModel::from(items)))
 }
 
-pub(crate) fn configure(window: &MainWindow) {
+fn is_library_setting(path: &str) -> bool {
+    path.starts_with("library.")
+}
+
+pub(crate) fn configure(
+    window: &MainWindow,
+    library_state: &Arc<Mutex<Option<app::AppStateHandle>>>,
+) {
     let values = match crate::config::read_scalar_settings() {
         Ok(values) => values,
         Err(error) => {
@@ -37,10 +47,12 @@ pub(crate) fn configure(window: &MainWindow) {
     });
 
     let weak = window.as_weak();
+    let state = library_state.clone();
     window
         .global::<SettingsState>()
         .on_setting_changed(move |path, control, value, bool_value| {
             let path = path.to_string();
+            let reconfigure_stores = is_library_setting(&path);
             let value = match control.as_str() {
                 "toggle" => crate::config::ScalarSettingValue::Bool(bool_value),
                 "text" | "secret" | "path" => {
@@ -49,6 +61,7 @@ pub(crate) fn configure(window: &MainWindow) {
                 _ => return,
             };
             let weak = weak.clone();
+            let state = state.clone();
             tokio::spawn(async move {
                 let result = tokio::task::spawn_blocking(move || {
                     crate::config::write_scalar_setting(&path, value)?;
@@ -58,7 +71,21 @@ pub(crate) fn configure(window: &MainWindow) {
                 .await;
                 match result {
                     Ok(Ok(values)) => {
-                        let _ = weak.upgrade_in_event_loop(move |window| publish(&window, values));
+                        if reconfigure_stores {
+                            let state = state.lock().expect("library state lock poisoned").clone();
+                            if let Some(state) = state {
+                                state.reconfigure_stores();
+                            }
+                        }
+                        let _ = weak.upgrade_in_event_loop(move |window| {
+                            publish(&window, values);
+                            if reconfigure_stores {
+                                window
+                                    .global::<StoreState>()
+                                    .set_platforms(model(Vec::new()));
+                                window.global::<StoreState>().invoke_entered();
+                            }
+                        });
                     }
                     Ok(Err(error)) => warn!(%error, "could not save setting"),
                     Err(error) => warn!(%error, "settings persistence task failed"),

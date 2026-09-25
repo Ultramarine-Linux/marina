@@ -57,7 +57,8 @@ async fn main() -> Result<(), slint::PlatformError> {
     // asynchronously once the event loop is running.
     let username = std::env::var("USER").unwrap_or_else(|_| "user".into());
     let window = MainWindow::new()?;
-    ui::settings::configure(&window);
+    let library_state: Arc<Mutex<Option<app::AppStateHandle>>> = Arc::new(Mutex::new(None));
+    ui::settings::configure(&window, &library_state);
     // Controller events are allowed only while Marina owns the native window,
     // but the selected Slint focus target belongs to the UI regardless of
     // whether a controller is connected.
@@ -170,7 +171,6 @@ async fn main() -> Result<(), slint::PlatformError> {
     window.global::<HomeState>().set_loading(true);
     window.global::<LibraryState>().set_loading(false);
 
-    let library_state: Arc<Mutex<Option<app::AppStateHandle>>> = Arc::new(Mutex::new(None));
     let cover_loader = covers::ViewportLoader::new(&window);
     let loader_sources = cover_loader.borrow().added_sources();
     let played_sources = cover_loader.borrow().played_sources();
@@ -388,7 +388,7 @@ async fn reconcile_stores(state: app::AppStateHandle) {
     // RomM import-on-startup stays opt-in, other backends sync
     // unconditionally once configured.
     let config = state.config.snapshot();
-    for backend in state.stores.values().cloned() {
+    for backend in state.store_backends() {
         if backend.id() == "romm" && !config.import_romm_on_startup {
             info!("RomM startup catalog import disabled by config");
             continue;

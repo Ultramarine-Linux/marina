@@ -208,7 +208,7 @@ pub(crate) fn install(
             return;
         };
         let window = install_window.clone();
-        let Some(backend) = state.stores.get(backend_id).cloned() else {
+        let Some(backend) = state.store(backend_id) else {
             error!(backend_id, "store backend for install is no longer enabled");
             return;
         };
@@ -357,7 +357,7 @@ pub(crate) fn install(
             .ok()
             .and_then(|state| state.clone());
         let Some(state) = state else { return };
-        let backends = state.stores.values().cloned().collect::<Vec<_>>();
+        let backends = state.store_backends();
         if backends.is_empty() {
             return;
         }
@@ -477,7 +477,7 @@ pub(crate) fn install(
                 .expect("library state lock poisoned")
                 .clone();
             let Some(state) = state else { return };
-            let backends = state.stores.values().cloned().collect::<Vec<_>>();
+            let backends = state.store_backends();
             if backends.is_empty() {
                 return;
             }
@@ -621,7 +621,7 @@ pub(crate) fn install(
             };
             let backend_id = backend_id.to_owned();
             let entry_id = entry_id.to_owned();
-            let Some(backend) = state.stores.get(&backend_id).cloned() else {
+            let Some(backend) = state.store(&backend_id) else {
                 return;
             };
             // Cover URLs need the backend's native base URL, which the trait

@@ -3,7 +3,7 @@
 use std::{
     collections::{HashMap, HashSet},
     path::Path,
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 
 use marina_library::{
@@ -31,7 +31,7 @@ pub(crate) struct AppState {
     /// Pluggable store backends by stable id ("romm", …). Access through
     /// the [`StoreBackend`] trait; downcast via `as_any` only for
     /// backend-specific operations the trait doesn't cover.
-    pub(crate) stores: HashMap<String, Arc<dyn StoreBackend>>,
+    pub(crate) stores: Mutex<HashMap<String, Arc<dyn StoreBackend>>>,
 }
 
 /// A shareable handle to the application's runtime state.
@@ -147,6 +147,41 @@ pub(crate) async fn reconcile_local_games(state: &AppStateHandle) {
 }
 
 impl AppState {
+    fn configured_stores(config: &crate::config::Config) -> HashMap<String, Arc<dyn StoreBackend>> {
+        let mut stores: HashMap<String, Arc<dyn StoreBackend>> = HashMap::new();
+        if let Some(base_url) = config.romm_url.clone() {
+            let backend = RommStore::new(base_url, config.romm_token.as_deref());
+            stores.insert(backend.id().to_owned(), Arc::new(backend));
+        }
+        if let Some(portmaster) = config.portmaster_store.clone() {
+            let backend = PortMasterStore::new(portmaster);
+            stores.insert(backend.id().to_owned(), Arc::new(backend));
+        }
+        stores
+    }
+
+    pub(crate) fn store_backends(&self) -> Vec<Arc<dyn StoreBackend>> {
+        self.stores
+            .lock()
+            .expect("store registry poisoned")
+            .values()
+            .cloned()
+            .collect()
+    }
+
+    pub(crate) fn store(&self, id: &str) -> Option<Arc<dyn StoreBackend>> {
+        self.stores
+            .lock()
+            .expect("store registry poisoned")
+            .get(id)
+            .cloned()
+    }
+
+    pub(crate) fn reconfigure_stores(&self) {
+        let stores = Self::configured_stores(&self.config.snapshot());
+        *self.stores.lock().expect("store registry poisoned") = stores;
+    }
+
     /// Loads configuration and initializes the services required by the UI.
     pub(crate) async fn initialize()
     -> Result<AppStateHandle, Box<dyn std::error::Error + Send + Sync>> {
@@ -167,15 +202,7 @@ impl AppState {
         tracing::info!("opening library store");
         let library = storage::connect(&startup_config).await?;
         let store_caches = storage::connect_store_caches(&startup_config);
-        let mut stores: HashMap<String, Arc<dyn StoreBackend>> = HashMap::new();
-        if let Some(base_url) = startup_config.romm_url.clone() {
-            let backend = RommStore::new(base_url, startup_config.romm_token.as_deref());
-            stores.insert(backend.id().to_owned(), Arc::new(backend));
-        }
-        if let Some(portmaster) = startup_config.portmaster_store.clone() {
-            let backend = PortMasterStore::new(portmaster);
-            stores.insert(backend.id().to_owned(), Arc::new(backend));
-        }
+        let stores = Self::configured_stores(&startup_config);
         tracing::info!(
             elapsed_ms = started.elapsed().as_millis() as u64,
             "application state ready"
@@ -185,7 +212,7 @@ impl AppState {
             config,
             library,
             store_caches,
-            stores,
+            stores: Mutex::new(stores),
         }))
     }
 }
