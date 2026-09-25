@@ -53,6 +53,8 @@ marina-input.workspace = true
 marina-runtime.workspace = true
 marina-portmaster.workspace = true
 marina-power.workspace = true
+marina-networking.workspace = true
+futures-util.workspace = true
 reqwest.workspace = true
 resvg.workspace = true
 tokio = { workspace = true, features = ["fs"] }

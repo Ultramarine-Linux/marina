@@ -3,19 +3,19 @@
 //! The UPower D-Bus backend lives in `marina-power`, including live
 //! `PropertiesChanged` / `DeviceAdded` / `DeviceRemoved` signal monitoring;
 //! this module only moves [`marina_power::BatteryStatus`] snapshots into
-//! `ShellState`. The indicator stays hidden when no battery is reported, so
+//! `BatteryState`. The indicator stays hidden when no battery is reported, so
 //! desktops without a battery simply show no icon.
 
 use slint::ComponentHandle;
 
 use marina_power::{BatteryStatus, monitor_battery_status};
 
-use crate::{MainWindow, ShellState};
+use crate::{BatteryState, MainWindow};
 
 pub(crate) fn initialize(window: &MainWindow) {
-    window.global::<ShellState>().set_battery_available(false);
-    window.global::<ShellState>().set_battery_percentage(100.0);
-    window.global::<ShellState>().set_battery_charging(false);
+    window.global::<BatteryState>().set_available(false);
+    window.global::<BatteryState>().set_percentage(100.0);
+    window.global::<BatteryState>().set_charging(false);
 
     if let Some(fake) = fake_battery_status() {
         tracing::warn!(
@@ -41,10 +41,10 @@ pub(crate) fn initialize(window: &MainWindow) {
 
 fn apply_status(window: &slint::Weak<MainWindow>, status: BatteryStatus) {
     let _ = window.upgrade_in_event_loop(move |window| {
-        let shell = window.global::<ShellState>();
-        shell.set_battery_available(status.available);
-        shell.set_battery_percentage(status.percentage as f32);
-        shell.set_battery_charging(status.charging);
+        let battery = window.global::<BatteryState>();
+        battery.set_available(status.available);
+        battery.set_percentage(status.percentage as f32);
+        battery.set_charging(status.charging);
     });
 }
 

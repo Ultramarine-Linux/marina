@@ -113,6 +113,7 @@ pub(crate) async fn run() -> Result<(), slint::PlatformError> {
     });
     ui::profile::initialize(&window, username.clone());
     ui::battery::initialize(&window);
+    ui::networking::initialize(&window);
     ui::clock::initialize(&window);
     window
         .global::<HomeState>()
