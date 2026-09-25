@@ -108,14 +108,14 @@ struct Layout {
 
 impl Layout {
     fn new(port: &str) -> Self {
-        let saves = Path::new(SAVES_DIR);
+        let saves = Path::new(SAVES_DIR).join(port);
         Self {
             install_dir: Path::new(PORTS_DIR).join(port),
-            game_upper: saves.join("data").join(port),
-            game_work: saves.join(".work").join(port),
-            home_upper: saves.join("home").join(port),
-            home_work: saves.join(".work").join(format!("home-{port}")),
-            empty_lower: saves.join(".work/empty"),
+            game_upper: saves.join("data"),
+            game_work: saves.join(".work/game"),
+            home_upper: saves.join("home"),
+            home_work: saves.join(".work/home"),
+            empty_lower: saves.join(".empty"),
             home: Path::new("/run/user/1000/portmaster/home").join(port),
         }
     }
@@ -315,6 +315,22 @@ fn required_runtimes(
         }
     }
     Ok(runtimes)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn saves_are_grouped_by_port_before_data_and_home() {
+        let layout = Layout::new("Moonlight New");
+        let root = Path::new("/var/games/saves/ports/Moonlight New");
+
+        assert_eq!(layout.game_upper, root.join("data"));
+        assert_eq!(layout.home_upper, root.join("home"));
+        assert_eq!(layout.game_work, root.join(".work/game"));
+        assert_eq!(layout.home_work, root.join(".work/home"));
+    }
 }
 
 fn insert_runtime(

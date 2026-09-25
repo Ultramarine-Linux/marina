@@ -198,20 +198,30 @@ pub struct RommConfig {
     pub import_on_startup: Option<bool>,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, ConfigTemplate, ConfigSettings)]
+#[derive(Clone, Debug, Deserialize, ConfigTemplate, ConfigSettings)]
 pub(super) struct PortMasterStoreConfig {
     #[serde(default)]
     #[template(env = "MARINA_ENABLE_PORTMASTER", example = "false")]
     pub(super) enable: Option<bool>,
-    #[serde(default = "default_portmaster_release")]
-    pub(super) release: String,
+    /// Optional PortMaster-New release tag. When unset, Marina follows GitHub's latest release.
+    #[serde(default)]
+    #[template(example = "latest")]
+    pub(super) release: Option<String>,
 
-    #[serde(default = "default_portmaster_ports_dir")]
-    pub(super) ports_dir: PathBuf,
+    /// PortMaster install directory. When unset, defaults to `/var/games/ports`.
+    #[serde(default)]
+    #[template(example = "/var/games/ports")]
+    pub(super) ports_dir: Option<PathBuf>,
 }
 
-fn default_portmaster_release() -> String {
-    DEFAULT_RELEASE.to_owned()
+impl Default for PortMasterStoreConfig {
+    fn default() -> Self {
+        Self {
+            enable: None,
+            release: None,
+            ports_dir: None,
+        }
+    }
 }
 
 fn default_portmaster_ports_dir() -> PathBuf {

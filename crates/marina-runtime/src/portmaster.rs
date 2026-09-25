@@ -48,10 +48,11 @@ pub(crate) async fn launch(
     config: &Config,
 ) -> Result<LaunchedGame, LaunchError> {
     let instance = instance_name(&request.executable, &config.ports_dir)?;
+    let save_dir = Path::new(DEFAULT_SAVES_DIR).join(&instance);
     for path in [
-        Path::new(DEFAULT_SAVES_DIR).join("data"),
-        Path::new(DEFAULT_SAVES_DIR).join("home"),
-        Path::new(DEFAULT_SAVES_DIR).join(".work"),
+        save_dir.join("data"),
+        save_dir.join("home"),
+        save_dir.join(".work"),
     ] {
         tokio::fs::create_dir_all(&path)
             .await

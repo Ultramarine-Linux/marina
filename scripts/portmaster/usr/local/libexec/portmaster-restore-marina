@@ -8,7 +8,7 @@ case "$encoded_port" in
     *) port="$encoded_port" ;;
 esac
 if [ -n "$port" ]; then
-    rm -rf "/var/games/saves/ports/.work/$port" "/var/games/saves/ports/.work/home-$port"
+    rm -rf "/var/games/saves/ports/$port/.work"
 fi
 
 if [ -z "${SWAYSOCK:-}" ]; then

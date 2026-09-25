@@ -56,7 +56,7 @@ use figment::{
     providers::{Format, Toml},
 };
 use marina_config_derive::{ConfigSettings, ConfigTemplate};
-use marina_portmaster::{DEFAULT_PORTS_DIR, DEFAULT_RELEASE, PortMasterConfig};
+use marina_portmaster::{DEFAULT_PORTS_DIR, PortMasterConfig};
 use marina_runtime::{
     PlatformRuntimeConfig, RetroArchConfig as EffectiveRetroArchConfig,
     portmaster::Config as RuntimePortMasterConfig,
@@ -192,8 +192,18 @@ impl Config {
             .enable
             .unwrap_or(false)
             .then(|| PortMasterConfig {
-                release: portmaster.release.clone(),
-                ports_dir: portmaster.ports_dir.clone(),
+                release: portmaster
+                    .release
+                    .as_deref()
+                    .map(str::trim)
+                    .filter(|release| !release.is_empty())
+                    .map(str::to_owned),
+                ports_dir: portmaster
+                    .ports_dir
+                    .as_ref()
+                    .filter(|path| !path.as_os_str().is_empty())
+                    .cloned()
+                    .unwrap_or_else(|| PathBuf::from(DEFAULT_PORTS_DIR)),
             });
 
         Self {

@@ -35,14 +35,14 @@ deploy: sysext-build
 # Compatibility target: PortMaster is included in the same system extension.
 deploy-portmaster: deploy
 
-# Deploy, restart the graphical user service, and follow its logs over SSH.
+# Deploy, restart the graphical user service, and follow its structured JSON logs over SSH.
 run-remote: deploy
     ssh {{ ssh_opts }} {{ user_target }} 'uid=$(id -u); XDG_RUNTIME_DIR=/run/user/$uid systemctl --user daemon-reload && XDG_RUNTIME_DIR=/run/user/$uid systemctl --user enable {{ service_name }} && XDG_RUNTIME_DIR=/run/user/$uid systemctl --user restart {{ service_name }}'
-    ssh {{ ssh_opts }} {{ user_target }} 'uid=$(id -u); XDG_RUNTIME_DIR=/run/user/$uid journalctl --user -u {{ service_name }} -n 100 -f --no-pager'
+    ssh {{ ssh_opts }} {{ user_target }} 'uid=$(id -u); XDG_RUNTIME_DIR=/run/user/$uid journalctl --user -u {{ service_name }} -n 100 -f --no-pager --all --output=json'
 
-# Follow logs from the already-running remote user service.
+# Follow one complete JSON object per event from the already-running remote user service.
 logs:
-    ssh {{ ssh_opts }} {{ user_target }} 'uid=$(id -u); XDG_RUNTIME_DIR=/run/user/$uid journalctl --user -u {{ service_name }} -n 100 -f --no-pager'
+    ssh {{ ssh_opts }} {{ user_target }} 'uid=$(id -u); XDG_RUNTIME_DIR=/run/user/$uid journalctl --user -u {{ service_name }} -n 100 -f --no-pager --all --output=json'
 
 # Show the remote user service status and recent logs.
 status:

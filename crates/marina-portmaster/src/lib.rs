@@ -1,8 +1,9 @@
 //! PortMaster release-backed store.
 //!
-//! The catalog and installer are sourced from a pinned PortMaster-New release.
-//! HarbourMaster remains the installer of record; Marina only bootstraps its
-//! PortMaster payload and registers the resulting launcher in the library.
+//! The catalog and installer are sourced from the latest PortMaster-New release
+//! by default, or from an explicitly configured release tag. HarbourMaster
+//! remains the installer of record; Marina only bootstraps its PortMaster
+//! payload and registers the resulting launcher in the library.
 
 use std::{
     io::Cursor,
@@ -22,28 +23,31 @@ use tokio::sync::Mutex;
 mod installer;
 use zip::ZipArchive;
 
-pub const DEFAULT_RELEASE: &str = "2026-09-21_0303";
+/// GitHub's moving release alias used unless a specific release is configured.
+pub const DEFAULT_RELEASE: &str = "latest";
 pub const DEFAULT_PORTS_DIR: &str = "/var/games/ports";
 
 const RELEASE_BASE: &str = "https://github.com/PortsMaster/PortMaster-New/releases/download";
+const LATEST_RELEASE_API: &str =
+    "https://api.github.com/repos/PortsMaster/PortMaster-New/releases/latest";
+const USER_AGENT: &str = "Marina/0.1";
 
-fn default_release() -> String {
-    DEFAULT_RELEASE.to_owned()
-}
 fn default_ports_dir() -> PathBuf {
     PathBuf::from(DEFAULT_PORTS_DIR)
 }
 
 #[derive(Clone, Debug)]
 pub struct PortMasterConfig {
-    pub release: String,
+    /// Optional PortMaster-New release tag. The store uses [`DEFAULT_RELEASE`]
+    /// when this is missing or blank.
+    pub release: Option<String>,
     pub ports_dir: PathBuf,
 }
 
 impl Default for PortMasterConfig {
     fn default() -> Self {
         Self {
-            release: default_release(),
+            release: None,
             ports_dir: default_ports_dir(),
         }
     }
@@ -55,6 +59,8 @@ enum Error {
     Http(#[from] reqwest::Error),
     #[error("PortMaster catalog has an unsupported JSON shape")]
     CatalogShape,
+    #[error("PortMaster latest-release response has an unsupported JSON shape")]
+    ReleaseShape,
     #[error("PortMaster image archive is missing {0}")]
     ImageMissing(String),
     #[error("PortMaster image archive contains an unsafe path")]
@@ -71,14 +77,23 @@ pub struct PortMasterStore {
     config: PortMasterConfig,
     client: reqwest::Client,
     catalog: Arc<Mutex<Option<Vec<StoreEntry>>>>,
+    latest_release: Arc<Mutex<Option<String>>>,
 }
 
 impl PortMasterStore {
-    pub fn new(config: PortMasterConfig) -> Self {
+    pub fn new(mut config: PortMasterConfig) -> Self {
+        if config.ports_dir.as_os_str().is_empty() {
+            config.ports_dir = default_ports_dir();
+        }
         Self {
             config,
-            client: reqwest::Client::new(),
+            client: reqwest::Client::builder()
+                // GitHub rejects anonymous API requests without a User-Agent.
+                .user_agent(USER_AGENT)
+                .build()
+                .expect("static Marina HTTP client configuration must be valid"),
             catalog: Arc::new(Mutex::new(None)),
+            latest_release: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -86,17 +101,58 @@ impl PortMasterStore {
         &self.config
     }
 
-    fn asset_url(&self, asset: &str) -> String {
-        format!("{}/{}/{}", RELEASE_BASE, self.config.release, asset)
+    async fn release(&self) -> Result<String, Error> {
+        if let Some(release) = self
+            .config
+            .release
+            .as_deref()
+            .map(str::trim)
+            .filter(|release| !release.is_empty())
+        {
+            return Ok(release.to_owned());
+        }
+
+        if DEFAULT_RELEASE != "latest" {
+            return Ok(DEFAULT_RELEASE.to_owned());
+        }
+
+        let mut cached = self.latest_release.lock().await;
+        if let Some(release) = cached.as_ref() {
+            return Ok(release.clone());
+        }
+        let release = self
+            .client
+            .get(LATEST_RELEASE_API)
+            .send()
+            .await?
+            .error_for_status()?
+            .json::<Value>()
+            .await?
+            .get("tag_name")
+            .and_then(Value::as_str)
+            .map(str::trim)
+            .filter(|release| !release.is_empty())
+            .map(str::to_owned)
+            .ok_or(Error::ReleaseShape)?;
+        *cached = Some(release.clone());
+        Ok(release)
+    }
+
+    async fn asset_url(&self, asset: &str) -> Result<String, Error> {
+        Ok(asset_url_for(&self.release().await?, asset))
     }
 
     async fn catalog_entries(&self) -> Result<Vec<StoreEntry>, StoreError> {
         if let Some(entries) = self.catalog.lock().await.clone() {
             return Ok(entries);
         }
+        let catalog_url = self
+            .asset_url("ports.json")
+            .await
+            .map_err(StoreError::backend)?;
         let value = self
             .client
-            .get(self.asset_url("ports.json"))
+            .get(catalog_url)
             .send()
             .await
             .map_err(|e| StoreError::backend(Error::Http(e)))?
@@ -146,11 +202,16 @@ impl StoreBackend for PortMasterStore {
         tokio::fs::create_dir_all(&media_dir)
             .await
             .map_err(|e| StoreError::backend(Error::Io(e)))?;
-        let archive_path = media_dir.join(format!("images-{}.zip", self.config.release));
+        let release = self.release().await.map_err(StoreError::backend)?;
+        let archive_path = media_dir.join(format!("images-{release}.zip"));
         if !tokio::fs::try_exists(&archive_path).await.unwrap_or(false) {
+            let image_url = self
+                .asset_url("images.zip")
+                .await
+                .map_err(StoreError::backend)?;
             let bytes = self
                 .client
-                .get(self.asset_url("images.zip"))
+                .get(image_url)
                 .send()
                 .await
                 .map_err(|e| StoreError::backend(Error::Http(e)))?
@@ -226,13 +287,13 @@ impl StoreBackend for PortMasterStore {
         library: &(dyn Library + Send + Sync),
         request: InstallRequest,
     ) -> Result<LibraryItem, StoreError> {
-        installer::ensure_payload(
-            &self.client,
-            self.asset_url("PortMaster.zip"),
-            self.config.ports_dir.clone(),
-        )
-        .await
-        .map_err(StoreError::backend)?;
+        let payload_url = self
+            .asset_url("PortMaster.zip")
+            .await
+            .map_err(StoreError::backend)?;
+        installer::ensure_payload(&self.client, payload_url, self.config.ports_dir.clone())
+            .await
+            .map_err(StoreError::backend)?;
         let package_id = request.entry.entry_id.clone();
         let payload = request
             .entry
@@ -252,9 +313,13 @@ impl StoreBackend for PortMasterStore {
                 _ => Vec::new(),
             })
             .unwrap_or_default();
+        let runtimes_url = self
+            .asset_url("runtimes_zips.json")
+            .await
+            .map_err(StoreError::backend)?;
         installer::ensure_runtimes(
             &self.client,
-            self.asset_url("runtimes_zips.json"),
+            runtimes_url,
             runtimes.clone(),
             self.config.ports_dir.join("PortMaster/libs"),
         )
@@ -300,8 +365,10 @@ impl StoreBackend for PortMasterStore {
         item.local_path = Some(launcher.to_string_lossy().into_owned());
         item.provider_ids
             .insert("portmaster.package".into(), package_id.clone());
-        item.provider_ids
-            .insert("portmaster.release".into(), self.config.release.clone());
+        item.provider_ids.insert(
+            "portmaster.release".into(),
+            self.release().await.map_err(StoreError::backend)?,
+        );
         if let Some(image) = self.preview_image(&request.entry).await? {
             item.assets.push(marina_core::LibraryAsset {
                 kind: marina_core::LibraryAssetKind::CoverLarge,
@@ -317,7 +384,10 @@ impl StoreBackend for PortMasterStore {
             .await
             .map_err(StoreError::backend)?
             .into_iter()
-            .find(|candidate| candidate.local_path == item.local_path);
+            .find(|candidate| {
+                candidate.local_path == item.local_path
+                    || candidate.provider_ids.get("portmaster.package") == Some(&package_id)
+            });
         if let Some(mut existing) = existing {
             existing.title = item.title;
             existing.assets = item.assets;
@@ -328,6 +398,10 @@ impl StoreBackend for PortMasterStore {
             library.add(item).await.map_err(StoreError::backend)
         }
     }
+}
+
+fn asset_url_for(release: &str, asset: &str) -> String {
+    format!("{RELEASE_BASE}/{release}/{asset}")
 }
 
 fn extract_image(archive_path: &Path, member: &str, output: &Path) -> Result<(), Error> {
@@ -365,6 +439,29 @@ fn safe_component(value: &str) -> String {
         "unknown".to_owned()
     } else {
         value.to_owned()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn concrete_release_tag_produces_a_valid_asset_url() {
+        assert_eq!(
+            asset_url_for("2026-09-23_2213", "ports.json"),
+            "https://github.com/PortsMaster/PortMaster-New/releases/download/2026-09-23_2213/ports.json"
+        );
+    }
+
+    #[test]
+    fn empty_ports_dir_uses_the_default_install_directory() {
+        let store = PortMasterStore::new(PortMasterConfig {
+            release: None,
+            ports_dir: PathBuf::new(),
+        });
+
+        assert_eq!(store.config().ports_dir, PathBuf::from(DEFAULT_PORTS_DIR));
     }
 }
 

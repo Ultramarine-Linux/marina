@@ -31,7 +31,6 @@ install -m 0644 scripts/portmaster/polkit/49-marina-portmaster.rules "$root/usr/
 
 for helper in \
     portmaster-mount-stack \
-    portmaster-launch \
     portmaster-focus \
     portmaster-unmount-stack \
     portmaster-restore-marina \

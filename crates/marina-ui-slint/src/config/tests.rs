@@ -2,6 +2,8 @@ use super::*;
 
 #[cfg(test)]
 mod tests {
+    use std::path::Path;
+
     use super::*;
 
     /// Serializes the tests that mutate process environment; Rust runs
@@ -42,6 +44,42 @@ scan_on_startup = false
         assert_eq!(config.library.romm.token.as_deref(), Some("secret"));
         assert_eq!(config.library.romm.enable, Some(true));
         assert_eq!(config.library.local.scan_on_startup, Some(false));
+    }
+
+    #[test]
+    fn portmaster_store_values_are_optional_and_blank_paths_use_defaults() {
+        let default_config = Config::from_figment(
+            Figment::new().merge(Toml::string("[library.portmaster]\nenable = true\n")),
+        );
+        assert_eq!(
+            default_config
+                .portmaster_store
+                .as_ref()
+                .and_then(|config| config.release.as_deref()),
+            None
+        );
+
+        let blank_override = Config::from_figment(Figment::new().merge(Toml::string(
+            "[library.portmaster]\nenable = true\nrelease = \"   \"\n",
+        )));
+        assert_eq!(
+            blank_override
+                .portmaster_store
+                .as_ref()
+                .and_then(|config| config.release.as_deref()),
+            None
+        );
+
+        let blank_path = Config::from_figment(Figment::new().merge(Toml::string(
+            "[library.portmaster]\nenable = true\nports_dir = \"\"\n",
+        )));
+        assert_eq!(
+            blank_path
+                .portmaster_store
+                .as_ref()
+                .map(|config| config.ports_dir.as_path()),
+            Some(Path::new(DEFAULT_PORTS_DIR))
+        );
     }
 
     #[test]
