@@ -54,6 +54,15 @@ pub(crate) fn configure_navigation(window: &MainWindow) {
         });
 }
 
+/// Returns focus to the mounted page after the native window regains input.
+///
+/// This is deliberately independent of controller discovery: keyboard and
+/// pointer users need the same focus guarantee after a compositor focus reset.
+pub(crate) fn restore_content_focus(window: &MainWindow) {
+    let shell = window.global::<ShellState>();
+    shell.set_content_focus_request(shell.get_content_focus_request() + 1);
+}
+
 pub(crate) fn dispatch_controller_action(window: &MainWindow, event: InputEvent) {
     if !matches!(
         event.kind,

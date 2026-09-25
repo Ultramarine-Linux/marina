@@ -57,12 +57,26 @@ async fn main() -> Result<(), slint::PlatformError> {
     // asynchronously once the event loop is running.
     let username = std::env::var("USER").unwrap_or_else(|_| "user".into());
     let window = MainWindow::new()?;
-    let controller_enabled = Arc::new(AtomicBool::new(true));
-    let focus_state = controller_enabled.clone();
+    // Controller events are allowed only while Marina owns the native window,
+    // but the selected Slint focus target belongs to the UI regardless of
+    // whether a controller is connected.
+    let window_active = Arc::new(AtomicBool::new(true));
+    let focus_state = window_active.clone();
+    let focus_window = window.as_weak();
     i_slint_core::context::set_window_event_hook(Some(Box::new(
         move |_adapter, event, _result| {
             if let i_slint_core::platform::WindowEvent::WindowActiveChanged(active) = event {
                 focus_state.store(*active, Ordering::Release);
+                if *active {
+                    // A controller hot-unplug can make the compositor rebuild
+                    // its input focus. Reassert the mounted page's focus scope
+                    // after the native window becomes active again, including
+                    // for keyboard- and pointer-only use.
+                    let focus_window = focus_window.clone();
+                    let _ = focus_window.upgrade_in_event_loop(move |window| {
+                        ui::controls::restore_content_focus(&window);
+                    });
+                }
             }
         },
     )))?;
@@ -75,7 +89,7 @@ async fn main() -> Result<(), slint::PlatformError> {
     // Never make window creation wait for it; initialize it after the event loop
     // has started and keep the returned loop alive in its background task.
     let controller_window = window.as_weak();
-    let controller_enabled = controller_enabled.clone();
+    let window_active = window_active.clone();
     tokio::spawn(async move {
         // gilrs probes every input device during construction. Let the first
         // frame and initial library query get CPU priority before doing that
@@ -85,7 +99,7 @@ async fn main() -> Result<(), slint::PlatformError> {
         info!("starting controller input discovery");
         let result = tokio::task::spawn_blocking(move || {
             InputLoop::spawn(InputConfig::default(), move |event| {
-                if !controller_enabled.load(Ordering::Acquire) {
+                if !window_active.load(Ordering::Acquire) {
                     return;
                 }
                 let controller_window = controller_window.clone();
