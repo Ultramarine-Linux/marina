@@ -488,8 +488,7 @@ pub(crate) async fn refresh_platform_cards(
             let icon_window = window.as_weak();
             tokio::spawn(async move {
                 let Some(path) = platform_asset_path(
-                    &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                        .join("ui/assets/platforms/systematic"),
+                    &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("ui/assets"),
                     &slug,
                 ) else {
                     return;

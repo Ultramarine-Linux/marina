@@ -404,8 +404,7 @@ pub(crate) fn install(
                 });
                 return;
             }
-            let icon_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("ui/assets/platforms/systematic");
+            let icon_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("ui/assets");
             // Publish the list immediately; icons resolve
             // concurrently per row instead of blocking the list on
             // a sequential await chain.

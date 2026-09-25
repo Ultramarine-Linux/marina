@@ -1,14 +1,48 @@
 import { ListView } from "std-widgets.slint";
 import { Sheet, SheetSide } from "../slintcn/components/sheet.slint";
+import { Button, ButtonSize, ButtonVariant } from "../slintcn/components/button.slint";
+import { RadioGroup, RadioItem } from "../slintcn/components/radio-group.slint";
+import { Slider } from "../slintcn/components/slider.slint";
 import { FocusListScroll } from "../components/focus-list-scroll.slint";
 import { Tokens } from "../slintcn/theme/tokens.slint";
 import { BatteryIndicator, BatteryState } from "../components/battery-indicator.slint";
 import { ClockIndicator, ClockState } from "../components/clock-indicator.slint";
 import { NetworkIndicator, NetworkState } from "../components/network-indicator.slint";
+import { InputLegend } from "../components/input-legend.slint";
 
 export { BatteryState } from "../components/battery-indicator.slint";
 export { ClockState } from "../components/clock-indicator.slint";
 export { NetworkState } from "../components/network-indicator.slint";
+
+component QuickSettingsEntry inherits Rectangle {
+    in property <bool> highlighted: false;
+    in property <string> title;
+    in property <string> value;
+
+    height: 58px;
+    clip: true;
+    border-radius: Tokens.radius-md;
+    background: highlighted ? Tokens.color-accent : transparent;
+
+
+    VerticalLayout {
+        x: Tokens.spacing-lg;
+        width: parent.width - Tokens.spacing-xl;
+        height: parent.height;
+        alignment: center;
+        Text {
+            text: root.title;
+            color: Tokens.color-foreground;
+            font-size: 16px;
+        }
+        Text {
+            text: root.value;
+            color: Tokens.color-muted-foreground;
+            font-size: 12px;
+        }
+    }
+}
+
 
 export component WindowOverlay inherits Window {
     callback dismissed();
@@ -31,17 +65,15 @@ export component WindowOverlay inherits Window {
     in property <int> quick-selected: 0;
     in property <int> brightness: 0;
     in property <int> volume: 0;
-    in property <[string]> profile-names: [];
+    in property <[RadioItem]> profile-items: [];
     in property <string> active-profile: "";
+    in property <int> active-profile-index: -1;
     in property <int> profile-selected: 0;
     in-out property <length> profile-scroll-y: 0px;
-
-
-    property <[string]> game-menu-items: [
-        "Resume game",
-        "Switch window",
-        "Exit game",
-    ];
+    in property <image> dpad-icon;
+    in property <image> accept-icon;
+    in property <image> back-icon;
+    in property <image> menu-icon;
 
     background: transparent;
 
@@ -84,54 +116,39 @@ export component WindowOverlay inherits Window {
                 }
             }
 
-            ListView {
-                vertical-stretch: 1;
-
-                for label[index] in root.game-menu-items: Rectangle {
-                    height: 52px;
-                    border-radius: Tokens.radius-md;
-                    background: index == root.menu-selected
-                        ? Tokens.color-accent
-                        : transparent;
-
-                    if index == root.menu-selected: Rectangle {
-                        x: 0;
-                        y: Tokens.spacing-sm;
-                        width: 4px;
-                        height: parent.height - Tokens.spacing-lg;
-                        border-radius: 2px;
-                        background: index == 2
-                            ? Tokens.color-destructive
-                            : Tokens.color-ring;
-                    }
-
-                    Text {
-                        x: Tokens.spacing-lg;
-                        width: parent.width - Tokens.spacing-xl;
-                        height: parent.height;
-                        text: label;
-                        color: index == 2
-                            ? Tokens.color-destructive
-                            : (index == root.menu-selected
-                                ? Tokens.color-foreground
-                                : Tokens.color-muted-foreground);
-                        font-size: 18px;
-                        font-weight: index == root.menu-selected
-                            ? Tokens.typography-weight-semibold
-                            : 400;
-                        vertical-alignment: center;
-                        overflow: elide;
-                    }
+            VerticalLayout {
+                spacing: Tokens.spacing-sm;
+                Button {
+                    width: parent.width;
+                    size: ButtonSize.lg;
+                    text: "Resume game";
+                    variant: root.menu-selected == 0 ? ButtonVariant.secondary : ButtonVariant.ghost;
+                }
+                Button {
+                    width: parent.width;
+                    size: ButtonSize.lg;
+                    text: "Switch window";
+                    variant: root.menu-selected == 1 ? ButtonVariant.secondary : ButtonVariant.ghost;
+                }
+                Button {
+                    width: parent.width;
+                    size: ButtonSize.lg;
+                    text: "Exit game";
+                    variant: ButtonVariant.destructive;
+                    opacity: root.menu-selected == 2 ? 1 : 0.72;
                 }
             }
+            Rectangle { vertical-stretch: 1; }
 
-            Text {
-                text: root.status-text == ""
-                    ? "D-pad  Select     A  Confirm     B  Back"
-                    : root.status-text;
-                color: root.status-text == ""
-                    ? Tokens.color-muted-foreground
-                    : Tokens.color-destructive;
+            if root.status-text == "": HorizontalLayout {
+                spacing: Tokens.spacing-md;
+                InputLegend { icon: root.dpad-icon; label: "Navigate"; }
+                InputLegend { icon: root.accept-icon; label: "Confirm"; }
+                InputLegend { icon: root.back-icon; label: "Back"; }
+            }
+            if root.status-text != "": Text {
+                text: root.status-text;
+                color: Tokens.color-destructive;
                 font-size: Tokens.typography-body-sm-size;
             }
         }
@@ -215,10 +232,15 @@ export component WindowOverlay inherits Window {
                 }
             }
 
-            Text {
-                text: root.position-label + "     B  Game menu";
-                color: Tokens.color-muted-foreground;
-                font-size: Tokens.typography-body-sm-size;
+            HorizontalLayout {
+                spacing: Tokens.spacing-md;
+                Text {
+                    text: root.position-label;
+                    color: Tokens.color-muted-foreground;
+                    font-size: Tokens.typography-body-sm-size;
+                    vertical-alignment: center;
+                }
+                InputLegend { icon: root.back-icon; label: "Game menu"; }
             }
 
             if root.status-text != "": Text {
@@ -258,25 +280,10 @@ export component WindowOverlay inherits Window {
             quick-list := VerticalLayout {
                 spacing: Tokens.spacing-sm;
 
-                quick-profile := Rectangle {
-                    height: 58px;
-                    border-radius: Tokens.radius-md;
-                    background: root.quick-selected == 0 ? Tokens.color-accent : transparent;
-                    if root.quick-selected == 0: Rectangle {
-                        width: 4px;
-                        height: parent.height - Tokens.spacing-md;
-                        y: Tokens.spacing-sm / 2;
-                        border-radius: 2px;
-                        background: Tokens.color-ring;
-                    }
-                    VerticalLayout {
-                        x: Tokens.spacing-lg;
-                        width: parent.width - Tokens.spacing-xl;
-                        height: parent.height;
-                        alignment: center;
-                        Text { text: "Power profile"; color: Tokens.color-foreground; font-size: 16px; }
-                        Text { text: root.active-profile; color: Tokens.color-muted-foreground; font-size: 12px; }
-                    }
+                QuickSettingsEntry {
+                    highlighted: root.quick-selected == 0;
+                    title: "Power profile";
+                    value: root.active-profile;
                 }
 
                 quick-brightness := Rectangle {
@@ -290,16 +297,10 @@ export component WindowOverlay inherits Window {
                             Text { text: "Brightness"; color: Tokens.color-foreground; font-size: 15px; }
                             Text { text: root.brightness + "%"; color: Tokens.color-muted-foreground; horizontal-alignment: right; }
                         }
-                        Rectangle {
-                            height: 6px;
-                            border-radius: 3px;
-                            background: Tokens.color-muted;
-                            Rectangle {
-                                width: parent.width * min(max(root.brightness, 0), 100) / 100;
-                                height: parent.height;
-                                border-radius: 3px;
-                                background: Tokens.color-ring;
-                            }
+                        Slider {
+                            value: root.brightness;
+                            minimum: 1;
+                            maximum: 100;
                         }
                     }
                 }
@@ -315,25 +316,25 @@ export component WindowOverlay inherits Window {
                             Text { text: "Volume"; color: Tokens.color-foreground; font-size: 15px; }
                             Text { text: root.volume + "%"; color: Tokens.color-muted-foreground; horizontal-alignment: right; }
                         }
-                        Rectangle {
-                            height: 6px;
-                            border-radius: 3px;
-                            background: Tokens.color-muted;
-                            Rectangle {
-                                width: parent.width * min(max(root.volume, 0), 100) / 100;
-                                height: parent.height;
-                                border-radius: 3px;
-                                background: Tokens.color-ring;
-                            }
+                        Slider {
+                            value: root.volume;
+                            minimum: 0;
+                            maximum: 100;
                         }
                     }
                 }
             }
 
             Rectangle { vertical-stretch: 1; }
-            Text {
-                text: root.status-text == "" ? "D-pad  Navigate / adjust     A  Select     B  Back" : root.status-text;
-                color: root.status-text == "" ? Tokens.color-muted-foreground : Tokens.color-destructive;
+            if root.status-text == "": HorizontalLayout {
+                spacing: Tokens.spacing-md;
+                InputLegend { icon: root.dpad-icon; label: "Navigate / adjust"; }
+                InputLegend { icon: root.accept-icon; label: "Select"; }
+                InputLegend { icon: root.back-icon; label: "Back"; }
+            }
+            if root.status-text != "": Text {
+                text: root.status-text;
+                color: Tokens.color-destructive;
                 font-size: Tokens.typography-body-sm-size;
                 wrap: word-wrap;
             }
@@ -352,39 +353,24 @@ export component WindowOverlay inherits Window {
                     color: Tokens.color-muted-foreground;
                     font-size: Tokens.typography-body-sm-size;
                 }
-            Rectangle {
+            RadioGroup {
                 vertical-stretch: 1;
-                profile-list-scroll := FocusListScroll {
-                    selected-index: root.profile-selected;
-                    item-count: root.profile-names.length;
-                    item-height: 46px;
-                    viewport-height: profile-list.height;
-                    viewport-y <=> root.profile-scroll-y;
-                }
-                profile-list := ListView {
-                    width: parent.width;
-                    height: parent.height;
-                    viewport-y <=> root.profile-scroll-y;
-                for profile[index] in root.profile-names: Rectangle {
-                    height: 46px;
-                    border-radius: Tokens.radius-md;
-                    background: index == root.profile-selected ? Tokens.color-accent : transparent;
-                    Text {
-                        x: Tokens.spacing-md;
-                        width: parent.width - 2 * Tokens.spacing-md;
-                        height: parent.height;
-                        text: (profile == root.active-profile ? "●  " : "○  ") + profile;
-                        color: profile == root.active-profile ? Tokens.color-affirm : Tokens.color-foreground;
-                        font-size: Tokens.typography-body-size;
-                        vertical-alignment: center;
-                        overflow: elide;
-                    }
-                }
-                }
+                width: parent.width;
+                items: root.profile-items;
+                selected: root.active-profile-index;
+                highlighted: root.profile-selected;
+                show-external-highlight: true;
+                scrollable: true;
+                scroll-y <=> root.profile-scroll-y;
             }
-            Text {
-                text: root.status-text == "" ? "A  Apply profile     B  Back" : root.status-text;
-                color: root.status-text == "" ? Tokens.color-muted-foreground : Tokens.color-destructive;
+            if root.status-text == "": HorizontalLayout {
+                spacing: Tokens.spacing-md;
+                InputLegend { icon: root.accept-icon; label: "Apply profile"; }
+                InputLegend { icon: root.back-icon; label: "Back"; }
+            }
+            if root.status-text != "": Text {
+                text: root.status-text;
+                color: Tokens.color-destructive;
                 font-size: Tokens.typography-body-sm-size;
             }
             }

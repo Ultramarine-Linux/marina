@@ -84,13 +84,29 @@ pub fn discover() -> Vec<LibraryItem> {
     items
 }
 
-fn resolve_icon(icon: &str) -> Option<String> {
+/// Resolves an XDG icon name or path to a concrete image path.
+pub fn resolve_icon(icon: &str) -> Option<String> {
     let icon = expand_home(icon);
     let path = std::path::Path::new(&icon);
     if path.is_file() {
         return Some(icon);
     }
     freedesktop_icons::lookup(&icon)
+        .with_size(256)
+        .with_cache()
+        .find()
+        .map(|path| path.to_string_lossy().into_owned())
+}
+
+/// Resolves an icon from a specific installed XDG icon theme.
+pub fn resolve_icon_in_theme(icon: &str, theme: &str) -> Option<String> {
+    let icon = expand_home(icon);
+    let path = std::path::Path::new(&icon);
+    if path.is_file() {
+        return Some(icon);
+    }
+    freedesktop_icons::lookup(&icon)
+        .with_theme(theme)
         .with_size(256)
         .with_cache()
         .find()

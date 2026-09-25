@@ -14,8 +14,8 @@ use std::{
 use layer_shika::{
     calloop::TimeoutAction,
     prelude::{KeyboardInteractivity, Shell, ShellControl},
-    slint::{ModelRc, SharedString, VecModel},
-    slint_interpreter::{ComponentInstance, Value},
+    slint::{Image, ModelRc, SharedString, VecModel},
+    slint_interpreter::{ComponentInstance, Struct, Value},
 };
 use marina_input::{InputAction, InputConfig, InputEvent, InputEventKind, InputLoop};
 use marina_shell::{
@@ -30,6 +30,10 @@ const SURFACE_NAME: &str = "WindowOverlay";
 const ANIMATION_FRAME_INTERVAL: Duration = Duration::from_millis(16);
 const RESUME_CLOCK_GAP: Duration = Duration::from_millis(500);
 const RESUME_EXIT_CODE: i32 = 75;
+
+thread_local! {
+    static SWITCH_ICON_CACHE: RefCell<Vec<(String, Image)>> = RefCell::new(Vec::new());
+}
 
 #[derive(Clone, Debug)]
 struct Presentation {
@@ -50,6 +54,7 @@ struct Presentation {
     volume: i32,
     profile_names: Vec<String>,
     active_profile: String,
+    active_profile_index: i32,
     profile_selected: i32,
     clock_text: String,
     battery_available: bool,
@@ -78,6 +83,9 @@ enum OverlayMessage {
     Battery(marina_power::BatteryStatus),
     Network(marina_networking::NetworkStatus),
     Clock(String),
+    SwitchProfile(String),
+    SetBrightness(u8),
+    SetVolume(u8),
 }
 
 struct ControllerState {
@@ -87,10 +95,10 @@ struct ControllerState {
     selected: usize,
     menu_selected: usize,
     mode: OverlayMode,
-    runtime: Arc<tokio::runtime::Runtime>,
     profiles: Vec<marina_power::TunedProfile>,
     active_profile: String,
     profile_selected: usize,
+    profile_switch_pending: bool,
     quick_selected: usize,
     brightness: u8,
     volume: u8,
@@ -100,7 +108,7 @@ struct ControllerState {
 }
 
 impl ControllerState {
-    fn new(manager: SwayWindowManager, runtime: Arc<tokio::runtime::Runtime>) -> Self {
+    fn new(manager: SwayWindowManager) -> Self {
         Self {
             manager,
             windows: Vec::new(),
@@ -108,10 +116,10 @@ impl ControllerState {
             selected: 0,
             menu_selected: 0,
             mode: OverlayMode::GameMenu,
-            runtime,
             profiles: Vec::new(),
             active_profile: String::new(),
             profile_selected: 0,
+            profile_switch_pending: false,
             quick_selected: 0,
             brightness: 0,
             volume: 0,
@@ -234,6 +242,12 @@ impl ControllerState {
                 .map(|profile| profile.name.clone())
                 .collect(),
             active_profile: self.active_profile.clone(),
+            active_profile_index: self
+                .profiles
+                .iter()
+                .position(|profile| profile.name == self.active_profile)
+                .map(|index| index as i32)
+                .unwrap_or(-1),
             profile_selected: self.profile_selected as i32,
             clock_text: self.clock_text.clone(),
             battery_available: self.battery.available,
@@ -318,20 +332,12 @@ impl ControllerState {
             InputAction::Left | InputAction::Right if self.quick_selected == 1 => {
                 let delta = if action == InputAction::Right { 5 } else { -5 };
                 self.brightness = (i16::from(self.brightness) + delta).clamp(1, 100) as u8;
-                let status = marina_power::set_display_brightness(self.brightness)
-                    .err()
-                    .map(|error| error.to_string())
-                    .unwrap_or_default();
-                Some(OverlayMessage::Presentation(self.presentation(status)))
+                Some(OverlayMessage::SetBrightness(self.brightness))
             }
             InputAction::Left | InputAction::Right if self.quick_selected == 2 => {
                 let delta = if action == InputAction::Right { 5 } else { -5 };
                 self.volume = (i16::from(self.volume) + delta).clamp(0, 100) as u8;
-                let status = marina_audio::set_volume(self.volume)
-                    .err()
-                    .map(|error| error.to_string())
-                    .unwrap_or_default();
-                Some(OverlayMessage::Presentation(self.presentation(status)))
+                Some(OverlayMessage::SetVolume(self.volume))
             }
             InputAction::Accept if self.quick_selected == 0 => {
                 self.mode = OverlayMode::ProfileList;
@@ -359,34 +365,16 @@ impl ControllerState {
                 self.profile_selected = (self.profile_selected + 1) % self.profiles.len();
                 Some(OverlayMessage::Presentation(self.presentation("")))
             }
-            InputAction::Accept => {
+            InputAction::Accept if !self.profile_switch_pending => {
                 let Some(profile) = self.profiles.get(self.profile_selected) else {
                     return Some(OverlayMessage::Presentation(
                         self.presentation("No TuneD profiles available"),
                     ));
                 };
-                let result = self.runtime.block_on(tokio::time::timeout(
-                    Duration::from_secs(2),
-                    marina_power::switch_tuned_profile(&profile.name),
-                ));
-                match result {
-                    Ok(Ok(true)) => {
-                        self.active_profile.clone_from(&profile.name);
-                        self.mode = OverlayMode::QuickSettings;
-                        Some(OverlayMessage::Presentation(self.presentation("")))
-                    }
-                    Ok(Ok(false)) => Some(OverlayMessage::Presentation(
-                        self.presentation("TuneD declined the selected profile"),
-                    )),
-                    Ok(Err(error)) => Some(OverlayMessage::Presentation(
-                        self.presentation(error.to_string()),
-                    )),
-                    Err(_) => Some(OverlayMessage::Presentation(
-                        self.presentation("TuneD timed out while switching profile"),
-                    )),
-                }
+                self.profile_switch_pending = true;
+                Some(OverlayMessage::SwitchProfile(profile.name.clone()))
             }
-            InputAction::Back => {
+            InputAction::Back if !self.profile_switch_pending => {
                 self.mode = OverlayMode::QuickSettings;
                 Some(OverlayMessage::Presentation(self.presentation("")))
             }
@@ -432,6 +420,110 @@ impl ControllerState {
             InputAction::Menu => Some(OverlayMessage::Hide),
             _ => None,
         }
+    }
+}
+
+fn load_switch_icon(name: &str) -> Image {
+    SWITCH_ICON_CACHE.with(|cache| {
+        if let Some((_, image)) = cache.borrow().iter().find(|(cached, _)| cached == name) {
+            return image.clone();
+        }
+
+        let Some(path) = marina_apps::resolve_icon_in_theme(name, "marina-assets") else {
+            warn!(icon = name, "switch icon was not found");
+            return Image::default();
+        };
+        let Ok(image) = Image::load_from_path(std::path::Path::new(&path)) else {
+            warn!(icon = name, %path, "switch icon could not be loaded");
+            return Image::default();
+        };
+        cache.borrow_mut().push((name.to_owned(), image.clone()));
+        image
+    })
+}
+
+fn spawn_control_operation(
+    state: Arc<Mutex<ControllerState>>,
+    sender: layer_shika::calloop::channel::Sender<OverlayMessage>,
+    runtime: Arc<tokio::runtime::Runtime>,
+    operation: OverlayMessage,
+) {
+    match operation {
+        OverlayMessage::SwitchProfile(profile_name) => {
+            let presentation = state
+                .lock()
+                .expect("overlay state lock poisoned")
+                .presentation("Applying power profile…");
+            send_overlay_message(&sender, OverlayMessage::Presentation(presentation));
+
+            runtime.spawn(async move {
+                let result = tokio::time::timeout(
+                    Duration::from_secs(2),
+                    marina_power::switch_tuned_profile(&profile_name),
+                )
+                .await;
+                let presentation = {
+                    let mut state = state.lock().expect("overlay state lock poisoned");
+                    state.profile_switch_pending = false;
+                    match result {
+                        Ok(Ok(true)) => {
+                            state.active_profile = profile_name;
+                            state.mode = OverlayMode::QuickSettings;
+                            state.presentation("")
+                        }
+                        Ok(Ok(false)) => state.presentation("TuneD declined the selected profile"),
+                        Ok(Err(error)) => state.presentation(error.to_string()),
+                        Err(_) => state.presentation("TuneD timed out while switching profile"),
+                    }
+                };
+                send_overlay_message(&sender, OverlayMessage::Presentation(presentation));
+            });
+        }
+        OverlayMessage::SetBrightness(value) => {
+            let presentation = state
+                .lock()
+                .expect("overlay state lock poisoned")
+                .presentation("Applying brightness…");
+            send_overlay_message(&sender, OverlayMessage::Presentation(presentation));
+            runtime.spawn(async move {
+                let result = tokio::task::spawn_blocking(move || {
+                    marina_power::set_display_brightness(value)
+                })
+                .await;
+                let status = match result {
+                    Ok(Ok(())) => String::new(),
+                    Ok(Err(error)) => error.to_string(),
+                    Err(error) => format!("brightness task failed: {error}"),
+                };
+                let presentation = state
+                    .lock()
+                    .expect("overlay state lock poisoned")
+                    .presentation(status);
+                send_overlay_message(&sender, OverlayMessage::Presentation(presentation));
+            });
+        }
+        OverlayMessage::SetVolume(value) => {
+            let presentation = state
+                .lock()
+                .expect("overlay state lock poisoned")
+                .presentation("Applying volume…");
+            send_overlay_message(&sender, OverlayMessage::Presentation(presentation));
+            runtime.spawn(async move {
+                let result =
+                    tokio::task::spawn_blocking(move || marina_audio::set_volume(value)).await;
+                let status = match result {
+                    Ok(Ok(())) => String::new(),
+                    Ok(Err(error)) => error.to_string(),
+                    Err(error) => format!("volume task failed: {error}"),
+                };
+                let presentation = state
+                    .lock()
+                    .expect("overlay state lock poisoned")
+                    .presentation(status);
+                send_overlay_message(&sender, OverlayMessage::Presentation(presentation));
+            });
+        }
+        _ => {}
     }
 }
 
@@ -492,7 +584,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .enable_all()
             .build()?,
     );
-    let state = Arc::new(Mutex::new(ControllerState::new(manager, runtime.clone())));
+    let state = Arc::new(Mutex::new(ControllerState::new(manager)));
     let visible = Arc::new(AtomicBool::new(false));
 
     let mut shell = build_overlay_shell(&ui_path)?;
@@ -558,6 +650,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         warn!(%error, "failed to update overlay clock state");
                     }
                 }
+            }
+            OverlayMessage::SwitchProfile(_)
+            | OverlayMessage::SetBrightness(_)
+            | OverlayMessage::SetVolume(_) => {
+                warn!("control operation reached the UI channel without being scheduled");
             }
         })?;
 
@@ -688,10 +785,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if matches!(message, OverlayMessage::Hide) {
                         input_visible.store(false, Ordering::Release);
                     }
-                    if matches!(message, OverlayMessage::Hide) {
-                        send_overlay_message(&input_sender, message);
-                    } else {
-                        let _ = input_sender.send(message);
+                    match message {
+                        OverlayMessage::SwitchProfile(_)
+                        | OverlayMessage::SetBrightness(_)
+                        | OverlayMessage::SetVolume(_) => {
+                            spawn_control_operation(
+                                input_state.clone(),
+                                input_sender.clone(),
+                                runtime.clone(),
+                                message,
+                            );
+                        }
+                        message => {
+                            let _ = input_sender.send(message);
+                        }
                     }
                 }
             }) {
@@ -790,10 +897,19 @@ fn apply_presentation_to_component(component: &ComponentInstance, presentation: 
         "menu-selected",
         Value::Number(f64::from(presentation.menu_selected)),
     );
+    for (name, image) in [
+        ("dpad-icon", load_switch_icon("dpad-default")),
+        ("accept-icon", load_switch_icon("button-south")),
+        ("back-icon", load_switch_icon("button-east")),
+        ("menu-icon", load_switch_icon("button-home")),
+    ] {
+        set_component_value(component, name, Value::Image(image));
+    }
     for (name, value) in [
         ("quick-selected", presentation.quick_selected),
         ("brightness", presentation.brightness),
         ("volume", presentation.volume),
+        ("active-profile-index", presentation.active_profile_index),
         ("profile-selected", presentation.profile_selected),
     ] {
         set_component_value(component, name, Value::Number(f64::from(value)));
@@ -801,11 +917,22 @@ fn apply_presentation_to_component(component: &ComponentInstance, presentation: 
     let profiles = presentation
         .profile_names
         .iter()
-        .map(|name| Value::String(SharedString::from(name.as_str())))
+        .map(|name| {
+            Value::Struct(Struct::from_iter([
+                (
+                    "value".to_owned(),
+                    Value::String(SharedString::from(name.as_str())),
+                ),
+                (
+                    "label".to_owned(),
+                    Value::String(SharedString::from(name.as_str())),
+                ),
+            ]))
+        })
         .collect::<Vec<_>>();
     set_component_value(
         component,
-        "profile-names",
+        "profile-items",
         Value::Model(ModelRc::from(Rc::new(VecModel::from(profiles)))),
     );
     let titles = presentation

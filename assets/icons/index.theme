@@ -1,0 +1,9 @@
+[Icon Theme]
+Name=marina-assets
+Comment=Marina controller legend icons
+Directories=scalable
+
+[scalable]
+Size=24
+Context=Actions
+Type=Scalable

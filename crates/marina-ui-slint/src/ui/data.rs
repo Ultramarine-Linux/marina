@@ -76,20 +76,18 @@ pub(crate) fn platform_asset_path(root: &std::path::Path, slug: &str) -> Option<
         "win" => "pc-50x-family",
         _ => slug,
     };
-    let exact_path = root.join(format!("{exact_name}.svg"));
-    if exact_path.is_file() {
-        return Some(exact_path.to_string_lossy().into_owned());
+    let exact_path = root.join(format!("platform-{exact_name}.svg"));
+    if let Some(path) = marina_apps::resolve_icon(&exact_path.to_string_lossy()) {
+        return Some(path);
     }
 
     if let Some(prefix) = slug.split('-').next() {
-        let prefix_path = root.join(format!("{prefix}.svg"));
-        if prefix_path.is_file() {
-            return Some(prefix_path.to_string_lossy().into_owned());
+        let prefix_path = root.join(format!("platform-{prefix}.svg"));
+        if let Some(path) = marina_apps::resolve_icon(&prefix_path.to_string_lossy()) {
+            return Some(path);
         }
     }
 
-    let default_path = root.join("default.svg");
-    default_path
-        .is_file()
-        .then(|| default_path.to_string_lossy().into_owned())
+    let default_path = root.join("platform-default.svg");
+    marina_apps::resolve_icon(&default_path.to_string_lossy())
 }

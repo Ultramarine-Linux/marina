@@ -191,8 +191,7 @@ pub(crate) async fn hydrate_startup_platforms(
             return;
         }
     };
-    let icon_root =
-        std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("ui/assets/platforms/systematic");
+    let icon_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("ui/assets");
     let cards = platforms
         .into_iter()
         .map(|platform| PlatformCardMetadata {
