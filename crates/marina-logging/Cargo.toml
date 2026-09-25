@@ -1,0 +1,10 @@
+[package]
+name = "marina-logging"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+dotenvy.workspace = true
+tracing-journald.workspace = true
+tracing-subscriber.workspace = true

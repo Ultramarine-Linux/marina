@@ -22,6 +22,8 @@ const PORTMASTER_DIR: &str = "/usr/libexec/marina-portmaster";
 const RUNTIME_DIR: &str = "/run/portmaster/runtimes";
 
 fn main() {
+    marina_logging::init();
+
     let exit_code = match run() {
         Ok(code) => code,
         Err(error) => {

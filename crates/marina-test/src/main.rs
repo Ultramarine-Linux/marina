@@ -12,7 +12,7 @@ use marina_store_sqlite::SqliteLibrary;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    dotenvy::dotenv().ok();
+    marina_logging::init();
 
     let romm_url = required_env("ROMM_URL")?;
     let storage_uri = env::var("MARINA_STORAGE_URI").unwrap_or_else(|_| "marina.db".to_owned());

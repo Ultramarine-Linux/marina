@@ -9,8 +9,6 @@ mod startup;
 mod storage;
 mod ui;
 
-use tracing_subscriber::EnvFilter;
-
 slint::include_modules!();
 
 pub(crate) use ui::data::{
@@ -24,10 +22,7 @@ pub(crate) use ui::store_details::populate_store_details;
 // being warmed by short-lived image buffers on high-core-count handhelds.
 #[tokio::main(worker_threads = 2)]
 async fn main() -> Result<(), slint::PlatformError> {
-    tracing_subscriber::fmt()
-        .with_env_filter(EnvFilter::from_default_env())
-        .init();
-    dotenvy::dotenv().ok();
+    marina_logging::init();
 
     let args: Vec<String> = std::env::args().collect();
     if args.get(1).map(String::as_str) == Some("--export-ui-fixture") {

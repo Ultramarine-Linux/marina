@@ -25,6 +25,8 @@ fn allowed_mountpoint(path: &Path) -> bool {
 }
 
 fn main() {
+    marina_logging::init();
+
     let mut args = env::args().skip(1);
     if args.next().as_deref() != Some("mount-image") {
         usage();
