@@ -3442,7 +3442,10 @@ dependencies = [
 name = "marina-networking"
 version = "0.1.0"
 dependencies = [
+ "futures-util",
  "nmrs",
+ "tokio",
+ "tracing",
 ]
 
 [[package]]
@@ -3580,7 +3583,6 @@ dependencies = [
  "dirs 6.0.0",
  "dotenvy",
  "figment",
- "futures-util",
  "i-slint-core",
  "image",
  "lucide-slint",
