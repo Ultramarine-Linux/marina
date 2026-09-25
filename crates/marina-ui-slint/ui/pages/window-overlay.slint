@@ -1,0 +1,393 @@
+import { ListView } from "std-widgets.slint";
+import { Sheet, SheetSide } from "../slintcn/components/sheet.slint";
+import { FocusListScroll } from "../components/focus-list-scroll.slint";
+import { Tokens } from "../slintcn/theme/tokens.slint";
+import { BatteryIndicator, BatteryState } from "../components/battery-indicator.slint";
+import { ClockIndicator, ClockState } from "../components/clock-indicator.slint";
+import { NetworkIndicator, NetworkState } from "../components/network-indicator.slint";
+
+export { BatteryState } from "../components/battery-indicator.slint";
+export { ClockState } from "../components/clock-indicator.slint";
+export { NetworkState } from "../components/network-indicator.slint";
+
+export component WindowOverlay inherits Window {
+    callback dismissed();
+    callback control-requested();
+
+    in property <bool> overlay-open: false;
+    in property <bool> window-mode: false;
+    in property <string> active-title: "No active game";
+    in property <int> menu-selected: 0;
+    in property <string> selected-title: "No application windows";
+    in property <string> selected-app-id: "";
+    in property <string> selected-location: "";
+    in property <string> position-label: "0 of 0";
+    in property <[string]> window-titles: [];
+    in property <int> selected-index: 0;
+    in-out property <length> window-scroll-y: 0px;
+    in property <string> status-text: "";
+    in property <bool> quick-mode: false;
+    in property <bool> profile-mode: false;
+    in property <int> quick-selected: 0;
+    in property <int> brightness: 0;
+    in property <int> volume: 0;
+    in property <[string]> profile-names: [];
+    in property <string> active-profile: "";
+    in property <int> profile-selected: 0;
+    in-out property <length> profile-scroll-y: 0px;
+
+
+    property <[string]> game-menu-items: [
+        "Resume game",
+        "Switch window",
+        "Exit game",
+    ];
+
+    background: transparent;
+
+    Sheet {
+        width: parent.width;
+        height: parent.height;
+        open: root.overlay-open && !root.quick-mode;
+        side: SheetSide.left;
+        panel-extent: min(parent.width * 0.56, 360px);
+        compact: true;
+        title: root.window-mode ? "Switch window" : "Game menu";
+        description: root.window-mode
+            ? "Bring another window to the front"
+            : root.active-title;
+        dismissed => { root.dismissed(); }
+
+        if !root.window-mode: VerticalLayout {
+            spacing: Tokens.spacing-lg;
+
+            Rectangle {
+                min-height: 72px;
+                border-radius: Tokens.radius-lg;
+                background: Tokens.color-surface-2;
+
+                VerticalLayout {
+                    padding: Tokens.spacing-lg;
+                    spacing: Tokens.spacing-xs;
+                    Text {
+                        text: root.active-title;
+                        color: Tokens.color-foreground;
+                        font-size: Tokens.typography-title-size;
+                        font-weight: Tokens.typography-weight-semibold;
+                        overflow: elide;
+                    }
+                    Text {
+                        text: "Active game";
+                        color: Tokens.color-muted-foreground;
+                        font-size: Tokens.typography-label-size;
+                    }
+                }
+            }
+
+            ListView {
+                vertical-stretch: 1;
+
+                for label[index] in root.game-menu-items: Rectangle {
+                    height: 52px;
+                    border-radius: Tokens.radius-md;
+                    background: index == root.menu-selected
+                        ? Tokens.color-accent
+                        : transparent;
+
+                    if index == root.menu-selected: Rectangle {
+                        x: 0;
+                        y: Tokens.spacing-sm;
+                        width: 4px;
+                        height: parent.height - Tokens.spacing-lg;
+                        border-radius: 2px;
+                        background: index == 2
+                            ? Tokens.color-destructive
+                            : Tokens.color-ring;
+                    }
+
+                    Text {
+                        x: Tokens.spacing-lg;
+                        width: parent.width - Tokens.spacing-xl;
+                        height: parent.height;
+                        text: label;
+                        color: index == 2
+                            ? Tokens.color-destructive
+                            : (index == root.menu-selected
+                                ? Tokens.color-foreground
+                                : Tokens.color-muted-foreground);
+                        font-size: 18px;
+                        font-weight: index == root.menu-selected
+                            ? Tokens.typography-weight-semibold
+                            : 400;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                }
+            }
+
+            Text {
+                text: root.status-text == ""
+                    ? "D-pad  Select     A  Confirm     B  Back"
+                    : root.status-text;
+                color: root.status-text == ""
+                    ? Tokens.color-muted-foreground
+                    : Tokens.color-destructive;
+                font-size: Tokens.typography-body-sm-size;
+            }
+        }
+
+        if root.window-mode: VerticalLayout {
+            spacing: Tokens.spacing-lg;
+
+            Rectangle {
+                min-height: 96px;
+                border-radius: Tokens.radius-lg;
+                background: Tokens.color-accent;
+                border-width: 2px;
+                border-color: Tokens.color-ring;
+
+                VerticalLayout {
+                    padding: Tokens.spacing-lg;
+                    spacing: Tokens.spacing-sm;
+
+                    Text {
+                        text: root.selected-title;
+                        color: Tokens.color-foreground;
+                        font-size: Tokens.typography-title-size;
+                        font-weight: Tokens.typography-weight-semibold;
+                        overflow: elide;
+                    }
+                    Text {
+                        text: root.selected-app-id;
+                        color: Tokens.color-muted-foreground;
+                        font-size: Tokens.typography-body-sm-size;
+                        overflow: elide;
+                    }
+                    Text {
+                        text: root.selected-location;
+                        color: Tokens.color-muted-foreground;
+                        font-size: Tokens.typography-label-size;
+                    }
+                }
+            }
+
+            if root.window-titles.length == 0: Text {
+                text: "No application windows are available.";
+                color: Tokens.color-muted-foreground;
+                font-size: Tokens.typography-body-size;
+                vertical-stretch: 1;
+                wrap: word-wrap;
+            }
+
+            if root.window-titles.length > 0: Rectangle {
+                vertical-stretch: 1;
+                window-list-scroll := FocusListScroll {
+                    selected-index: root.selected-index;
+                    item-count: root.window-titles.length;
+                    item-height: 42px;
+                    viewport-height: window-list.height;
+                    viewport-y <=> root.window-scroll-y;
+                }
+                window-list := ListView {
+                    width: parent.width;
+                    height: parent.height;
+                    viewport-y <=> root.window-scroll-y;
+                for title[index] in root.window-titles: Rectangle {
+                    height: 42px;
+                    border-radius: Tokens.radius-md;
+                    background: index == root.selected-index
+                        ? Tokens.color-accent
+                        : transparent;
+
+                    Text {
+                        x: Tokens.spacing-md;
+                        width: parent.width - Tokens.spacing-xl;
+                        height: parent.height;
+                        text: title;
+                        color: index == root.selected-index
+                            ? Tokens.color-foreground
+                            : Tokens.color-muted-foreground;
+                        font-size: Tokens.typography-body-size;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                }
+                }
+            }
+
+            Text {
+                text: root.position-label + "     B  Game menu";
+                color: Tokens.color-muted-foreground;
+                font-size: Tokens.typography-body-sm-size;
+            }
+
+            if root.status-text != "": Text {
+                text: root.status-text;
+                color: Tokens.color-destructive;
+                font-size: Tokens.typography-body-sm-size;
+            }
+        }
+    }
+
+    Sheet {
+        width: parent.width;
+        height: parent.height;
+        open: root.overlay-open && root.quick-mode;
+        side: SheetSide.right;
+        panel-extent: min(parent.width * 0.56, 360px);
+        compact: true;
+        title: "";
+        description: "";
+        dismissed => { root.dismissed(); }
+
+        VerticalLayout {
+            spacing: Tokens.spacing-md;
+
+            HorizontalLayout {
+                height: Tokens.density-button-default;
+                spacing: Tokens.spacing-md;
+                alignment: end;
+                NetworkIndicator {}
+                BatteryIndicator {}
+                ClockIndicator {}
+            }
+
+            if !root.profile-mode: VerticalLayout {
+                spacing: Tokens.spacing-lg;
+
+            quick-list := VerticalLayout {
+                spacing: Tokens.spacing-sm;
+
+                quick-profile := Rectangle {
+                    height: 58px;
+                    border-radius: Tokens.radius-md;
+                    background: root.quick-selected == 0 ? Tokens.color-accent : transparent;
+                    if root.quick-selected == 0: Rectangle {
+                        width: 4px;
+                        height: parent.height - Tokens.spacing-md;
+                        y: Tokens.spacing-sm / 2;
+                        border-radius: 2px;
+                        background: Tokens.color-ring;
+                    }
+                    VerticalLayout {
+                        x: Tokens.spacing-lg;
+                        width: parent.width - Tokens.spacing-xl;
+                        height: parent.height;
+                        alignment: center;
+                        Text { text: "Power profile"; color: Tokens.color-foreground; font-size: 16px; }
+                        Text { text: root.active-profile; color: Tokens.color-muted-foreground; font-size: 12px; }
+                    }
+                }
+
+                quick-brightness := Rectangle {
+                    height: 72px;
+                    border-radius: Tokens.radius-md;
+                    background: root.quick-selected == 1 ? Tokens.color-accent : transparent;
+                    VerticalLayout {
+                        padding: Tokens.spacing-md;
+                        spacing: Tokens.spacing-sm;
+                        HorizontalLayout {
+                            Text { text: "Brightness"; color: Tokens.color-foreground; font-size: 15px; }
+                            Text { text: root.brightness + "%"; color: Tokens.color-muted-foreground; horizontal-alignment: right; }
+                        }
+                        Rectangle {
+                            height: 6px;
+                            border-radius: 3px;
+                            background: Tokens.color-muted;
+                            Rectangle {
+                                width: parent.width * min(max(root.brightness, 0), 100) / 100;
+                                height: parent.height;
+                                border-radius: 3px;
+                                background: Tokens.color-ring;
+                            }
+                        }
+                    }
+                }
+
+                quick-volume := Rectangle {
+                    height: 72px;
+                    border-radius: Tokens.radius-md;
+                    background: root.quick-selected == 2 ? Tokens.color-accent : transparent;
+                    VerticalLayout {
+                        padding: Tokens.spacing-md;
+                        spacing: Tokens.spacing-sm;
+                        HorizontalLayout {
+                            Text { text: "Volume"; color: Tokens.color-foreground; font-size: 15px; }
+                            Text { text: root.volume + "%"; color: Tokens.color-muted-foreground; horizontal-alignment: right; }
+                        }
+                        Rectangle {
+                            height: 6px;
+                            border-radius: 3px;
+                            background: Tokens.color-muted;
+                            Rectangle {
+                                width: parent.width * min(max(root.volume, 0), 100) / 100;
+                                height: parent.height;
+                                border-radius: 3px;
+                                background: Tokens.color-ring;
+                            }
+                        }
+                    }
+                }
+            }
+
+            Rectangle { vertical-stretch: 1; }
+            Text {
+                text: root.status-text == "" ? "D-pad  Navigate / adjust     A  Select     B  Back" : root.status-text;
+                color: root.status-text == "" ? Tokens.color-muted-foreground : Tokens.color-destructive;
+                font-size: Tokens.typography-body-sm-size;
+                wrap: word-wrap;
+            }
+            }
+
+            if root.profile-mode: VerticalLayout {
+                spacing: Tokens.spacing-md;
+                Text {
+                    text: "Power profile";
+                    color: Tokens.color-foreground;
+                    font-size: Tokens.typography-title-size;
+                    font-weight: Tokens.typography-weight-semibold;
+                }
+                Text {
+                    text: "Choose a TuneD profile";
+                    color: Tokens.color-muted-foreground;
+                    font-size: Tokens.typography-body-sm-size;
+                }
+            Rectangle {
+                vertical-stretch: 1;
+                profile-list-scroll := FocusListScroll {
+                    selected-index: root.profile-selected;
+                    item-count: root.profile-names.length;
+                    item-height: 46px;
+                    viewport-height: profile-list.height;
+                    viewport-y <=> root.profile-scroll-y;
+                }
+                profile-list := ListView {
+                    width: parent.width;
+                    height: parent.height;
+                    viewport-y <=> root.profile-scroll-y;
+                for profile[index] in root.profile-names: Rectangle {
+                    height: 46px;
+                    border-radius: Tokens.radius-md;
+                    background: index == root.profile-selected ? Tokens.color-accent : transparent;
+                    Text {
+                        x: Tokens.spacing-md;
+                        width: parent.width - 2 * Tokens.spacing-md;
+                        height: parent.height;
+                        text: (profile == root.active-profile ? "●  " : "○  ") + profile;
+                        color: profile == root.active-profile ? Tokens.color-affirm : Tokens.color-foreground;
+                        font-size: Tokens.typography-body-size;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                }
+                }
+            }
+            Text {
+                text: root.status-text == "" ? "A  Apply profile     B  Back" : root.status-text;
+                color: root.status-text == "" ? Tokens.color-muted-foreground : Tokens.color-destructive;
+                font-size: Tokens.typography-body-sm-size;
+            }
+            }
+        }
+    }
+}

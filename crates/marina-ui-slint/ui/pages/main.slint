@@ -2,6 +2,7 @@ import { NavigationItem } from "../slintcn/components/navigation-menu.slint";
 import { AppShell } from "../components/app-shell.slint";
 import { BatteryState } from "../components/battery-indicator.slint";
 import { NetworkState } from "../components/network-indicator.slint";
+import { ClockState } from "../components/clock-indicator.slint";
 import { PageRouter } from "../components/page-router.slint";
 import { Toaster } from "../slintcn/components/toast.slint";
 import { ShellPage } from "route.slint";
@@ -16,6 +17,7 @@ export { ShellPage } from "route.slint";
 export { ShellState } from "../components/app-shell.slint";
 export { BatteryState } from "../components/battery-indicator.slint";
 export { NetworkState } from "../components/network-indicator.slint";
+export { ClockState } from "../components/clock-indicator.slint";
 export { ProfileAction } from "../components/profile-menu.slint";
 export { HomeState } from "../components/shelf.slint";
 export { LibraryState } from "library.slint";
@@ -50,7 +52,7 @@ export component MainWindow inherits Window {
         page: ShellState.page;
         active-tab <=> ShellState.active-tab;
         search-query <=> ShellState.search-query;
-        clock-time: ShellState.clock-time;
+
         navigate(index) => { ShellState.navigate(index); }
         focus-content => { ShellState.content-focus-request += 1; }
         profile-action(action) => { ShellState.profile-action(action); }

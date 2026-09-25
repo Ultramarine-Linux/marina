@@ -8,7 +8,7 @@
 //! A missing daemon, missing system bus, or absent battery all resolve to an
 //! unavailable status so callers can hide their indicator.
 
-use std::{collections::BTreeMap, time::Duration};
+use std::{io, process::Command, time::Duration};
 
 use futures_util::StreamExt;
 
@@ -170,6 +170,37 @@ pub async fn power_off() -> Result<(), zbus::Error> {
     manager.power_off(false).await
 }
 
+/// Returns display brightness as reported by `brightnessctl`.
+pub fn display_brightness() -> io::Result<u8> {
+    let output = Command::new("brightnessctl").arg("-m").output()?;
+    if !output.status.success() {
+        return Err(io::Error::other(
+            String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+        ));
+    }
+    String::from_utf8_lossy(&output.stdout)
+        .trim()
+        .split(',')
+        .find_map(|field| field.strip_suffix('%'))
+        .and_then(|percent| percent.parse::<u8>().ok())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidData, "invalid brightnessctl output"))
+}
+
+/// Sets display brightness through `brightnessctl`.
+pub fn set_display_brightness(percent: u8) -> io::Result<()> {
+    let value = format!("{}%", percent.clamp(1, 100));
+    let output = Command::new("brightnessctl")
+        .args(["set", &value])
+        .output()?;
+    if output.status.success() {
+        Ok(())
+    } else {
+        Err(io::Error::other(
+            String::from_utf8_lossy(&output.stderr).trim().to_owned(),
+        ))
+    }
+}
+
 /// A TuneD profile available on the system.
 ///
 /// TuneD provides the profile name as the stable identifier and a human-facing
@@ -181,14 +212,17 @@ pub struct TunedProfile {
 }
 
 #[zbus::proxy(
-    interface = "com.redhat.tuned",
+    interface = "com.redhat.tuned.control",
     default_service = "com.redhat.tuned",
     default_path = "/Tuned"
 )]
 trait Tuned {
+    #[zbus(name = "active_profile")]
     fn active_profile(&self) -> zbus::Result<String>;
-    fn profiles(&self) -> zbus::Result<BTreeMap<String, String>>;
-    fn switch_profile(&self, profile: &str) -> zbus::Result<bool>;
+    #[zbus(name = "profiles2")]
+    fn profiles2(&self) -> zbus::Result<Vec<(String, String)>>;
+    #[zbus(name = "switch_profile")]
+    fn switch_profile(&self, profile: &str) -> zbus::Result<(bool, String)>;
 }
 
 /// Returns the profile currently active in TuneD.
@@ -206,10 +240,11 @@ pub async fn active_tuned_profile() -> Result<String, zbus::Error> {
 pub async fn tuned_profiles() -> Result<Vec<TunedProfile>, zbus::Error> {
     let connection = zbus::Connection::system().await?;
     let tuned = TunedProxy::new(&connection).await?;
-    Ok(profiles_from_tuned(tuned.profiles().await?))
+    Ok(profiles_from_tuned(tuned.profiles2().await?))
 }
 
-fn profiles_from_tuned(profiles: BTreeMap<String, String>) -> Vec<TunedProfile> {
+fn profiles_from_tuned(mut profiles: Vec<(String, String)>) -> Vec<TunedProfile> {
+    profiles.sort_by(|left, right| left.0.cmp(&right.0));
     profiles
         .into_iter()
         .map(|(name, summary)| TunedProfile { name, summary })
@@ -224,7 +259,10 @@ fn profiles_from_tuned(profiles: BTreeMap<String, String>) -> Vec<TunedProfile> 
 pub async fn switch_tuned_profile(profile: &str) -> Result<bool, zbus::Error> {
     let connection = zbus::Connection::system().await?;
     let tuned = TunedProxy::new(&connection).await?;
-    tuned.switch_profile(profile).await
+    tuned
+        .switch_profile(profile)
+        .await
+        .map(|(accepted, _message)| accepted)
 }
 
 /// Continuously reports battery status: an immediate initial read, live
@@ -420,13 +458,13 @@ mod tests {
 
     #[test]
     fn tuned_profiles_are_ordered_by_name() {
-        let profiles = BTreeMap::from([
-            ("balanced".to_owned(), "Balanced".to_owned()),
+        let profiles = vec![
             (
                 "throughput-performance".to_owned(),
                 "Performance".to_owned(),
             ),
-        ]);
+            ("balanced".to_owned(), "Balanced".to_owned()),
+        ];
         let profiles = profiles_from_tuned(profiles);
 
         assert_eq!(profiles[0].name, "balanced");

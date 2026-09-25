@@ -98,10 +98,10 @@ pub struct Config {
 /// filesystem, network, or UI operations. Reloads replace the snapshot only
 /// after the edited TOML has been validated and atomically written.
 #[derive(Clone, Debug)]
-pub(crate) struct ConfigHandle(Arc<RwLock<Config>>);
+pub struct ConfigHandle(Arc<RwLock<Config>>);
 
 impl ConfigHandle {
-    pub(crate) fn snapshot(&self) -> Config {
+    pub fn snapshot(&self) -> Config {
         self.0
             .read()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
@@ -119,7 +119,7 @@ impl ConfigHandle {
 static SHARED_CONFIG: OnceLock<ConfigHandle> = OnceLock::new();
 
 /// Returns the process-wide configuration, loading it on first use.
-pub(crate) fn shared() -> ConfigHandle {
+pub fn shared() -> ConfigHandle {
     SHARED_CONFIG
         .get_or_init(|| ConfigHandle(Arc::new(RwLock::new(Config::from_env()))))
         .clone()
@@ -127,7 +127,7 @@ pub(crate) fn shared() -> ConfigHandle {
 
 /// Reloads every configuration source and publishes the new snapshot to all
 /// future readers.
-pub(crate) fn reload() {
+pub fn reload() {
     shared().replace(Config::from_env());
 }
 

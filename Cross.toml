@@ -2,5 +2,5 @@
 image = "ghcr.io/cross-rs/aarch64-unknown-linux-gnu:main"
 pre-build = [
     "dpkg --add-architecture arm64",
-    "apt-get update && apt-get install --assume-yes libfontconfig1-dev:arm64 libudev-dev:arm64",
+    "apt-get update && apt-get install --assume-yes libegl1-mesa-dev:arm64 libfontconfig1-dev:arm64 libpipewire-0.3-dev:arm64 libudev-dev:arm64 libwayland-dev:arm64 libxkbcommon-dev:arm64",
 ]

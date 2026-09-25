@@ -5,6 +5,7 @@ import { Text as Typography } from "../slintcn/components/text.slint";
 import { TextVariant, TextTone } from "../slintcn/components/text.slint";
 import { BreadcrumbItem } from "../slintcn/components/breadcrumb.slint";
 import { BatteryIndicator } from "battery-indicator.slint";
+import { ClockIndicator } from "clock-indicator.slint";
 import { NetworkIndicator } from "network-indicator.slint";
 import { ProfileChip, ProfileDropdown, ProfileAction } from "profile-menu.slint";
 import { ShellPage } from "../pages/route.slint";
@@ -19,9 +20,7 @@ export global ShellState {
     in-out property <image> profile-image;
     in-out property <int> content-focus-request: 0;
 
-    // Local time (`HH:MM`, or 12-hour when configured) for the top-right
-    // digital clock.
-    in-out property <string> clock-time: "--:--";
+
     // Navigation trail; the last item is the current location.
     in-out property <[BreadcrumbItem]> breadcrumbs;
     callback navigate(int);
@@ -42,7 +41,7 @@ export component AppShell inherits Rectangle {
     in-out property <int> active-tab: 0;
     in-out property <string> search-query;
 
-    in property <string> clock-time: "--:--";
+
     callback navigate(int);
     callback focus-content;
     callback profile-action(ProfileAction);
@@ -146,14 +145,7 @@ export component AppShell inherits Rectangle {
                             // Fills the row height like the status applets above:
                             // HorizontalLayout top-aligns children, so equal
                             // heights are what keep both on one center line.
-                            clock_label := Typography {
-                                text: root.clock-time;
-                                height: Tokens.density-button-default;
-                                variant: TextVariant.label;
-                                tone: TextTone.muted;
-                                vertical-alignment: center;
-                                font-size: 18px;
-                            }
+                            ClockIndicator {}
                         }
                     }
                 }

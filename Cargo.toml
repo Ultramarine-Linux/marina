@@ -9,7 +9,7 @@ strip = true            # Strip debug symbols
 
 resolver = "3"
 members = [
-    "crates/marina-apps", "crates/marina-core", "crates/marina-library",
+    "crates/marina-apps", "crates/marina-audio", "crates/marina-core", "crates/marina-library",
     "crates/marina-romm",
     "crates/marina-store",
     "crates/marina-scanner",
@@ -21,23 +21,26 @@ members = [
     "crates/marina-power",
     "crates/marina-systemd",
     "crates/marina-networking",
+    "crates/marina-shell",
     "crates/marina-logging",
     "crates/marina-config-derive",
     "crates/marina-ui-slint",
 ]
+exclude = ["vendor/layer-shika-adapters"]
 
 [workspace.package]
 readme = "README.md"
 rust-version = "1.95"
 version = "0.1.0"
 edition = "2024"
-license = "Apache-2.0"
+license = "GPL-3.0-only"
 
 [workspace.dependencies]
 base64 = "0.23"
 bytesize = "2.7.0"
 chrono = { version = "0.4", default-features = false, features = ["serde", "clock"] }
 dotenvy = "0.15"
+evdev = "0.13.2"
 figment = { version = "0.10", features = ["toml"] }
 dirs = "6"
 futures-util = "0.3"
@@ -47,6 +50,7 @@ reqwest = { version = "0.13", default-features = false, features = ["json", "que
 resvg = "0.47"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+serde_derive = "1"
 toml = { version = "0.8", features = ["parse"] }
 toml_edit = "0.19"
 serde_urlencoded = "0.7"
@@ -68,9 +72,16 @@ ulid = "1"
 zbus = "5"
 zbus_systemd = { version = "0.26100.0", features = ["hostname1", "locale1", "login1", "resolve1", "systemd1", "sysupdate1", "timedate1", "timesync1", "zbus-async-tokio"] }
 nmrs = "3.5.3"
+pipewire = "0.10.1"
+layer-shika = { git = "https://github.com/waydeerwm/layer-shika", rev = "0a684334056e2ffb680ff38618ae1ceddb319218" }
+spin_on = "0.1"
+swayipc = "4.0.0"
+varlink = "13.0.0"
+varlink_generator = "13.0.0"
 
 # marina
 marina-apps = { path = "crates/marina-apps" }
+marina-audio = { path = "crates/marina-audio" }
 marina-config-derive = { path = "crates/marina-config-derive" }
 marina-core = { path = "crates/marina-core" }
 marina-romm = { path = "crates/marina-romm" }
@@ -85,3 +96,7 @@ marina-portmaster = { path = "crates/marina-portmaster" }
 marina-power = { path = "crates/marina-power" }
 marina-systemd = { path = "crates/marina-systemd" }
 marina-networking = { path = "crates/marina-networking" }
+marina-shell = { path = "crates/marina-shell" }
+
+[patch."https://github.com/waydeerwm/layer-shika"]
+layer-shika-adapters = { path = "vendor/layer-shika-adapters" }

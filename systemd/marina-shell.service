@@ -2,7 +2,8 @@
 [Unit]
 Description=Marina game launcher shell
 
-After=graphical-session.target
+Wants=marina-shell-overlay.service
+After=graphical-session.target marina-shell-overlay.service
 PartOf=graphical-session.target
 
 [Service]

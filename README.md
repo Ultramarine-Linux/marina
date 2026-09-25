@@ -14,7 +14,9 @@ just cross-build
 ```
 
 This uses the `aarch64-unknown-linux-gnu` target and produces
-`target/aarch64-unknown-linux-gnu/release/marina-ui-slint`.
+`target/aarch64-unknown-linux-gnu/release/marina-ui-slint` and
+`marina-shell-overlay`. The target sysroot is provisioned with the native
+Wayland/XKB/EGL and PipeWire development packages required by the layer-shell renderer and native audio controls. Native development additionally requires the distribution's `pipewire-devel` package.
 
 Package and deploy Marina over SSH with the `DEPLOY_TARGET` and `USER_TARGET` values from `.env`:
 
