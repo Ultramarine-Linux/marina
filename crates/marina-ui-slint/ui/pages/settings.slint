@@ -310,7 +310,7 @@ export component SettingsPage inherits Rectangle {
                     entry-list-scroll := FocusListScroll {
                         selected-index: root.selected-entry;
                         item-count: root.current-panel.entries.length;
-                        item-height: 142px;
+                        item-height: 124px;
                         viewport-height: entry-list.height;
                         viewport-y <=> root.entry-list-scroll-y;
                     }
@@ -320,18 +320,18 @@ export component SettingsPage inherits Rectangle {
                         viewport-y <=> root.entry-list-scroll-y;
                         for entry[entry-index] in root.current-panel.entries: Rectangle {
                             width: parent.width;
-                            height: 142px;
+                            height: 124px;
                             background: entry-index == root.selected-entry && root.active-pane == 1
                                 ? Tokens.color-surface-3
                                 : Tokens.color-surface-2;
-                            border-radius: Tokens.radius-sm;
+                            border-radius: 0px;
                             border-width: entry-index == root.selected-entry && root.active-pane == 1 && page-focus.has-focus
                                 ? Tokens.focus-ring-width : 0px;
                             border-color: Tokens.color-ring-muted;
 
                             VerticalLayout {
-                                padding: Tokens.spacing-lg;
-                                spacing: Tokens.spacing-sm;
+                                padding: Tokens.spacing-md;
+                                spacing: Tokens.spacing-xs;
                                 Typography {
                                     text: entry.title;
                                     variant: TextVariant.body-lg;
@@ -358,6 +358,7 @@ export component SettingsPage inherits Rectangle {
                                     placeholder: entry.control == "path" ? "Enter a path" : "Not configured";
                                     password: entry.sensitive || entry.control == "secret";
                                     read-only: entry.environment-overridden;
+                                    compact: true;
                                     accepted(value) => {
                                         if (!entry.environment-overridden) {
                                             SettingsState.setting-changed(entry.path, entry.control, value, false);
