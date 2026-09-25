@@ -19,6 +19,8 @@ members = [
     "crates/marina-runtime",
     "crates/marina-portmaster",
     "crates/marina-power",
+    "crates/marina-systemd",
+    "crates/marina-networking",
     "crates/marina-logging",
     "crates/marina-config-derive",
     "crates/marina-ui-slint",
@@ -81,3 +83,5 @@ marina-input = { path = "crates/marina-input" }
 marina-runtime = { path = "crates/marina-runtime" }
 marina-portmaster = { path = "crates/marina-portmaster" }
 marina-power = { path = "crates/marina-power" }
+marina-systemd = { path = "crates/marina-systemd" }
+marina-networking = { path = "crates/marina-networking" }

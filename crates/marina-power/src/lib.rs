@@ -1,8 +1,7 @@
 //! System power state for Marina.
 //!
 //! This crate owns Marina's system-bus integrations. It exposes plain battery
-//! snapshots, TuneD profile controls, and typed systemd/NetworkManager bindings
-//! for future power and connectivity UI work.
+//! snapshots and TuneD profile controls.
 //!
 //! The composite DisplayDevice (`org.freedesktop.UPower.GetDisplayDevice` +
 //! `org.freedesktop.UPower.Device` properties) aggregates the system battery.
@@ -12,9 +11,6 @@
 use std::{collections::BTreeMap, time::Duration};
 
 use futures_util::StreamExt;
-
-pub use nmrs::NetworkManager;
-pub use zbus_systemd;
 
 /// Interval for the fallback re-read. Live `PropertiesChanged` /
 /// `DeviceAdded` / `DeviceRemoved` signals normally deliver updates instantly;
@@ -170,7 +166,7 @@ enum SessionOutcome {
 /// Requests a non-interactive system shutdown through systemd-logind.
 pub async fn power_off() -> Result<(), zbus::Error> {
     let connection = zbus::Connection::system().await?;
-    let manager = zbus_systemd::login1::ManagerProxy::new(&connection).await?;
+    let manager = marina_systemd::zbus_systemd::login1::ManagerProxy::new(&connection).await?;
     manager.power_off(false).await
 }
 

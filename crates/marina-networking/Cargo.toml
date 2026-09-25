@@ -1,0 +1,8 @@
+[package]
+name = "marina-networking"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+nmrs.workspace = true

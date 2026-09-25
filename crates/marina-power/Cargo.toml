@@ -9,5 +9,4 @@ futures-util.workspace = true
 tokio.workspace = true
 tracing.workspace = true
 zbus.workspace = true
-zbus_systemd.workspace = true
-nmrs.workspace = true
+marina-systemd.workspace = true

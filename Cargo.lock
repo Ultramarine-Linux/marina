@@ -3439,6 +3439,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "marina-networking"
+version = "0.1.0"
+dependencies = [
+ "nmrs",
+]
+
+[[package]]
 name = "marina-portmaster"
 version = "0.1.0"
 dependencies = [
@@ -3463,11 +3470,10 @@ name = "marina-power"
 version = "0.1.0"
 dependencies = [
  "futures-util",
- "nmrs",
+ "marina-systemd",
  "tokio",
  "tracing",
  "zbus",
- "zbus_systemd",
 ]
 
 [[package]]
@@ -3541,6 +3547,13 @@ dependencies = [
  "serde_json",
  "tokio",
  "tracing",
+]
+
+[[package]]
+name = "marina-systemd"
+version = "0.1.0"
+dependencies = [
+ "zbus_systemd",
 ]
 
 [[package]]
