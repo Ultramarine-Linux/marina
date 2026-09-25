@@ -21,6 +21,7 @@ import { GameDetailsView } from "../components/game-details-view.slint";
 import { LucideIcon } from "../slintcn/components/lucide-icon.slint";
 import { IconSet } from "@lucide/lucide.slint";
 import { CrumbHeader } from "../components/crumb-header.slint";
+import { FocusListScroll } from "../components/focus-list-scroll.slint";
 
 export struct StoreArtifact {
     path: string,
@@ -135,12 +136,6 @@ export component StorePage inherits Rectangle {
     function select-platform(index: int) {
         if (root.platforms.length <= 0) { return; }
         root.selected-platform-index = min(max(index, 0), root.platforms.length - 1);
-
-        if (root.selected-platform-index * 52px < -root.platform-list-scroll-y) {
-            root.platform-list-scroll-y = -root.selected-platform-index * 52px;
-        } else if ((root.selected-platform-index + 1) * 52px > -root.platform-list-scroll-y + root.height - 98px) {
-            root.platform-list-scroll-y = root.height - 98px - (root.selected-platform-index + 1) * 52px;
-        }
     }
 
     function open-platform(index: int) {        if (root.platforms.length <= 0) { return; }
@@ -158,12 +153,6 @@ export component StorePage inherits Rectangle {
         root.selected-game-index = min(max(index, 0), root.games.length - 1);
         root.details-loading = true;
         root.game-selected(root.games[root.selected-game-index].id, root.selected-game-index);
-
-        if (root.selected-game-index * 42px < -root.game-list-scroll-y) {
-            root.game-list-scroll-y = -root.selected-game-index * 42px;
-        } else if ((root.selected-game-index + 1) * 42px > -root.game-list-scroll-y + root.height - 98px) {
-            root.game-list-scroll-y = root.height - 98px - (root.selected-game-index + 1) * 42px;
-        }
     }
 
     page-focus := FocusScope {
@@ -265,8 +254,21 @@ export component StorePage inherits Rectangle {
             description: "No store backends are enabled.";
             action-label: "";
         }
-        if !root.loading && root.platforms.length > 0: ListView {
-            viewport-y <=> root.platform-list-scroll-y;
+        if !root.loading && root.platforms.length > 0: Rectangle {
+            vertical-stretch: 1;
+
+            platform-list-scroll := FocusListScroll {
+                selected-index: root.selected-platform-index;
+                item-count: root.platforms.length;
+                item-height: 52px;
+                viewport-height: platform-list.height;
+                viewport-y <=> root.platform-list-scroll-y;
+            }
+
+            platform-list := ListView {
+                width: parent.width;
+                height: parent.height;
+                viewport-y <=> root.platform-list-scroll-y;
             for platform[i] in root.platforms: Rectangle {
                 width: parent.width;
                 height: 52px;
@@ -320,6 +322,7 @@ export component StorePage inherits Rectangle {
                 }
             }
         }
+        }
     }
 
     if root.page == 1: VerticalLayout {
@@ -367,6 +370,7 @@ export component StorePage inherits Rectangle {
                 root.artifact-sheet-open = true;
             }
         }
+        focus-header => { root.focus-header(); }
     }
 
 

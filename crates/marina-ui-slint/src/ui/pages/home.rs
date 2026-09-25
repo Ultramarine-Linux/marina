@@ -161,12 +161,13 @@ pub(crate) async fn hydrate_played(
         return;
     }
     {
+        let config = state.config.snapshot();
         let mut entries = store.lock().expect("played store poisoned");
         entries.clear();
         entries.extend(
             items
                 .iter()
-                .map(|item| played_entry(item, state.config.romm_url.as_deref())),
+                .map(|item| played_entry(item, config.romm_url.as_deref())),
         );
         *played_sources.lock().expect("played sources poisoned") =
             entries.iter().map(|entry| entry.source.clone()).collect();
@@ -262,8 +263,9 @@ pub(crate) fn install(
         let request_session = entered_session.clone();
         let task_session = request_session.clone();
         let task = tokio::spawn(async move {
+            let config = state.config.snapshot();
             if let Ok((metadata, cover_sources)) =
-                shelf::load_games(&state.library, state.config.romm_url.as_deref()).await
+                shelf::load_games(&state.library, config.romm_url.as_deref()).await
             {
                 let _ = window.upgrade_in_event_loop(move |window| {
                     // The query may finish after a tab change. Do not republish

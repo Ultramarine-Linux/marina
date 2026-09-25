@@ -9,7 +9,7 @@ use slint::ComponentHandle;
 use tracing::{error, info, warn};
 
 use crate::ui::pages::home;
-use crate::{GameState, MainWindow, app, config::Config};
+use crate::{GameState, MainWindow, app};
 
 pub(crate) fn install(
     window: &MainWindow,
@@ -38,11 +38,9 @@ pub(crate) fn install(
         let played_sources = played_sources.clone();
         let played_window = played_window.clone();
         tokio::spawn(async move {
-            // Reload only the launcher's inputs at the launch boundary. The
-            // AppState config is a startup snapshot used by long-lived
-            // services, but platform/core edits must not require restarting
-            // the shell.
-            let launch_config = Config::from_env();
+            // Take the latest shared snapshot at the launch boundary so
+            // runtime changes made through Settings apply immediately.
+            let launch_config = state.config.snapshot();
             let game_launcher = GameLauncher::new()
                 .with_retroarch_config(launch_config.retroarch)
                 .with_portmaster_config(launch_config.portmaster)
@@ -63,7 +61,7 @@ pub(crate) fn install(
                             &played_sources,
                             &played_window,
                             &item,
-                            state.config.romm_url.as_deref(),
+                            state.config.snapshot().romm_url.as_deref(),
                         );
                     }
                     Err(error) => error!(%error, game_id = %id, "failed to launch game"),

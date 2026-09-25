@@ -3,6 +3,7 @@ import { ShellState } from "app-shell.slint";
 import { HomeState, Shelf, ShelfSkeleton } from "shelf.slint";
 import { LibraryState, LibraryPage } from "../pages/library.slint";
 import { StoreState, StorePage } from "../pages/store.slint";
+import { SettingsPage } from "../pages/settings.slint";
 import { GameState, GameDetailsView } from "game-details-view.slint";
 import { Tokens } from "../slintcn/theme/tokens.slint";
 
@@ -28,6 +29,7 @@ export component PageRouter inherits Rectangle {
         loading: GameState.details-loading;
         focus-request: ShellState.content-focus-request;
         action-requested => { GameState.play-requested(GameState.selected-game.id); }
+        focus-header => { root.focus-header(); }
     }
 
     if ShellState.page == ShellPage.home: Rectangle {
@@ -133,6 +135,11 @@ export component PageRouter inherits Rectangle {
         artifact-selected(index) => { StoreState.artifact-selected(index); }
         install-requested(id, selected) => { StoreState.install-requested(id, selected); }
         search-requested(query) => { StoreState.search(query); }
+        focus-header => { root.focus-header(); }
+    }
+
+    if ShellState.page == ShellPage.settings: SettingsPage {
+        focus-request: ShellState.content-focus-request;
         focus-header => { root.focus-header(); }
     }
 }

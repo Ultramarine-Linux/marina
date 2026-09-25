@@ -12,13 +12,15 @@ import { StoreState } from "store.slint";
 export { ToastQueue, ToastItem, ToastVariant } from "../slintcn/components/toast.slint";
 export { ShellPage } from "route.slint";
 export { ShellState } from "../components/app-shell.slint";
+export { ProfileAction } from "../components/profile-menu.slint";
 export { HomeState } from "../components/shelf.slint";
 export { LibraryState } from "library.slint";
 export { GameState } from "../components/game-details-view.slint";
 export { StoreState } from "store.slint";
+export { SettingsState } from "settings.slint";
 
 export component MainWindow inherits Window {
-    callback focus-navigation;
+    callback focus-content;
     property <[NavigationItem]> navigation-items: [
         { label: "Home" },
         { label: "Library" },
@@ -41,6 +43,7 @@ export component MainWindow inherits Window {
         profile-username: ShellState.profile-username;
         profile-initials: ShellState.profile-initials;
         profile-image: ShellState.profile-image;
+        page: ShellState.page;
         active-tab <=> ShellState.active-tab;
         search-query <=> ShellState.search-query;
         battery-available: ShellState.battery-available;
@@ -49,11 +52,14 @@ export component MainWindow inherits Window {
         clock-time: ShellState.clock-time;
         navigate(index) => { ShellState.navigate(index); }
         focus-content => { ShellState.content-focus-request += 1; }
+        profile-action(action) => { ShellState.profile-action(action); }
 
-        PageRouter { }
+        PageRouter {
+            focus-header => { shell.focus-profile(); }
+        }
     }
 
-    focus-navigation => { shell.focus(); }
+    focus-content => { ShellState.content-focus-request += 1; }
 
     Toaster {
         width: parent.width;

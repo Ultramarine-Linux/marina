@@ -9,47 +9,16 @@ export struct NavigationItem { label: string }
 export component NavigationMenu inherits Rectangle {
     // Items shown in the nav strip (left-to-right).
     in property <[NavigationItem]> items;
-    // Index of the highlighted item; bound two-way so consumers drive routing.
+    // Index of the active tab. `show-active` can suppress its presentation for
+    // top-level sibling routes such as Settings while preserving the return tab.
     in-out property <int> active: 0;
+    in property <bool> show-active: true;
     // Fired when an item is clicked; `active` is updated first.
     callback navigate(int);
-    // Moves keyboard focus from the persistent navigation into the active page.
-    callback focus-content;
 
     background: transparent;
-    preferred-width:  row.preferred-width;
+    preferred-width: row.preferred-width;
     preferred-height: row.preferred-height;
-    // Keyboard nav: ←/→ moves `active`, Enter / Space fires `navigate` on it.
-    forward-focus: nav-focus;
-    nav-focus := FocusScope {
-        key-pressed(event) => {
-            if (event.text == Key.LeftArrow) {
-                if (root.items.length > 0) {
-                    root.active = max(0, root.active - 1);
-                    root.navigate(root.active);
-                }
-                return accept;
-            }
-            if (event.text == Key.RightArrow) {
-                if (root.items.length > 0) {
-                    if (root.active < root.items.length - 1) {
-                        root.active += 1;
-                        root.navigate(root.active);
-                    }
-                }
-                return accept;
-            }
-            if (event.text == Key.DownArrow) {
-                root.focus-content();
-                return accept;
-            }
-            if (event.text == "\n" || event.text == " ") {
-                root.navigate(root.active);
-                return accept;
-            }
-            return reject;
-        }
-    }
 
     row := HorizontalLayout {
         spacing: Tokens.spacing-xs;
@@ -66,22 +35,20 @@ export component NavigationMenu inherits Rectangle {
                 width: parent.width;
                 height: parent.height;
                 border-radius: Tokens.radius-sm;
-                background: i == root.active
+                background: root.show-active && i == root.active
                     ? Tokens.color-surface-2
                     : (ta.has-hover ? Tokens.color-surface-1 : transparent);
-                border-width: nav-focus.has-focus && i == root.active ? Tokens.focus-ring-width : 0px;
-                border-color: Tokens.color-ring-muted;
 
                 HorizontalLayout {
                     padding-left: Tokens.spacing-md;
                     padding-right: Tokens.spacing-md;
                     lab := Text {
                         text: it.label;
-                        color: i == root.active
+                        color: root.show-active && i == root.active
                             ? Tokens.color-foreground
                             : Tokens.color-muted-foreground;
                         font-size: Tokens.typography-body-sm-size;
-                        font-weight: i == root.active
+                        font-weight: root.show-active && i == root.active
                             ? Tokens.typography-weight-semibold
                             : Tokens.typography-weight-medium;
                         vertical-alignment: center;

@@ -7,8 +7,8 @@
 //! selected platform) lives in globals for the same reason; the trail only
 //! records *where*, the globals preserve *what*.
 //!
-//! The trail is a path, not a history: tabs are roots (jumping rebase to
-//! just the tab), drills append beneath them. Open games are not pushed:
+//! The trail is a path, not a history: tabs and Settings are roots, while
+//! drills append beneath tabs. Open games are not pushed:
 //! detail views render the selected game title as the visual current crumb,
 //! and back from a detail restores the trail top beneath it.
 
@@ -25,6 +25,7 @@ const MAX_CRUMBS: usize = 25;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) enum Crumb {
     Tab(Tab),
+    Settings,
     LibraryPlatform { slug: String, name: String },
     StorePlatform { slug: String, name: String },
 }
@@ -58,6 +59,7 @@ impl Crumb {
     fn label(&self) -> String {
         match self {
             Self::Tab(tab) => tab.label().to_owned(),
+            Self::Settings => "Settings".to_owned(),
             Self::LibraryPlatform { name, .. } | Self::StorePlatform { name, .. } => name.clone(),
         }
     }
@@ -106,6 +108,20 @@ pub(crate) fn push_tab(window: &MainWindow, index: i32) {
         stack.push(Crumb::Tab(tab));
     });
     publish(window);
+}
+
+pub(crate) fn open_settings(window: &MainWindow) {
+    with_stack(|stack| {
+        stack.clear();
+        stack.push(Crumb::Settings);
+    });
+    window.global::<ShellState>().set_page(ShellPage::Settings);
+    publish(window);
+    let weak = window.as_weak();
+    let _ = weak.upgrade_in_event_loop(move |window| {
+        let shell = window.global::<ShellState>();
+        shell.set_content_focus_request(shell.get_content_focus_request() + 1);
+    });
 }
 
 /// Records drilling into a library platform. No-op during restores.
@@ -256,6 +272,14 @@ pub(crate) fn back(window: &MainWindow) {
             unload_game_details(window);
             restore(window, &target);
         }
+        ShellPage::Settings => {
+            let target = active_tab_root(&shell);
+            with_stack(|stack| {
+                stack.clear();
+                stack.push(target.clone());
+            });
+            restore(window, &target);
+        }
         ShellPage::Library if window.global::<LibraryState>().get_page() == 1 => {
             let target = pop().unwrap_or(Crumb::Tab(Tab::Library));
             restore(window, &target);
@@ -349,12 +373,15 @@ pub(crate) fn goto_tab(window: &MainWindow, index: i32) {
     if !left_home {
         home.invoke_cover_context_changed(index);
     }
-    window.invoke_focus_navigation();
+    window.invoke_focus_content();
 }
 
 fn restore(window: &MainWindow, target: &Crumb) {
     match target {
         Crumb::Tab(tab) => goto_tab(window, tab.index()),
+        Crumb::Settings => {
+            window.global::<ShellState>().set_page(ShellPage::Settings);
+        }
         Crumb::LibraryPlatform { slug, .. } => restore_library_games(window, slug),
         Crumb::StorePlatform { slug, .. } => restore_store_games(window, slug),
     }
@@ -384,7 +411,7 @@ fn restore_library_games(window: &MainWindow, slug: &str) {
     *suppress_push().lock().expect("breadcrumb lock poisoned") = true;
     library.invoke_platform_query(SharedString::from(slug));
     *suppress_push().lock().expect("breadcrumb lock poisoned") = false;
-    window.invoke_focus_navigation();
+    window.invoke_focus_content();
 }
 
 fn restore_store_games(window: &MainWindow, slug: &str) {
@@ -408,5 +435,5 @@ fn restore_store_games(window: &MainWindow, slug: &str) {
     *suppress_push().lock().expect("breadcrumb lock poisoned") = true;
     store.invoke_platform_query(SharedString::from(slug));
     *suppress_push().lock().expect("breadcrumb lock poisoned") = false;
-    window.invoke_focus_navigation();
+    window.invoke_focus_content();
 }

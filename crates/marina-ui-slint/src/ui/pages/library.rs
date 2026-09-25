@@ -317,7 +317,7 @@ pub(crate) fn install(
             let Some(state) = state else {
                 return;
             };
-            let base_url = state.config.romm_url.clone();
+            let base_url = state.config.snapshot().romm_url;
             let window = query_window.clone();
             tokio::spawn(async move {
                 let loaded = load_platform_games(

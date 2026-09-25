@@ -14,6 +14,8 @@ export component Input inherits Rectangle {
     in property <bool> password: false;
     // When true, the input grabs focus on mount.
     in property <bool> auto-focus: false;
+    // Compact controls are suited to dense settings rows.
+    in property <bool> compact: false;
     // Fired on every keystroke with the current text.
     callback edited(string);
     // Fired on Enter with the current text.
@@ -26,7 +28,9 @@ export component Input inherits Rectangle {
 
     forward-focus: field-scope;
 
-    height: Tokens.density-input;
+    private property <length> horizontal-padding: root.compact ? 8px : 12px;
+
+    height: root.compact ? 28px : Tokens.density-input;
     background: Tokens.color-surface-1;
     border-color: input.has-focus ? Tokens.color-ring : Tokens.color-border-hairline;
     border-width: 1px;
@@ -58,9 +62,9 @@ export component Input inherits Rectangle {
     }
 
     input := TextInput {
-        x: 12px;
+        x: root.horizontal-padding;
         y: 0;
-        width: parent.width - 24px;
+        width: parent.width - 2 * root.horizontal-padding;
         height: parent.height;
         text <=> root.text;
         color: Tokens.color-foreground;

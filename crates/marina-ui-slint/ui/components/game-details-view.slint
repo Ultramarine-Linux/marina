@@ -29,6 +29,7 @@ export component GameDetailsView inherits Rectangle {
     private property <length> scroll-content-height:
         max(root.height, details-content.preferred-height + Tokens.spacing-2xl);
     callback action-requested;
+    callback focus-header;
 
     background: transparent;
     forward-focus: action-button;
@@ -99,9 +100,9 @@ export component GameDetailsView inherits Rectangle {
                             text: root.action-label;
                             directional-navigation: true;
                             navigation-requested(direction) => {
-                                // Nothing focusable sits above the action;
-                                // Up/Left intentionally keep focus here.
-                                if (direction == "down") {
+                                if (direction == "up") {
+                                    root.focus-header();
+                                } else if (direction == "down") {
                                     root.scroll-focus-request += 1;
                                 }
                             }

@@ -7,7 +7,7 @@
 use chrono::Timelike;
 use slint::{ComponentHandle, SharedString};
 
-use crate::{MainWindow, ShellState, config::Config};
+use crate::{MainWindow, ShellState, config};
 
 /// Poll once per second so minute transitions appear promptly and system time
 /// changes are reflected without waiting for a minute-long interval.
@@ -50,10 +50,7 @@ pub(crate) fn initialize(window: &MainWindow) {
     slint::Timer::single_shot(std::time::Duration::ZERO, move || {
         tokio::spawn(async move {
             tracing::debug!("clock task started");
-            // Read off the event loop; the file is tiny and this runs once.
-            let twelve_hour = Config::from_env().clock_twelve_hour;
-            tracing::debug!(twelve_hour, "clock config loaded");
-            let mut last = current_time_string(twelve_hour);
+            let mut last = current_time_string(config::shared().snapshot().clock_twelve_hour);
             apply_time(&weak, last.clone());
             let mut interval = tokio::time::interval(TICK_INTERVAL);
             loop {
@@ -62,7 +59,7 @@ pub(crate) fn initialize(window: &MainWindow) {
                 // thread. This task runs on a Tokio worker, so dispatch the
                 // update directly and let `upgrade_in_event_loop()` skip it
                 // when the window no longer exists.
-                let now = current_time_string(twelve_hour);
+                let now = current_time_string(config::shared().snapshot().clock_twelve_hour);
                 if now != last {
                     last = now.clone();
                     apply_time(&weak, now);

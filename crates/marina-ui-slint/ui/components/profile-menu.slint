@@ -1,0 +1,199 @@
+import { Tokens } from "../slintcn/theme/tokens.slint";
+import { Avatar } from "../slintcn/components/avatar.slint";
+import { Text as Typography } from "../slintcn/components/text.slint";
+import { TextVariant, TextTone } from "../slintcn/components/text.slint";
+
+export enum ProfileAction { settings, exit, shutdown }
+
+export struct ProfileMenuItem {
+    label: string,
+    action: ProfileAction,
+    destructive: bool,
+}
+
+export component ProfileChip inherits Rectangle {
+    in property <string> profile-name: "User";
+    in property <string> profile-username: "user";
+    in property <string> profile-initials: "U";
+    in property <image> profile-image;
+    callback activated;
+    callback focus-content;
+
+    forward-focus: chip-scope;
+    preferred-width: row.preferred-width;
+    preferred-height: Tokens.density-button-default;
+    border-radius: Tokens.radius-md;
+    border-width: chip-scope.has-focus ? Tokens.focus-ring-width : 0px;
+    border-color: Tokens.color-ring-muted;
+    background: touch.has-hover ? Tokens.color-surface-1 : transparent;
+
+    public function focus-chip() {
+        chip-scope.focus();
+    }
+
+    row := HorizontalLayout {
+        padding-left: Tokens.spacing-sm;
+        padding-right: Tokens.spacing-sm;
+        spacing: Tokens.spacing-sm;
+        alignment: start;
+
+        Avatar {
+            source: root.profile-image;
+            fallback: root.profile-initials;
+            size: Tokens.density-button-default;
+        }
+
+        VerticalLayout {
+            alignment: center;
+
+            Typography {
+                text: root.profile-name;
+                variant: TextVariant.body;
+                tone: TextTone.default;
+                overflow: elide;
+            }
+
+            Typography {
+                text: root.profile-username;
+                variant: TextVariant.caption;
+                tone: TextTone.muted;
+                overflow: elide;
+            }
+        }
+    }
+
+    touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => {
+            chip-scope.focus();
+            root.activated();
+        }
+    }
+
+    chip-scope := FocusScope {
+        width: 0px;
+        height: 0px;
+        key-pressed(event) => {
+            if (event.text == Key.RightArrow) {
+                return accept;
+            }
+            if (event.text == Key.DownArrow) {
+                root.focus-content();
+                return accept;
+            }
+            if (event.text == Key.LeftArrow) {
+                return accept;
+            }
+            if (event.text == "\n" || event.text == " ") {
+                root.activated();
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    animate background {
+        duration: Tokens.motion-fast;
+        easing: Tokens.motion-easing-standard;
+    }
+}
+
+export component ProfileDropdown inherits Rectangle {
+    in property <length> anchor-x;
+    in property <length> anchor-y;
+    in property <bool> open: false;
+    callback action(ProfileAction);
+    callback dismissed;
+
+    property <int> selected: 0;
+    property <[ProfileMenuItem]> items: [
+        { label: "Settings", action: ProfileAction.settings, destructive: false },
+        { label: "Exit", action: ProfileAction.exit, destructive: false },
+        { label: "Shutdown", action: ProfileAction.shutdown, destructive: true },
+    ];
+
+    background: transparent;
+    forward-focus: menu-scope;
+
+    if root.open: TouchArea {
+        clicked => { root.dismissed(); }
+    }
+
+    panel := Rectangle {
+        visible: root.open;
+        x: root.anchor-x - root.absolute-position.x;
+        y: root.anchor-y - root.absolute-position.y;
+        width: max(column.preferred-width, 140px);
+        height: column.preferred-height;
+        background: Tokens.color-card;
+        border-radius: Tokens.radius-md;
+        border-width: 1px;
+        border-color: Tokens.color-border-hairline;
+        drop-shadow-blur: Tokens.shadow-e3-blur;
+        drop-shadow-offset-y: Tokens.shadow-e3-offset-y;
+        drop-shadow-color: Tokens.shadow-e3-color;
+
+        column := VerticalLayout {
+            padding: Tokens.spacing-xs;
+            spacing: 2px;
+
+            for item[index] in root.items: Rectangle {
+                height: Tokens.density-button-sm;
+                border-radius: Tokens.radius-sm;
+                background: item-touch.has-hover || index == root.selected
+                    ? Tokens.color-surface-2
+                    : transparent;
+
+                HorizontalLayout {
+                    padding-left: Tokens.spacing-md;
+                    padding-right: Tokens.spacing-md;
+
+                    Text {
+                        text: item.label;
+                        color: item.destructive
+                            ? Tokens.color-destructive
+                            : Tokens.color-foreground;
+                        font-size: Tokens.typography-body-sm-size;
+                        font-weight: Tokens.typography-weight-medium;
+                        vertical-alignment: center;
+                    }
+                }
+
+                item-touch := TouchArea {
+                    mouse-cursor: pointer;
+                    pointer-event(event) => {
+                        if (event.kind == PointerEventKind.move) {
+                            root.selected = index;
+                        }
+                    }
+                    clicked => { root.action(item.action); }
+                }
+            }
+        }
+    }
+
+    menu-scope := FocusScope {
+        width: 0px;
+        height: 0px;
+        enabled: root.open;
+        key-pressed(event) => {
+            if (event.text == Key.UpArrow) {
+                root.selected = max(0, root.selected - 1);
+                return accept;
+            }
+            if (event.text == Key.DownArrow) {
+                root.selected = min(root.items.length - 1, root.selected + 1);
+                return accept;
+            }
+            if (event.text == "\n" || event.text == " ") {
+                root.action(root.items[root.selected].action);
+                return accept;
+            }
+            if (event.text == "\u{1b}") {
+                root.dismissed();
+                return accept;
+            }
+            return accept;
+        }
+    }
+}

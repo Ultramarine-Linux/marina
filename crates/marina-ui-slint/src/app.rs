@@ -3,7 +3,7 @@
 use std::{
     collections::{HashMap, HashSet},
     path::Path,
-    sync::Arc,
+    sync::{Arc, Mutex},
 };
 
 use marina_library::{
@@ -17,29 +17,33 @@ use marina_scanner::scan;
 use marina_store::{StoreBackend, StoreCaches};
 use marina_store_sqlite::SqliteLibrary;
 
-use crate::{config::Config, storage};
+use crate::{
+    config::{self, ConfigHandle},
+    storage,
+};
 
 /// Long-lived services and configuration shared by the application.
 #[derive(Debug)]
 pub(crate) struct AppState {
-    pub(crate) config: Config,
+    pub(crate) config: ConfigHandle,
     pub(crate) library: SqliteLibrary,
     pub(crate) store_caches: StoreCaches,
     /// Pluggable store backends by stable id ("romm", …). Access through
     /// the [`StoreBackend`] trait; downcast via `as_any` only for
     /// backend-specific operations the trait doesn't cover.
-    pub(crate) stores: HashMap<String, Arc<dyn StoreBackend>>,
+    pub(crate) stores: Mutex<HashMap<String, Arc<dyn StoreBackend>>>,
 }
 
 /// A shareable handle to the application's runtime state.
 pub(crate) type AppStateHandle = Arc<AppState>;
 
 pub(crate) async fn reconcile_local_games(state: &AppStateHandle) {
-    if !state.config.scan_on_startup {
+    let config = state.config.snapshot();
+    if !config.scan_on_startup {
         return;
     }
 
-    let Some(root) = state.config.library_root.clone() else {
+    let Some(root) = config.library_root else {
         return;
     };
 
@@ -143,25 +147,7 @@ pub(crate) async fn reconcile_local_games(state: &AppStateHandle) {
 }
 
 impl AppState {
-    /// Loads configuration and initializes the services required by the UI.
-    pub(crate) async fn initialize()
-    -> Result<AppStateHandle, Box<dyn std::error::Error + Send + Sync>> {
-        let started = std::time::Instant::now();
-        tracing::info!("initializing application state");
-        let config = Config::from_env();
-
-        tracing::info!(
-            uri = %config.storage_uri,
-            "connecting to library store"
-        );
-        if let Some(root) = &config.library_root {
-            tracing::info!(path = %root.display(), "configured local library root");
-        } else {
-            tracing::warn!("MARINA_LIBRARY_ROOT not set; local installation discovery is disabled");
-        }
-        tracing::info!("opening library store");
-        let library = storage::connect(&config).await?;
-        let store_caches = storage::connect_store_caches(&config);
+    fn configured_stores(config: &crate::config::Config) -> HashMap<String, Arc<dyn StoreBackend>> {
         let mut stores: HashMap<String, Arc<dyn StoreBackend>> = HashMap::new();
         if let Some(base_url) = config.romm_url.clone() {
             let backend = RommStore::new(base_url, config.romm_token.as_deref());
@@ -171,6 +157,52 @@ impl AppState {
             let backend = PortMasterStore::new(portmaster);
             stores.insert(backend.id().to_owned(), Arc::new(backend));
         }
+        stores
+    }
+
+    pub(crate) fn store_backends(&self) -> Vec<Arc<dyn StoreBackend>> {
+        self.stores
+            .lock()
+            .expect("store registry poisoned")
+            .values()
+            .cloned()
+            .collect()
+    }
+
+    pub(crate) fn store(&self, id: &str) -> Option<Arc<dyn StoreBackend>> {
+        self.stores
+            .lock()
+            .expect("store registry poisoned")
+            .get(id)
+            .cloned()
+    }
+
+    pub(crate) fn reconfigure_stores(&self) {
+        let stores = Self::configured_stores(&self.config.snapshot());
+        *self.stores.lock().expect("store registry poisoned") = stores;
+    }
+
+    /// Loads configuration and initializes the services required by the UI.
+    pub(crate) async fn initialize()
+    -> Result<AppStateHandle, Box<dyn std::error::Error + Send + Sync>> {
+        let started = std::time::Instant::now();
+        tracing::info!("initializing application state");
+        let config = config::shared();
+        let startup_config = config.snapshot();
+
+        tracing::info!(
+            uri = %startup_config.storage_uri,
+            "connecting to library store"
+        );
+        if let Some(root) = &startup_config.library_root {
+            tracing::info!(path = %root.display(), "configured local library root");
+        } else {
+            tracing::warn!("MARINA_LIBRARY_ROOT not set; local installation discovery is disabled");
+        }
+        tracing::info!("opening library store");
+        let library = storage::connect(&startup_config).await?;
+        let store_caches = storage::connect_store_caches(&startup_config);
+        let stores = Self::configured_stores(&startup_config);
         tracing::info!(
             elapsed_ms = started.elapsed().as_millis() as u64,
             "application state ready"
@@ -180,7 +212,7 @@ impl AppState {
             config,
             library,
             store_caches,
-            stores,
+            stores: Mutex::new(stores),
         }))
     }
 }

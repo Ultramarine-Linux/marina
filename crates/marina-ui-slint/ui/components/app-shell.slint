@@ -1,11 +1,11 @@
 import { Tokens } from "../slintcn/theme/tokens.slint";
 
-import { Avatar } from "../slintcn/components/avatar.slint";
 import { NavigationMenu, NavigationItem } from "../slintcn/components/navigation-menu.slint";
 import { Text as Typography } from "../slintcn/components/text.slint";
 import { TextVariant, TextTone } from "../slintcn/components/text.slint";
 import { BreadcrumbItem } from "../slintcn/components/breadcrumb.slint";
 import { BatteryIndicator } from "battery-indicator.slint";
+import { ProfileChip, ProfileDropdown, ProfileAction } from "profile-menu.slint";
 import { ShellPage } from "../pages/route.slint";
 
 export global ShellState {
@@ -31,6 +31,7 @@ export global ShellState {
     callback navigate(int);
     callback back-requested;
     callback crumb-navigate(int);
+    callback profile-action(ProfileAction);
 }
 
 // Shared application chrome. Screens are supplied as children and are kept
@@ -41,6 +42,7 @@ export component AppShell inherits Rectangle {
     in property <string> profile-username: "user";
     in property <string> profile-initials: "U";
     in property <image> profile-image;
+    in property <ShellPage> page: ShellPage.home;
     in-out property <int> active-tab: 0;
     in-out property <string> search-query;
     in property <bool> battery-available: false;
@@ -49,9 +51,18 @@ export component AppShell inherits Rectangle {
     in property <string> clock-time: "--:--";
     callback navigate(int);
     callback focus-content;
+    callback profile-action(ProfileAction);
+
+    // True while the profile dropdown is open; the overlay below mounts last
+    // so the header's clipped regions never cut it off.
+    property <bool> profile-menu-open: false;
 
     background: Tokens.color-background.with-alpha(0.92);
-    forward-focus: navigation;
+    forward-focus: profile-chip;
+
+    public function focus-profile() {
+        profile-chip.focus-chip();
+    }
 
     VerticalLayout {
         // Only persistent shell chrome owns the outer padding. Routed pages
@@ -77,33 +88,20 @@ export component AppShell inherits Rectangle {
                         height: parent.height;
                         clip: true;
 
-                        HorizontalLayout {
-                            spacing: Tokens.spacing-sm;
-                            alignment: start;
-
-                            Avatar {
-                                source: root.profile-image;
-                                fallback: root.profile-initials;
-                                size: Tokens.density-button-default;
+                        profile-chip := ProfileChip {
+                            x: 0px;
+                            y: 0px;
+                            width: min(self.preferred-width, parent.width);
+                            height: parent.height;
+                            profile-name: root.profile-name;
+                            profile-username: root.profile-username;
+                            profile-initials: root.profile-initials;
+                            profile-image: root.profile-image;
+                            activated => {
+                                root.profile-menu-open = true;
+                                profile-dropdown.focus();
                             }
-
-                            VerticalLayout {
-                                alignment: center;
-
-                                Typography {
-                                    text: root.profile-name;
-                                    variant: TextVariant.body;
-                                    tone: TextTone.default;
-                                    overflow: elide;
-                                }
-
-                                Typography {
-                                    text: root.profile-username;
-                                    variant: TextVariant.caption;
-                                    tone: TextTone.muted;
-                                    overflow: elide;
-                                }
-                            }
+                            focus-content => { root.focus-content(); }
                         }
                     }
 
@@ -120,11 +118,11 @@ export component AppShell inherits Rectangle {
                             y: (parent.height - self.height) / 2;
                             items: root.navigation-items;
                             active <=> root.active-tab;
+                            show-active: root.page != ShellPage.settings;
                             navigate(index) => {
                                 root.active-tab = index;
                                 root.navigate(index);
                             }
-                            focus-content => { root.focus-content(); }
                         }
                     }
 
@@ -175,5 +173,23 @@ export component AppShell inherits Rectangle {
         }
 
 
+    }
+    profile-dropdown := ProfileDropdown {
+        x: 0px;
+        y: 0px;
+        width: root.width;
+        height: root.height;
+        open: root.profile-menu-open;
+        anchor-x: profile-chip.absolute-position.x;
+        anchor-y: profile-chip.absolute-position.y + profile-chip.height + Tokens.spacing-xs;
+        action(a) => {
+            root.profile-menu-open = false;
+            profile-chip.focus-chip();
+            root.profile-action(a);
+        }
+        dismissed => {
+            root.profile-menu-open = false;
+            profile-chip.focus-chip();
+        }
     }
 }
