@@ -8,7 +8,6 @@ license.workspace = true
 varlink_generator.workspace = true
 
 [dependencies]
-evdev.workspace = true
 layer-shika.workspace = true
 serde.workspace = true
 serde_derive.workspace = true

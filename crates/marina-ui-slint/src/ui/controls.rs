@@ -161,7 +161,10 @@ pub(crate) fn dispatch_controller_action(window: &MainWindow, event: InputEvent)
         | InputAction::ScrollDown
         | InputAction::ScrollLeft
         | InputAction::ScrollRight => return,
-        InputAction::PreviousTab | InputAction::NextTab | InputAction::Menu => return,
+        InputAction::PreviousTab
+        | InputAction::NextTab
+        | InputAction::Context
+        | InputAction::Menu => return,
     };
     window
         .window()

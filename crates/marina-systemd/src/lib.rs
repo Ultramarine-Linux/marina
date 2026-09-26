@@ -39,6 +39,26 @@ pub async fn start_user_unit(unit_name: &str) -> Result<OwnedObjectPath, Error> 
         .await?)
 }
 
+/// Return whether an installed or transient user unit is still active.
+///
+/// `ListUnitsByNames` only includes loaded units; a collected transient unit is
+/// absent and is therefore considered inactive.
+pub async fn user_unit_is_active(unit_name: &str) -> Result<bool, Error> {
+    let connection = zbus::Connection::session().await?;
+    let manager = ManagerProxy::new(&connection).await?;
+    let units = manager
+        .list_units_by_names(vec![unit_name.to_owned()])
+        .await?;
+    Ok(units.into_iter().any(|unit| unit_state_is_active(&unit.3)))
+}
+
+fn unit_state_is_active(state: &str) -> bool {
+    matches!(
+        state,
+        "active" | "activating" | "reloading" | "deactivating"
+    )
+}
+
 /// Create and start a transient service through the per-user systemd manager.
 pub async fn start_transient_user_service(
     service: &TransientService,
@@ -104,6 +124,16 @@ mod tests {
             .position(|(property_name, _)| property_name == name)
             .expect("property");
         properties.remove(index).1
+    }
+
+    #[test]
+    fn active_unit_states_include_transitions_until_a_service_is_gone() {
+        for state in ["active", "activating", "reloading", "deactivating"] {
+            assert!(unit_state_is_active(state));
+        }
+        for state in ["inactive", "failed", "unknown"] {
+            assert!(!unit_state_is_active(state));
+        }
     }
 
     #[test]

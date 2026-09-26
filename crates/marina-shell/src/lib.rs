@@ -5,11 +5,9 @@
 //! through a backend such as Sway IPC rather than pretending a standard Wayland
 //! protocol can focus arbitrary clients.
 
-mod input;
 mod ipc;
 mod sway;
 
-pub use input::spawn_overlay_shortcut_listener;
 pub use ipc::{OverlayClient, OverlayIpcError, OverlayRequest, spawn_overlay_server};
 pub use sway::SwayWindowManager;
 

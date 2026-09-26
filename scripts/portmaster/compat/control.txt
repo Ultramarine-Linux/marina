@@ -26,7 +26,7 @@ get_controls() {
     export SDL_GAMECONTROLLERCONFIG_FILE="$controlfolder/gamecontrollerdb.txt"
     # SDL_GAMECONTROLLERCONFIG is inherited by every child process, so never
     # export the complete database (it is hundreds of KiB). Keep one mapping.
-    controller_guid="030000005e0400008e02000014010000"
+    controller_guid="030000005e0400008e02000001000000"
     sdl_controllerconfig="$(grep -i "^${controller_guid}," "$SDL_GAMECONTROLLERCONFIG_FILE" 2>/dev/null | head -n 1)"
     printf '%s\n' "$sdl_controllerconfig" > /tmp/gamecontrollerdb.txt
     export sdl_controllerconfig

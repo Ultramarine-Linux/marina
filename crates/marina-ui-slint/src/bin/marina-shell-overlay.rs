@@ -17,13 +17,19 @@ use layer_shika::{
     slint::{Image, ModelRc, SharedString, VecModel},
     slint_interpreter::{ComponentInstance, Struct, Value},
 };
-use marina_input::{InputAction, InputConfig, InputEvent, InputEventKind, InputLoop};
+use marina_input::InputEvent;
 use marina_shell::{
-    ManagedWindow, OverlayRequest, SwayWindowManager, WindowManager, build_overlay_shell,
-    layer_shell::Surface, spawn_overlay_server, spawn_overlay_shortcut_listener,
-    validate_overlay_ui,
+    OverlayRequest, SwayWindowManager, build_overlay_shell, layer_shell::Surface,
+    spawn_overlay_server, validate_overlay_ui,
 };
-use tracing::{error, info, warn};
+use tracing::{debug, error, info, warn};
+
+#[path = "marina-shell-overlay/controller.rs"]
+mod controller;
+#[path = "marina-shell-overlay/input.rs"]
+mod input;
+
+use controller::{ControllerState, OverlayMessage, OverlayMode, Presentation};
 
 const INSTALLED_UI_ROOT: &str = "/usr/share/marina/ui";
 const SURFACE_NAME: &str = "WindowOverlay";
@@ -33,394 +39,6 @@ const RESUME_EXIT_CODE: i32 = 75;
 
 thread_local! {
     static SWITCH_ICON_CACHE: RefCell<Vec<(String, Image)>> = RefCell::new(Vec::new());
-}
-
-#[derive(Clone, Debug)]
-struct Presentation {
-    window_mode: bool,
-    active_title: String,
-    menu_selected: i32,
-    title: String,
-    app_id: String,
-    location: String,
-    position: String,
-    window_titles: Vec<String>,
-    selected_index: i32,
-    status: String,
-    quick_mode: bool,
-    profile_mode: bool,
-    quick_selected: i32,
-    brightness: i32,
-    volume: i32,
-    profile_names: Vec<String>,
-    active_profile: String,
-    active_profile_index: i32,
-    profile_selected: i32,
-    clock_text: String,
-    battery_available: bool,
-    battery_percentage: f64,
-    battery_charging: bool,
-    network_available: bool,
-    network_connected: bool,
-    network_signal: i32,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum OverlayMode {
-    GameMenu,
-    WindowList,
-    QuickSettings,
-    ProfileList,
-}
-
-const MENU_ITEM_COUNT: usize = 3;
-const QUICK_ITEM_COUNT: usize = 3;
-
-enum OverlayMessage {
-    Show(Presentation),
-    Hide,
-    Presentation(Presentation),
-    Battery(marina_power::BatteryStatus),
-    Network(marina_networking::NetworkStatus),
-    Clock(String),
-    SwitchProfile(String),
-    SetBrightness(u8),
-    SetVolume(u8),
-}
-
-struct ControllerState {
-    manager: SwayWindowManager,
-    windows: Vec<ManagedWindow>,
-    active: Option<usize>,
-    selected: usize,
-    menu_selected: usize,
-    mode: OverlayMode,
-    profiles: Vec<marina_power::TunedProfile>,
-    active_profile: String,
-    profile_selected: usize,
-    profile_switch_pending: bool,
-    quick_selected: usize,
-    brightness: u8,
-    volume: u8,
-    clock_text: String,
-    battery: marina_power::BatteryStatus,
-    network: marina_networking::NetworkStatus,
-}
-
-impl ControllerState {
-    fn new(manager: SwayWindowManager) -> Self {
-        Self {
-            manager,
-            windows: Vec::new(),
-            active: None,
-            selected: 0,
-            menu_selected: 0,
-            mode: OverlayMode::GameMenu,
-            profiles: Vec::new(),
-            active_profile: String::new(),
-            profile_selected: 0,
-            profile_switch_pending: false,
-            quick_selected: 0,
-            brightness: 0,
-            volume: 0,
-            clock_text: String::new(),
-            battery: marina_power::BatteryStatus {
-                available: false,
-                percentage: 0.0,
-                charging: false,
-            },
-            network: marina_networking::NetworkStatus::unavailable(),
-        }
-    }
-
-    fn refresh(&mut self) -> Result<Presentation, marina_shell::WindowManagerError> {
-        self.windows = self.manager.windows()?;
-        self.active = self.windows.iter().position(|window| window.focused);
-        self.selected = self.active.unwrap_or(0);
-        self.menu_selected = 0;
-        self.mode = OverlayMode::GameMenu;
-        Ok(self.presentation(""))
-    }
-
-    fn begin_quick_settings(&mut self) -> Presentation {
-        self.mode = OverlayMode::QuickSettings;
-        self.quick_selected = 0;
-        self.presentation("Loading system controls…")
-    }
-
-    fn apply_quick_snapshot(
-        &mut self,
-        profiles: Result<Vec<marina_power::TunedProfile>, String>,
-        active: Result<String, String>,
-        brightness: u8,
-        volume: u8,
-        battery: marina_power::BatteryStatus,
-        network: marina_networking::NetworkStatus,
-    ) -> Presentation {
-        let status = match (profiles, active) {
-            (Ok(profiles), Ok(active)) => {
-                self.profiles = profiles;
-                self.active_profile = active;
-                self.profile_selected = self
-                    .profiles
-                    .iter()
-                    .position(|profile| profile.name == self.active_profile)
-                    .unwrap_or(0);
-                String::new()
-            }
-            (Err(error), _) | (_, Err(error)) => format!("TuneD unavailable: {error}"),
-        };
-        self.brightness = brightness;
-        self.volume = volume;
-        self.clock_text = marina_ui_slint::clock_format::current_time_string(
-            marina_ui_slint::config::shared()
-                .map(|config| config.snapshot().clock_twelve_hour)
-                .unwrap_or(false),
-        );
-        self.battery = battery;
-        self.network = network;
-        info!(
-            profile = %self.active_profile,
-            brightness = self.brightness,
-            volume = self.volume,
-            battery = self.battery.percentage,
-            network_connected = self.network.connected,
-            "quick settings loaded"
-        );
-        self.presentation(status)
-    }
-
-    fn presentation(&self, status: impl Into<String>) -> Presentation {
-        let selected = self.windows.get(self.selected);
-        let active_title = self
-            .active
-            .and_then(|index| self.windows.get(index))
-            .map(|window| window.title.clone())
-            .unwrap_or_else(|| "No active game".to_owned());
-        let location = selected
-            .map(|window| match (&window.workspace, &window.output) {
-                (Some(workspace), Some(output)) => format!("Workspace {workspace} · {output}"),
-                (Some(workspace), None) => format!("Workspace {workspace}"),
-                (None, Some(output)) => output.clone(),
-                (None, None) => String::new(),
-            })
-            .unwrap_or_default();
-        Presentation {
-            window_mode: self.mode == OverlayMode::WindowList,
-            active_title,
-            menu_selected: self.menu_selected as i32,
-            title: selected
-                .map(|window| window.title.clone())
-                .unwrap_or_else(|| "No application windows".to_owned()),
-            app_id: selected
-                .and_then(|window| window.app_id.clone())
-                .unwrap_or_default(),
-            location,
-            position: if self.windows.is_empty() {
-                "0 of 0".to_owned()
-            } else {
-                format!("{} of {}", self.selected + 1, self.windows.len())
-            },
-            window_titles: self
-                .windows
-                .iter()
-                .map(|candidate| candidate.title.clone())
-                .collect(),
-            selected_index: self.selected as i32,
-            status: status.into(),
-            quick_mode: matches!(
-                self.mode,
-                OverlayMode::QuickSettings | OverlayMode::ProfileList
-            ),
-            profile_mode: self.mode == OverlayMode::ProfileList,
-            quick_selected: self.quick_selected as i32,
-            brightness: i32::from(self.brightness),
-            volume: i32::from(self.volume),
-            profile_names: self
-                .profiles
-                .iter()
-                .map(|profile| profile.name.clone())
-                .collect(),
-            active_profile: self.active_profile.clone(),
-            active_profile_index: self
-                .profiles
-                .iter()
-                .position(|profile| profile.name == self.active_profile)
-                .map(|index| index as i32)
-                .unwrap_or(-1),
-            profile_selected: self.profile_selected as i32,
-            clock_text: self.clock_text.clone(),
-            battery_available: self.battery.available,
-            battery_percentage: self.battery.percentage,
-            battery_charging: self.battery.charging,
-            network_available: self.network.available,
-            network_connected: self.network.connected,
-            network_signal: self
-                .network
-                .wifi_signal_strength
-                .map(i32::from)
-                .unwrap_or(-1),
-        }
-    }
-
-    fn handle(&mut self, event: InputEvent) -> Option<OverlayMessage> {
-        if !matches!(
-            event.kind,
-            InputEventKind::Pressed | InputEventKind::Repeated
-        ) {
-            return None;
-        }
-        match self.mode {
-            OverlayMode::GameMenu => self.handle_game_menu(event.action),
-            OverlayMode::WindowList => self.handle_window_list(event.action),
-            OverlayMode::QuickSettings => self.handle_quick_settings(event.action),
-            OverlayMode::ProfileList => self.handle_profile_list(event.action),
-        }
-    }
-
-    fn handle_game_menu(&mut self, action: InputAction) -> Option<OverlayMessage> {
-        match action {
-            InputAction::Up | InputAction::Left | InputAction::PreviousTab => {
-                self.menu_selected = self
-                    .menu_selected
-                    .checked_sub(1)
-                    .unwrap_or(MENU_ITEM_COUNT - 1);
-                Some(OverlayMessage::Presentation(self.presentation("")))
-            }
-            InputAction::Down | InputAction::Right | InputAction::NextTab => {
-                self.menu_selected = (self.menu_selected + 1) % MENU_ITEM_COUNT;
-                Some(OverlayMessage::Presentation(self.presentation("")))
-            }
-            InputAction::Accept => match self.menu_selected {
-                0 => Some(OverlayMessage::Hide),
-                1 => {
-                    self.mode = OverlayMode::WindowList;
-                    Some(OverlayMessage::Presentation(self.presentation("")))
-                }
-                _ => {
-                    let Some(window) = self.active.and_then(|index| self.windows.get(index)) else {
-                        return Some(OverlayMessage::Presentation(
-                            self.presentation("No active game window to exit"),
-                        ));
-                    };
-                    Some(match self.manager.close(window.id) {
-                        Ok(()) => OverlayMessage::Hide,
-                        Err(error) => {
-                            OverlayMessage::Presentation(self.presentation(error.to_string()))
-                        }
-                    })
-                }
-            },
-            InputAction::Back | InputAction::Menu => Some(OverlayMessage::Hide),
-            _ => None,
-        }
-    }
-
-    fn handle_quick_settings(&mut self, action: InputAction) -> Option<OverlayMessage> {
-        match action {
-            InputAction::Up | InputAction::PreviousTab => {
-                self.quick_selected = self
-                    .quick_selected
-                    .checked_sub(1)
-                    .unwrap_or(QUICK_ITEM_COUNT - 1);
-                Some(OverlayMessage::Presentation(self.presentation("")))
-            }
-            InputAction::Down | InputAction::NextTab => {
-                self.quick_selected = (self.quick_selected + 1) % QUICK_ITEM_COUNT;
-                Some(OverlayMessage::Presentation(self.presentation("")))
-            }
-            InputAction::Left | InputAction::Right if self.quick_selected == 1 => {
-                let delta = if action == InputAction::Right { 5 } else { -5 };
-                self.brightness = (i16::from(self.brightness) + delta).clamp(1, 100) as u8;
-                Some(OverlayMessage::SetBrightness(self.brightness))
-            }
-            InputAction::Left | InputAction::Right if self.quick_selected == 2 => {
-                let delta = if action == InputAction::Right { 5 } else { -5 };
-                self.volume = (i16::from(self.volume) + delta).clamp(0, 100) as u8;
-                Some(OverlayMessage::SetVolume(self.volume))
-            }
-            InputAction::Accept if self.quick_selected == 0 => {
-                self.mode = OverlayMode::ProfileList;
-                Some(OverlayMessage::Presentation(self.presentation("")))
-            }
-            InputAction::Back | InputAction::Menu => Some(OverlayMessage::Hide),
-            _ => None,
-        }
-    }
-
-    fn handle_profile_list(&mut self, action: InputAction) -> Option<OverlayMessage> {
-        match action {
-            InputAction::Up | InputAction::Left | InputAction::PreviousTab
-                if !self.profiles.is_empty() =>
-            {
-                self.profile_selected = self
-                    .profile_selected
-                    .checked_sub(1)
-                    .unwrap_or(self.profiles.len() - 1);
-                Some(OverlayMessage::Presentation(self.presentation("")))
-            }
-            InputAction::Down | InputAction::Right | InputAction::NextTab
-                if !self.profiles.is_empty() =>
-            {
-                self.profile_selected = (self.profile_selected + 1) % self.profiles.len();
-                Some(OverlayMessage::Presentation(self.presentation("")))
-            }
-            InputAction::Accept if !self.profile_switch_pending => {
-                let Some(profile) = self.profiles.get(self.profile_selected) else {
-                    return Some(OverlayMessage::Presentation(
-                        self.presentation("No TuneD profiles available"),
-                    ));
-                };
-                self.profile_switch_pending = true;
-                Some(OverlayMessage::SwitchProfile(profile.name.clone()))
-            }
-            InputAction::Back if !self.profile_switch_pending => {
-                self.mode = OverlayMode::QuickSettings;
-                Some(OverlayMessage::Presentation(self.presentation("")))
-            }
-            InputAction::Menu => Some(OverlayMessage::Hide),
-            _ => None,
-        }
-    }
-
-    fn handle_window_list(&mut self, action: InputAction) -> Option<OverlayMessage> {
-        match action {
-            InputAction::Left | InputAction::Up | InputAction::PreviousTab
-                if !self.windows.is_empty() =>
-            {
-                self.selected = self
-                    .selected
-                    .checked_sub(1)
-                    .unwrap_or(self.windows.len() - 1);
-                Some(OverlayMessage::Presentation(self.presentation("")))
-            }
-            InputAction::Right | InputAction::Down | InputAction::NextTab
-                if !self.windows.is_empty() =>
-            {
-                self.selected = (self.selected + 1) % self.windows.len();
-                Some(OverlayMessage::Presentation(self.presentation("")))
-            }
-            InputAction::Accept => {
-                let Some(window) = self.windows.get(self.selected) else {
-                    return Some(OverlayMessage::Presentation(
-                        self.presentation("No window to focus"),
-                    ));
-                };
-                Some(match self.manager.focus(window.id) {
-                    Ok(()) => OverlayMessage::Hide,
-                    Err(error) => {
-                        OverlayMessage::Presentation(self.presentation(error.to_string()))
-                    }
-                })
-            }
-            InputAction::Back => {
-                self.mode = OverlayMode::GameMenu;
-                Some(OverlayMessage::Presentation(self.presentation("")))
-            }
-            InputAction::Menu => Some(OverlayMessage::Hide),
-            _ => None,
-        }
-    }
 }
 
 fn load_switch_icon(name: &str) -> Image {
@@ -586,6 +204,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     let state = Arc::new(Mutex::new(ControllerState::new(manager)));
     let visible = Arc::new(AtomicBool::new(false));
+    let (inputplumber_control, inputplumber_modes) = marina_input::inputplumber::intercept_control(
+        marina_input::inputplumber::InterceptMode::Pass,
+    );
 
     let mut shell = build_overlay_shell(&ui_path)?;
     let control = capture_shell_control(&shell)?;
@@ -594,9 +215,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let handle = shell.event_loop_handle();
     let event_control = control.clone();
     let event_visible = visible.clone();
+    let event_inputplumber = inputplumber_control.clone();
     let (_token, sender) =
         handle.add_channel(move |message: OverlayMessage, app_state| match message {
             OverlayMessage::Show(presentation) => {
+                event_inputplumber.set_mode(marina_input::inputplumber::InterceptMode::All);
                 for surface in app_state.all_outputs() {
                     apply_presentation_to_component(surface.component_instance(), &presentation);
                     set_open_on_component(surface.component_instance(), true);
@@ -612,6 +235,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             OverlayMessage::Hide => {
+                event_inputplumber.set_mode(marina_input::inputplumber::InterceptMode::Pass);
                 event_visible.store(false, Ordering::Release);
                 for surface in app_state.all_outputs() {
                     set_open_on_component(surface.component_instance(), false);
@@ -718,6 +342,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let request_state = state.clone();
     let request_runtime = runtime.clone();
     let request_visible = visible.clone();
+    let request_inputplumber = inputplumber_control.clone();
     let request_handler: Arc<dyn Fn(OverlayRequest) + Send + Sync> = Arc::new(move |request| {
         let should_show = match request {
             OverlayRequest::Show | OverlayRequest::QuickSettings => true,
@@ -726,6 +351,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         };
         if !should_show {
             request_visible.store(false, Ordering::Release);
+            request_inputplumber.set_mode(marina_input::inputplumber::InterceptMode::Pass);
             send_overlay_message(&request_sender, OverlayMessage::Hide);
             return;
         }
@@ -754,63 +380,98 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 request_visible.store(true, Ordering::Release);
                 send_overlay_message(&request_sender, OverlayMessage::Show(presentation));
             }
-            Err(error) => warn!(%error, "failed to refresh Sway windows"),
+            Err(error) => {
+                request_visible.store(false, Ordering::Release);
+                request_inputplumber.set_mode(marina_input::inputplumber::InterceptMode::Pass);
+                send_overlay_message(&request_sender, OverlayMessage::Hide);
+                warn!(%error, "failed to refresh Sway windows");
+            }
         }
     });
 
     let server_handler = request_handler.clone();
     let _server = spawn_overlay_server(move |request| server_handler(request))?;
-    let left_menu_handler = request_handler.clone();
-    let right_menu_handler = request_handler.clone();
-    let _shortcut_listener = spawn_overlay_shortcut_listener(
-        move || left_menu_handler(OverlayRequest::Show),
-        move || right_menu_handler(OverlayRequest::QuickSettings),
-    )?;
 
     let input_sender = sender.clone();
     let input_state = state.clone();
     let input_visible = visible.clone();
-    thread::Builder::new()
-        .name("marina-overlay-controller".to_owned())
-        .spawn(move || {
-            match InputLoop::spawn(InputConfig::default(), move |event| {
-                if !input_visible.load(Ordering::Acquire) {
-                    return;
-                }
-                let message = input_state
-                    .lock()
-                    .expect("overlay state lock poisoned")
-                    .handle(event);
-                if let Some(message) = message {
-                    if matches!(message, OverlayMessage::Hide) {
-                        input_visible.store(false, Ordering::Release);
-                    }
-                    match message {
-                        OverlayMessage::SwitchProfile(_)
-                        | OverlayMessage::SetBrightness(_)
-                        | OverlayMessage::SetVolume(_) => {
-                            spawn_control_operation(
-                                input_state.clone(),
-                                input_sender.clone(),
-                                runtime.clone(),
-                                message,
-                            );
-                        }
-                        message => {
-                            let _ = input_sender.send(message);
-                        }
-                    }
-                }
-            }) {
-                Ok(_input) => loop {
-                    thread::park();
-                },
-                Err(error) => error!(%error, "window overlay controller input unavailable"),
+    let input_runtime = runtime.clone();
+    let dispatch_inputplumber = inputplumber_control.clone();
+    let dispatch_visible: Arc<dyn Fn(InputEvent) + Send + Sync> = Arc::new(move |event| {
+        if !input_visible.load(Ordering::Acquire) {
+            return;
+        }
+        let message = input_state
+            .lock()
+            .expect("overlay state lock poisoned")
+            .handle(event);
+        if let Some(message) = message {
+            if matches!(message, OverlayMessage::Hide) {
+                input_visible.store(false, Ordering::Release);
+                dispatch_inputplumber.set_mode(marina_input::inputplumber::InterceptMode::Pass);
             }
-        })?;
+            match message {
+                OverlayMessage::SwitchProfile(_)
+                | OverlayMessage::SetBrightness(_)
+                | OverlayMessage::SetVolume(_) => {
+                    spawn_control_operation(
+                        input_state.clone(),
+                        input_sender.clone(),
+                        input_runtime.clone(),
+                        message,
+                    );
+                }
+                message => {
+                    let _ = input_sender.send(message);
+                }
+            }
+        }
+    });
+
+    let gilrs_dispatch = dispatch_visible.clone();
+    input::spawn_gilrs(move |event| gilrs_dispatch(event))?;
+
+    let dbus_dispatch = dispatch_visible.clone();
+    let dbus_visible = visible.clone();
+    let dbus_request = request_handler.clone();
+    let dbus_inputplumber = inputplumber_control.clone();
+    let dbus_router = Arc::new(Mutex::new(input::DbusOverlayRouter::default()));
+    input::spawn_inputplumber(&runtime, inputplumber_modes, move |event| {
+        let action = dbus_router
+            .lock()
+            .expect("InputPlumber router lock poisoned")
+            .route(event, dbus_visible.load(Ordering::Acquire));
+        match action {
+            input::DbusOverlayAction::ShowGameMenu => {
+                dbus_inputplumber.observe_mode(marina_input::inputplumber::InterceptMode::All);
+                dbus_request(OverlayRequest::Show);
+            }
+            input::DbusOverlayAction::ShowQuickSettings => {
+                dbus_inputplumber.observe_mode(marina_input::inputplumber::InterceptMode::All);
+                dbus_request(OverlayRequest::QuickSettings);
+            }
+            input::DbusOverlayAction::Dispatch(event) => dbus_dispatch(event),
+            input::DbusOverlayAction::Ignore => {}
+        }
+    });
 
     info!("persistent window overlay ready");
-    shell.run()?;
+    let result = shell.run();
+    inputplumber_control.set_mode(marina_input::inputplumber::InterceptMode::Pass);
+    runtime.block_on(async {
+        match marina_input::inputplumber::Client::connect().await {
+            Ok(client) => {
+                if let Err(error) = client
+                    .set_intercept_mode(marina_input::inputplumber::InterceptMode::Pass)
+                    .await
+                {
+                    warn!(%error, "failed to restore InputPlumber pass-through during shutdown");
+                }
+            }
+            Err(error) => debug!(%error, "InputPlumber unavailable during overlay shutdown"),
+        }
+    });
+    result?;
     Ok(())
 }
 

@@ -33,6 +33,7 @@ pub enum InputAction {
     Back,
     PreviousTab,
     NextTab,
+    Context,
     Menu,
 }
 
@@ -385,6 +386,7 @@ fn button_action(button: Button) -> Option<InputAction> {
         Button::DPadRight => Some(InputAction::Right),
         Button::South => Some(InputAction::Accept),
         Button::East => Some(InputAction::Back),
+        Button::North => Some(InputAction::Context),
         Button::LeftTrigger => Some(InputAction::PreviousTab),
         Button::RightTrigger => Some(InputAction::NextTab),
         Button::LeftTrigger2 => Some(InputAction::PageUp),

@@ -4,6 +4,7 @@ use std::{
     collections::HashMap,
     io,
     path::{Path, PathBuf},
+    sync::{Arc, Mutex, OnceLock},
 };
 
 use marina_config_derive::{ConfigSettings, ConfigTemplate};
@@ -277,6 +278,36 @@ pub struct LaunchedGame {
     pub unit_name: String,
 }
 
+/// A Marina-created transient game service that systemd still reports as active.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RunningGame {
+    pub unit_name: String,
+    pub item_id: String,
+    pub application_id: String,
+    pub title: String,
+    pub platform_slug: Option<String>,
+    pub backend: RuntimeBackend,
+}
+
+#[derive(Debug, Default)]
+struct LaunchRegistryState {
+    launching: bool,
+    running: Option<RunningGame>,
+}
+
+#[derive(Debug, Default)]
+struct LaunchRegistry {
+    state: Mutex<LaunchRegistryState>,
+}
+
+static TRANSIENT_LAUNCH_REGISTRY: OnceLock<Arc<LaunchRegistry>> = OnceLock::new();
+
+fn transient_launch_registry() -> Arc<LaunchRegistry> {
+    TRANSIENT_LAUNCH_REGISTRY
+        .get_or_init(|| Arc::new(LaunchRegistry::default()))
+        .clone()
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub enum RuntimeBackend {
     #[default]
@@ -302,6 +333,10 @@ pub enum LaunchError {
     Systemd { status: String, stderr: String },
     #[error("failed to launch through the systemd user manager: {0}")]
     SystemdDbus(#[from] marina_systemd::Error),
+    #[error("a Marina transient game launch is already in progress")]
+    LaunchInProgress,
+    #[error("a Marina game is already running: {unit_name} ({title})")]
+    GameAlreadyRunning { unit_name: String, title: String },
     #[error("runtime backend is not implemented: {0}")]
     UnsupportedBackend(String),
     #[error("invalid PortMaster launcher path: {path}")]
@@ -315,12 +350,128 @@ pub enum LaunchError {
 }
 
 /// Launches games as transient per-user systemd services in `graphical-apps.slice`.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct GameLauncher {
     backend: RuntimeBackend,
     retroarch: RetroArchConfig,
     portmaster: portmaster::Config,
     platforms: HashMap<String, PlatformRuntimeConfig>,
+    registry: Arc<LaunchRegistry>,
+}
+
+impl Default for GameLauncher {
+    fn default() -> Self {
+        Self {
+            backend: RuntimeBackend::default(),
+            retroarch: RetroArchConfig::default(),
+            portmaster: portmaster::Config::default(),
+            platforms: HashMap::new(),
+            registry: transient_launch_registry(),
+        }
+    }
+}
+
+struct LaunchPermit {
+    registry: Arc<LaunchRegistry>,
+    committed: bool,
+}
+
+impl LaunchRegistry {
+    async fn reserve(self: &Arc<Self>) -> Result<LaunchPermit, LaunchError> {
+        let running = {
+            let mut state = self.state.lock().expect("launch registry lock poisoned");
+            if state.launching {
+                return Err(LaunchError::LaunchInProgress);
+            }
+            state.launching = true;
+            state.running.clone()
+        };
+
+        if let Some(running) = running {
+            match marina_systemd::user_unit_is_active(&running.unit_name).await {
+                Ok(true) => {
+                    self.release_reservation();
+                    return Err(LaunchError::GameAlreadyRunning {
+                        unit_name: running.unit_name,
+                        title: running.title,
+                    });
+                }
+                Ok(false) => {
+                    let mut state = self.state.lock().expect("launch registry lock poisoned");
+                    if state
+                        .running
+                        .as_ref()
+                        .is_some_and(|current| current.unit_name == running.unit_name)
+                    {
+                        state.running = None;
+                    }
+                }
+                Err(error) => {
+                    self.release_reservation();
+                    return Err(error.into());
+                }
+            }
+        }
+
+        Ok(LaunchPermit {
+            registry: self.clone(),
+            committed: false,
+        })
+    }
+
+    async fn running_games(&self) -> Result<Vec<RunningGame>, LaunchError> {
+        let running = self
+            .state
+            .lock()
+            .expect("launch registry lock poisoned")
+            .running
+            .clone();
+        let Some(running) = running else {
+            return Ok(Vec::new());
+        };
+
+        if marina_systemd::user_unit_is_active(&running.unit_name).await? {
+            return Ok(vec![running]);
+        }
+
+        let mut state = self.state.lock().expect("launch registry lock poisoned");
+        if state
+            .running
+            .as_ref()
+            .is_some_and(|current| current.unit_name == running.unit_name)
+        {
+            state.running = None;
+        }
+        Ok(Vec::new())
+    }
+
+    fn commit(&self, running: RunningGame) {
+        let mut state = self.state.lock().expect("launch registry lock poisoned");
+        state.running = Some(running);
+        state.launching = false;
+    }
+
+    fn release_reservation(&self) {
+        self.state
+            .lock()
+            .expect("launch registry lock poisoned")
+            .launching = false;
+    }
+}
+
+impl LaunchPermit {
+    fn commit(mut self, running: RunningGame) {
+        self.registry.commit(running);
+        self.committed = true;
+    }
+}
+
+impl Drop for LaunchPermit {
+    fn drop(&mut self) {
+        if !self.committed {
+            self.registry.release_reservation();
+        }
+    }
 }
 
 impl RuntimeBackend {
@@ -411,6 +562,13 @@ impl GameLauncher {
         &self.platforms
     }
 
+    /// Return Marina-created transient game services that systemd still reports
+    /// as active. This is the runtime snapshot used to prevent duplicate
+    /// launches and will later drive input-profile selection.
+    pub async fn running_games(&self) -> Result<Vec<RunningGame>, LaunchError> {
+        self.registry.running_games().await
+    }
+
     pub async fn launch_item(&self, item: &LibraryItem) -> Result<LaunchedGame, LaunchError> {
         debug!(
             game_id = %item.id,
@@ -430,7 +588,28 @@ impl GameLauncher {
             self.backend.clone()
         };
         debug!(game_id = %item.id, backend = ?backend, "dispatching launch request");
-        match backend {
+        let tracked = matches!(
+            &backend,
+            RuntimeBackend::Native | RuntimeBackend::RetroArch(_)
+        );
+        let permit = if tracked {
+            Some(self.registry.reserve().await?)
+        } else {
+            None
+        };
+        let running = tracked.then(|| RunningGame {
+            unit_name: String::new(),
+            item_id: item.id.to_string(),
+            application_id: item
+                .provider_ids
+                .get("xdg.desktop")
+                .cloned()
+                .unwrap_or_else(|| item.id.to_string()),
+            title: item.title.clone(),
+            platform_slug: item.platform_slug.clone(),
+            backend: backend.clone(),
+        });
+        let result = match backend {
             RuntimeBackend::Native => {
                 let request = LaunchRequest::from_item(item).ok_or_else(|| {
                     warn!(game_id = %item.id, "launch request has no executable path");
@@ -459,7 +638,8 @@ impl GameLauncher {
                     "Runtime({runtime})"
                 )))
             }
-        }
+        };
+        self.finish_tracked_launch(result, permit, running)
     }
 
     pub async fn launch(&self, request: LaunchRequest) -> Result<LaunchedGame, LaunchError> {
@@ -471,7 +651,24 @@ impl GameLauncher {
             backend = ?self.backend,
             "launch backend invoked"
         );
-        match &self.backend {
+        let tracked = matches!(
+            &self.backend,
+            RuntimeBackend::Native | RuntimeBackend::RetroArch(_)
+        );
+        let permit = if tracked {
+            Some(self.registry.reserve().await?)
+        } else {
+            None
+        };
+        let running = tracked.then(|| RunningGame {
+            unit_name: String::new(),
+            item_id: request.item_id.clone(),
+            application_id: request.application_id.clone(),
+            title: request.title.clone(),
+            platform_slug: None,
+            backend: self.backend.clone(),
+        });
+        let result = match &self.backend {
             RuntimeBackend::Native => self.launch_native(request).await,
             RuntimeBackend::Runtime(runtime) => {
                 warn!(runtime = %runtime, "runtime backend is not implemented");
@@ -490,6 +687,25 @@ impl GameLauncher {
                 self.launch_retroarch(&item, &core, &request.executable)
                     .await
             }
+        };
+        self.finish_tracked_launch(result, permit, running)
+    }
+
+    fn finish_tracked_launch(
+        &self,
+        result: Result<LaunchedGame, LaunchError>,
+        permit: Option<LaunchPermit>,
+        running: Option<RunningGame>,
+    ) -> Result<LaunchedGame, LaunchError> {
+        match result {
+            Ok(launched) => {
+                if let (Some(permit), Some(mut running)) = (permit, running) {
+                    running.unit_name.clone_from(&launched.unit_name);
+                    permit.commit(running);
+                }
+                Ok(launched)
+            }
+            Err(error) => Err(error),
         }
     }
 
@@ -647,6 +863,75 @@ mod tests {
                 .bytes()
                 .all(|byte| byte.is_ascii_digit() || (b'A'..=b'Z').contains(&byte))
         );
+    }
+
+    fn running_game(unit_name: &str) -> RunningGame {
+        RunningGame {
+            unit_name: unit_name.to_owned(),
+            item_id: "item-1".to_owned(),
+            application_id: "example.desktop".to_owned(),
+            title: "Example".to_owned(),
+            platform_slug: Some("apps".to_owned()),
+            backend: RuntimeBackend::Native,
+        }
+    }
+
+    #[test]
+    fn launch_permit_releases_an_unsuccessful_reservation() {
+        let registry = Arc::new(LaunchRegistry {
+            state: Mutex::new(LaunchRegistryState {
+                launching: true,
+                running: None,
+            }),
+        });
+        let permit = LaunchPermit {
+            registry: registry.clone(),
+            committed: false,
+        };
+
+        drop(permit);
+
+        assert!(
+            !registry
+                .state
+                .lock()
+                .expect("launch registry lock poisoned")
+                .launching
+        );
+    }
+
+    #[test]
+    fn launch_permit_commits_the_running_game() {
+        let registry = Arc::new(LaunchRegistry {
+            state: Mutex::new(LaunchRegistryState {
+                launching: true,
+                running: None,
+            }),
+        });
+        let permit = LaunchPermit {
+            registry: registry.clone(),
+            committed: false,
+        };
+
+        permit.commit(running_game("app-example.service"));
+
+        let state = registry
+            .state
+            .lock()
+            .expect("launch registry lock poisoned");
+        assert!(!state.launching);
+        assert_eq!(
+            state.running.as_ref().map(|game| game.unit_name.as_str()),
+            Some("app-example.service")
+        );
+    }
+
+    #[test]
+    fn launchers_share_the_transient_registry() {
+        let first = GameLauncher::new();
+        let second = GameLauncher::new();
+
+        assert!(Arc::ptr_eq(&first.registry, &second.registry));
     }
 
     #[test]

@@ -10,7 +10,8 @@ polkit.addRule(function(action, subject) {
         || action.id.indexOf("org.freedesktop.NetworkManager.") == 0
         || action.id == "com.redhat.tuned.active_profile"
         || action.id == "com.redhat.tuned.profiles2"
-        || action.id == "com.redhat.tuned.switch_profile") {
+        || action.id == "com.redhat.tuned.switch_profile"
+        || action.id == "org.shadowblip.Input.CompositeDevice.SetInterceptMode") {
         return polkit.Result.YES;
     }
 });
