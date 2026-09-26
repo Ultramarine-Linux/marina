@@ -14,6 +14,8 @@ use std::{
 use gilrs::{Axis, Button, EventType, GamepadId, GilrsBuilder};
 use thiserror::Error;
 
+pub mod inputplumber;
+
 /// A controller action understood by Marina's user interfaces.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum InputAction {

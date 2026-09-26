@@ -4,20 +4,17 @@ use std::{
     collections::HashMap,
     io,
     path::{Path, PathBuf},
-    process::Stdio,
 };
 
 use marina_config_derive::{ConfigSettings, ConfigTemplate};
 use marina_core::LibraryItem;
 use serde::Deserialize;
 use thiserror::Error;
-use tokio::process::Command;
 use tracing::{debug, info, warn};
 use ulid::Ulid;
 
 pub mod portmaster;
 
-const SYSTEMD_RUN: &str = "systemd-run";
 const APP_SLICE: &str = "graphical-apps.slice";
 
 /// Default RetroArch frontend binary, resolved via `PATH`.
@@ -299,10 +296,12 @@ pub enum LaunchError {
     MissingCore { platform: String },
     #[error("RetroArch core not found: {core} ({hint})")]
     CoreNotFound { core: String, hint: String },
-    #[error("failed to invoke systemd-run: {0}")]
+    #[error("failed to invoke a system utility: {0}")]
     Spawn(#[source] std::io::Error),
-    #[error("systemd-run failed with status {status}: {stderr}")]
+    #[error("system utility failed with status {status}: {stderr}")]
     Systemd { status: String, stderr: String },
+    #[error("failed to launch through the systemd user manager: {0}")]
+    SystemdDbus(#[from] marina_systemd::Error),
     #[error("runtime backend is not implemented: {0}")]
     UnsupportedBackend(String),
     #[error("invalid PortMaster launcher path: {path}")]
@@ -570,22 +569,8 @@ pub(crate) async fn start_user_service(
     unit_name: &str,
     title: &str,
 ) -> Result<LaunchedGame, LaunchError> {
-    let output = Command::new("systemctl")
-        .args(["--user", "start", "--no-block", unit_name])
-        .stdin(Stdio::null())
-        .output()
-        .await
-        .map_err(LaunchError::Spawn)?;
-    if !output.status.success() {
-        return Err(LaunchError::Systemd {
-            status: output
-                .status
-                .code()
-                .map_or_else(|| "signal".to_owned(), |code| code.to_string()),
-            stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
-        });
-    }
-    tracing::info!(unit = %unit_name, title = %title, "launched user service");
+    let job = marina_systemd::start_user_unit(unit_name).await?;
+    tracing::info!(unit = %unit_name, title = %title, job = %job, "queued user service launch");
     Ok(LaunchedGame {
         unit_name: unit_name.to_owned(),
     })
@@ -598,34 +583,17 @@ async fn run_transient(
     working_directory: Option<&Path>,
     title: &str,
 ) -> Result<LaunchedGame, LaunchError> {
-    let mut command = Command::new(SYSTEMD_RUN);
-    command.args(systemd_run_args(unit_name));
-    if let Some(working_directory) = working_directory {
-        command.args([
-            "--working-directory",
-            working_directory.to_string_lossy().as_ref(),
-        ]);
-    }
-    let output = command
-        .arg(executable)
-        .args(arguments)
-        .stdin(Stdio::null())
-        .output()
-        .await
-        .map_err(LaunchError::Spawn)?;
+    let service = marina_systemd::TransientService {
+        unit_name: unit_name.to_owned(),
+        description: title.to_owned(),
+        executable: executable.to_string_lossy().into_owned(),
+        arguments: arguments.to_vec(),
+        working_directory: working_directory.map(|path| path.to_string_lossy().into_owned()),
+        slice: APP_SLICE.to_owned(),
+    };
+    let job = marina_systemd::start_transient_user_service(&service).await?;
 
-    if !output.status.success() {
-        warn!(unit = %unit_name, status = ?output.status, "transient launch service failed");
-        return Err(LaunchError::Systemd {
-            status: output
-                .status
-                .code()
-                .map_or_else(|| "signal".to_owned(), |code| code.to_string()),
-            stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
-        });
-    }
-
-    tracing::info!(unit = %unit_name, title = %title, path = %executable.display(), "launched game");
+    tracing::info!(unit = %unit_name, title = %title, path = %executable.display(), job = %job, "queued game launch");
     Ok(LaunchedGame {
         unit_name: unit_name.to_owned(),
     })
@@ -637,19 +605,6 @@ fn unit_name(application_id: &str) -> String {
 
 fn ulid() -> String {
     Ulid::new().to_string()
-}
-
-fn systemd_run_args(unit_name: &str) -> [&str; 8] {
-    [
-        "--user",
-        "--no-block",
-        "--collect",
-        "--quiet",
-        "--unit",
-        unit_name,
-        "--slice",
-        APP_SLICE,
-    ]
 }
 
 #[cfg(test)]

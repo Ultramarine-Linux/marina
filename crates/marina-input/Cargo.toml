@@ -8,3 +8,4 @@ license.workspace = true
 gilrs.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
+zbus.workspace = true

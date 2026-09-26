@@ -3563,6 +3563,7 @@ dependencies = [
  "gilrs",
  "thiserror 2.0.20",
  "tracing",
+ "zbus",
 ]
 
 [[package]]
@@ -3656,6 +3657,7 @@ version = "0.1.0"
 dependencies = [
  "marina-config-derive",
  "marina-core",
+ "marina-systemd",
  "serde",
  "serde_json",
  "thiserror 2.0.20",
@@ -3721,6 +3723,7 @@ dependencies = [
 name = "marina-systemd"
 version = "0.1.0"
 dependencies = [
+ "thiserror 2.0.20",
  "zbus_systemd",
 ]
 
