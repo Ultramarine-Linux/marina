@@ -34,6 +34,7 @@ use controller::{ControllerState, OverlayMessage, OverlayMode, Presentation};
 const INSTALLED_UI_ROOT: &str = "/usr/share/marina/ui";
 const SURFACE_NAME: &str = "WindowOverlay";
 const ANIMATION_FRAME_INTERVAL: Duration = Duration::from_millis(16);
+const RUNTIME_INPUT_PROFILE_INTERVAL: Duration = Duration::from_millis(500);
 const RESUME_CLOCK_GAP: Duration = Duration::from_millis(500);
 const RESUME_EXIT_CODE: i32 = 75;
 
@@ -185,6 +186,42 @@ fn spawn_quick_settings_hydration(
     });
 }
 
+fn spawn_runtime_input_profile_monitor(
+    runtime: &Arc<tokio::runtime::Runtime>,
+    inputplumber: marina_input::inputplumber::InterceptControl,
+) {
+    runtime.spawn(async move {
+        let mut last_retroarch_state = None;
+        let mut error_reported = false;
+        loop {
+            match marina_runtime::retroarch_is_running().await {
+                Ok(retroarch_running) => {
+                    error_reported = false;
+                    if last_retroarch_state != Some(retroarch_running) {
+                        let activation = if retroarch_running {
+                            marina_input::inputplumber::InterceptActivation::guide_north()
+                        } else {
+                            marina_input::inputplumber::InterceptActivation::guide()
+                        };
+                        inputplumber.set_activation(activation);
+                        last_retroarch_state = Some(retroarch_running);
+                        info!(
+                            retroarch_running,
+                            "updated InputPlumber runtime shortcut profile"
+                        );
+                    }
+                }
+                Err(error) if !error_reported => {
+                    warn!(%error, "failed to detect the active RetroArch runtime");
+                    error_reported = true;
+                }
+                Err(_) => {}
+            }
+            tokio::time::sleep(RUNTIME_INPUT_PROFILE_INTERVAL).await;
+        }
+    });
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     marina_logging::init();
 
@@ -204,9 +241,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     let state = Arc::new(Mutex::new(ControllerState::new(manager)));
     let visible = Arc::new(AtomicBool::new(false));
-    let (inputplumber_control, inputplumber_modes) = marina_input::inputplumber::intercept_control(
-        marina_input::inputplumber::InterceptMode::Pass,
-    );
+    let (inputplumber_control, inputplumber_modes, inputplumber_activations) =
+        marina_input::inputplumber::intercept_control(
+            marina_input::inputplumber::InterceptMode::Pass,
+            marina_input::inputplumber::InterceptActivation::guide(),
+        );
+    spawn_runtime_input_profile_monitor(&runtime, inputplumber_control.clone());
 
     let mut shell = build_overlay_shell(&ui_path)?;
     let control = capture_shell_control(&shell)?;
@@ -436,24 +476,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dbus_request = request_handler.clone();
     let dbus_inputplumber = inputplumber_control.clone();
     let dbus_router = Arc::new(Mutex::new(input::DbusOverlayRouter::default()));
-    input::spawn_inputplumber(&runtime, inputplumber_modes, move |event| {
-        let action = dbus_router
-            .lock()
-            .expect("InputPlumber router lock poisoned")
-            .route(event, dbus_visible.load(Ordering::Acquire));
-        match action {
-            input::DbusOverlayAction::ShowGameMenu => {
-                dbus_inputplumber.observe_mode(marina_input::inputplumber::InterceptMode::All);
-                dbus_request(OverlayRequest::Show);
+    input::spawn_inputplumber(
+        &runtime,
+        inputplumber_modes,
+        inputplumber_activations,
+        move |event| {
+            let action = dbus_router
+                .lock()
+                .expect("InputPlumber router lock poisoned")
+                .route(event, dbus_visible.load(Ordering::Acquire));
+            match action {
+                input::DbusOverlayAction::ShowGameMenu => {
+                    dbus_inputplumber.observe_mode(marina_input::inputplumber::InterceptMode::All);
+                    dbus_request(OverlayRequest::Show);
+                }
+                input::DbusOverlayAction::ShowQuickSettings => {
+                    dbus_inputplumber.observe_mode(marina_input::inputplumber::InterceptMode::All);
+                    dbus_request(OverlayRequest::QuickSettings);
+                }
+                input::DbusOverlayAction::Dispatch(event) => dbus_dispatch(event),
+                input::DbusOverlayAction::Ignore => {}
             }
-            input::DbusOverlayAction::ShowQuickSettings => {
-                dbus_inputplumber.observe_mode(marina_input::inputplumber::InterceptMode::All);
-                dbus_request(OverlayRequest::QuickSettings);
-            }
-            input::DbusOverlayAction::Dispatch(event) => dbus_dispatch(event),
-            input::DbusOverlayAction::Ignore => {}
-        }
-    });
+        },
+    );
 
     info!("persistent window overlay ready");
     let result = shell.run();

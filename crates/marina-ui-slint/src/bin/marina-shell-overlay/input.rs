@@ -88,9 +88,14 @@ pub(super) fn spawn_gilrs(handler: impl Fn(InputEvent) + Send + 'static) -> io::
 pub(super) fn spawn_inputplumber(
     runtime: &Arc<tokio::runtime::Runtime>,
     modes: tokio::sync::watch::Receiver<inputplumber::InterceptMode>,
+    activations: tokio::sync::watch::Receiver<inputplumber::InterceptActivation>,
     handler: impl Fn(InputEvent) + Send + 'static,
 ) {
-    runtime.spawn(inputplumber::monitor_input_events(modes, handler));
+    runtime.spawn(inputplumber::monitor_input_events(
+        modes,
+        activations,
+        handler,
+    ));
 }
 
 #[cfg(test)]
@@ -102,7 +107,7 @@ mod tests {
     }
 
     #[test]
-    fn unchorded_guide_opens_the_game_menu_on_release() {
+    fn intercepted_guide_north_signal_opens_the_game_menu_on_release() {
         let mut router = DbusOverlayRouter::default();
 
         assert_eq!(

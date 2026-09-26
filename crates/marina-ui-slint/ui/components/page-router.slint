@@ -27,6 +27,11 @@ export component PageRouter inherits Rectangle {
         details: GameState.details;
         tags: GameState.tags;
         loading: GameState.details-loading;
+        action-label: GameState.playing-game-id == GameState.selected-game.id
+            ? "Playing"
+            : (GameState.launching-game-id == GameState.selected-game.id ? "Launching…" : "Play");
+        action-disabled: GameState.playing-game-id == GameState.selected-game.id
+            || GameState.launching-game-id == GameState.selected-game.id;
         focus-request: ShellState.content-focus-request;
         action-requested => { GameState.play-requested(GameState.selected-game.id); }
         focus-header => { root.focus-header(); }

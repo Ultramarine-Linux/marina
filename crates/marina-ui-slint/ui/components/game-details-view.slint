@@ -15,6 +15,8 @@ export global GameState {
     in-out property <PreviewDetailsData> details;
     in-out property <[string]> tags;
     in-out property <bool> details-loading: false;
+    in-out property <string> launching-game-id;
+    in-out property <string> playing-game-id;
     callback play-requested(string);
 }
 
@@ -24,6 +26,7 @@ export component GameDetailsView inherits Rectangle {
     in property <[string]> tags: [];
     in property <bool> loading: false;
     in property <string> action-label: "Play";
+    in property <bool> action-disabled: false;
     in property <int> focus-request: 0;
     private property <int> scroll-focus-request: 0;
     private property <length> scroll-content-height:
@@ -98,6 +101,7 @@ export component GameDetailsView inherits Rectangle {
                         action-button := Button {
                             width: 150px;
                             text: root.action-label;
+                            disabled: root.action-disabled;
                             directional-navigation: true;
                             navigation-requested(direction) => {
                                 if (direction == "up") {

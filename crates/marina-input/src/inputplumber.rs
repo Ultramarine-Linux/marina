@@ -28,6 +28,11 @@ pub const ROOT_PATH: &str = "/org/shadowblip/InputPlumber";
 pub const COMPOSITE_DEVICE_INTERFACE: &str = "org.shadowblip.Input.CompositeDevice";
 pub const DBUS_DEVICE_INTERFACE: &str = "org.shadowblip.Input.DBusDevice";
 
+/// InputPlumber capabilities used to reserve Guide + North for Marina while
+/// replaying Guide and every other incomplete chord to ordinary targets.
+pub const GUIDE_CAPABILITY: &str = "Gamepad:Button:Guide";
+pub const NORTH_CAPABILITY: &str = "Gamepad:Button:North";
+
 const RECONNECT_DELAY: Duration = Duration::from_secs(2);
 // Object topology changes rarely on the built-in handheld controller. Keep a
 // low-frequency fallback reconciliation without continuously loading
@@ -41,7 +46,8 @@ pub enum InterceptMode {
     /// Forward all events to the ordinary virtual devices.
     #[default]
     None = 0,
-    /// Forward normal events, but reserve Guide to enter [`Self::All`].
+    /// Forward normal events, but reserve the configured activation chord to
+    /// enter [`Self::All`].
     Pass = 1,
     /// Route all events only to InputPlumber's D-Bus target.
     All = 2,
@@ -97,6 +103,14 @@ pub trait CompositeDevice {
     /// Change the InputPlumber interception mode.
     #[zbus(property)]
     fn set_intercept_mode(&self, mode: u32) -> zbus::Result<()>;
+
+    /// Configure the button chord that activates interception and the event
+    /// emitted to D-Bus targets when that chord completes.
+    fn set_intercept_activation(
+        &self,
+        activation_events: Vec<String>,
+        target_event: String,
+    ) -> zbus::Result<()>;
 }
 
 /// The subset of `org.shadowblip.Input.DBusDevice` used by Marina.
@@ -188,10 +202,37 @@ impl Client {
     }
 }
 
+/// Chord that switches InputPlumber from pass-through to interception.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct InterceptActivation {
+    pub events: Vec<String>,
+    pub target_event: String,
+}
+
+impl InterceptActivation {
+    /// Reserve Guide itself for Marina's normal overlay shortcuts.
+    pub fn guide() -> Self {
+        Self {
+            events: vec![GUIDE_CAPABILITY.to_owned()],
+            target_event: GUIDE_CAPABILITY.to_owned(),
+        }
+    }
+
+    /// Reserve Guide + North for Marina. InputPlumber replays an incomplete
+    /// Guide chord to its ordinary virtual controller targets.
+    pub fn guide_north() -> Self {
+        Self {
+            events: vec![GUIDE_CAPABILITY.to_owned(), NORTH_CAPABILITY.to_owned()],
+            target_event: GUIDE_CAPABILITY.to_owned(),
+        }
+    }
+}
+
 /// Cloneable control handle for the InputPlumber interception monitor.
 #[derive(Clone, Debug)]
 pub struct InterceptControl {
     mode: watch::Sender<InterceptMode>,
+    activation: watch::Sender<InterceptActivation>,
 }
 
 impl InterceptControl {
@@ -219,23 +260,50 @@ impl InterceptControl {
     pub fn mode(&self) -> InterceptMode {
         *self.mode.borrow()
     }
+
+    /// Change the chord that activates interception.
+    pub fn set_activation(&self, activation: InterceptActivation) {
+        self.activation.send_if_modified(|current| {
+            if *current == activation {
+                return false;
+            }
+            *current = activation;
+            true
+        });
+    }
+
+    pub fn activation(&self) -> InterceptActivation {
+        self.activation.borrow().clone()
+    }
 }
 
-/// Create the control channel consumed by [`monitor_input_events`].
+/// Create the control channels consumed by [`monitor_input_events`].
 pub fn intercept_control(
     initial_mode: InterceptMode,
-) -> (InterceptControl, watch::Receiver<InterceptMode>) {
-    let (mode, receiver) = watch::channel(initial_mode);
-    (InterceptControl { mode }, receiver)
+    initial_activation: InterceptActivation,
+) -> (
+    InterceptControl,
+    watch::Receiver<InterceptMode>,
+    watch::Receiver<InterceptActivation>,
+) {
+    let (mode, mode_receiver) = watch::channel(initial_mode);
+    let (activation, activation_receiver) = watch::channel(initial_activation);
+    (
+        InterceptControl { mode, activation },
+        mode_receiver,
+        activation_receiver,
+    )
 }
 
 /// Monitor InputPlumber controllers, reconnect across daemon restarts, and emit
 /// Marina semantic input events from each attached D-Bus target.
 ///
 /// Dropping every [`InterceptControl`] ends the monitor. The image's Polkit
-/// policy must allow Marina to set `InterceptMode` without interaction.
+/// policy must allow Marina to set `InterceptMode` and `InterceptActivation`
+/// without interaction.
 pub async fn monitor_input_events(
     mut modes: watch::Receiver<InterceptMode>,
+    mut activations: watch::Receiver<InterceptActivation>,
     mut handler: impl FnMut(SemanticInputEvent) + Send + 'static,
 ) {
     let (events_tx, mut events_rx) = mpsc::unbounded_channel::<(String, f64)>();
@@ -251,7 +319,7 @@ pub async fn monitor_input_events(
     loop {
         match Client::connect().await {
             Ok(client) => {
-                if !monitor_connection(&client, &mut modes, &events_tx).await {
+                if !monitor_connection(&client, &mut modes, &mut activations, &events_tx).await {
                     break;
                 }
                 debug!("InputPlumber connection was lost; reconnecting");
@@ -268,6 +336,11 @@ pub async fn monitor_input_events(
                     break;
                 }
             }
+            changed = activations.changed() => {
+                if changed.is_err() {
+                    break;
+                }
+            }
         }
     }
 
@@ -278,6 +351,7 @@ pub async fn monitor_input_events(
 async fn monitor_connection(
     client: &Client,
     modes: &mut watch::Receiver<InterceptMode>,
+    activations: &mut watch::Receiver<InterceptActivation>,
     events_tx: &mpsc::UnboundedSender<(String, f64)>,
 ) -> bool {
     let mut targets: HashMap<String, JoinHandle<()>> = HashMap::new();
@@ -290,7 +364,17 @@ async fn monitor_connection(
         tokio::select! {
             _ = interval.tick() => {
                 let mode = *modes.borrow();
-                match reconcile(client, mode, &composites, events_tx, &mut targets).await {
+                let activation = activations.borrow().clone();
+                match reconcile(
+                    client,
+                    mode,
+                    &activation,
+                    &composites,
+                    events_tx,
+                    &mut targets,
+                )
+                .await
+                {
                     Ok(paths) => {
                         if !announced {
                             info!(devices = paths.len(), "connected to InputPlumber");
@@ -322,6 +406,30 @@ async fn monitor_connection(
                     }
                 }
             }
+            changed = activations.changed() => {
+                if changed.is_err() {
+                    break false;
+                }
+                let activation = activations.borrow_and_update().clone();
+                for path in &composites {
+                    match client.composite_device(path).await {
+                        Ok(proxy) => {
+                            if let Err(error) = proxy
+                                .set_intercept_activation(
+                                    activation.events.clone(),
+                                    activation.target_event.clone(),
+                                )
+                                .await
+                            {
+                                warn!(%error, device = %path, "failed to change InputPlumber interception activation");
+                            }
+                        }
+                        Err(error) => {
+                            debug!(%error, device = %path, "InputPlumber device disappeared while changing activation");
+                        }
+                    }
+                }
+            }
 
         }
     };
@@ -335,6 +443,7 @@ async fn monitor_connection(
 async fn reconcile(
     client: &Client,
     mode: InterceptMode,
+    activation: &InterceptActivation,
     known_composites: &[OwnedObjectPath],
     events: &mpsc::UnboundedSender<(String, f64)>,
     targets: &mut HashMap<String, JoinHandle<()>>,
@@ -360,6 +469,12 @@ async fn reconcile(
             }
         }
         if !known_composites.contains(path.as_str()) {
+            composite
+                .set_intercept_activation(
+                    activation.events.clone(),
+                    activation.target_event.clone(),
+                )
+                .await?;
             composite.set_intercept_mode(mode.into()).await?;
         }
     }
@@ -466,8 +581,47 @@ mod tests {
     }
 
     #[test]
+    fn guide_north_activation_preserves_guide_for_incomplete_chords() {
+        assert_eq!(
+            InterceptActivation::guide_north(),
+            InterceptActivation {
+                events: vec![GUIDE_CAPABILITY.to_owned(), NORTH_CAPABILITY.to_owned()],
+                target_event: GUIDE_CAPABILITY.to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn guide_activation_reserves_guide_for_normal_overlay_shortcuts() {
+        assert_eq!(
+            InterceptActivation::guide(),
+            InterceptActivation {
+                events: vec![GUIDE_CAPABILITY.to_owned()],
+                target_event: GUIDE_CAPABILITY.to_owned(),
+            }
+        );
+    }
+
+    #[test]
+    fn activation_changes_notify_the_monitor() {
+        let (control, _, mut receiver) =
+            intercept_control(InterceptMode::Pass, InterceptActivation::guide());
+        assert!(!receiver.has_changed().expect("activation sender"));
+
+        control.set_activation(InterceptActivation::guide_north());
+
+        assert!(receiver.has_changed().expect("activation sender"));
+        assert_eq!(
+            *receiver.borrow_and_update(),
+            InterceptActivation::guide_north()
+        );
+        assert_eq!(control.activation(), InterceptActivation::guide_north());
+    }
+
+    #[test]
     fn observed_modes_do_not_trigger_redundant_dbus_updates() {
-        let (control, receiver) = intercept_control(InterceptMode::Pass);
+        let (control, receiver, _) =
+            intercept_control(InterceptMode::Pass, InterceptActivation::guide());
         assert!(!receiver.has_changed().expect("mode sender"));
 
         control.observe_mode(InterceptMode::All);

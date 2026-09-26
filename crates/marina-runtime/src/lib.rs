@@ -18,6 +18,15 @@ pub mod portmaster;
 
 const APP_SLICE: &str = "graphical-apps.slice";
 
+/// Stable user-service name for Marina's singleton RetroArch runtime.
+pub const RETROARCH_UNIT_NAME: &str = "marina-retroarch.service";
+
+/// Return whether Marina's singleton RetroArch runtime is active in the user
+/// systemd manager. This is safe to call from another Marina process.
+pub async fn retroarch_is_running() -> Result<bool, LaunchError> {
+    Ok(marina_systemd::user_unit_is_active(RETROARCH_UNIT_NAME).await?)
+}
+
 /// Default RetroArch frontend binary, resolved via `PATH`.
 pub const DEFAULT_RETROARCH_BINARY: &str = "retroarch";
 /// Default directory scanned for libretro cores (`*_libretro.so`).
@@ -276,6 +285,15 @@ impl LaunchRequest {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LaunchedGame {
     pub unit_name: String,
+}
+
+impl LaunchedGame {
+    /// Return whether systemd still considers this launched game unit active or
+    /// in an active transition. This works for transient Native/RetroArch units
+    /// and installed PortMaster template instances.
+    pub async fn is_active(&self) -> Result<bool, LaunchError> {
+        Ok(marina_systemd::user_unit_is_active(&self.unit_name).await?)
+    }
 }
 
 /// A Marina-created transient game service that systemd still reports as active.
@@ -755,12 +773,13 @@ impl GameLauncher {
                 hint,
             });
         }
-        let application_id = item
-            .provider_ids
-            .get("xdg.desktop")
-            .cloned()
-            .unwrap_or_else(|| item.id.to_string());
-        let unit_name = unit_name(&application_id);
+        if retroarch_is_running().await? {
+            return Err(LaunchError::GameAlreadyRunning {
+                unit_name: RETROARCH_UNIT_NAME.to_owned(),
+                title: "RetroArch".to_owned(),
+            });
+        }
+        let unit_name = RETROARCH_UNIT_NAME.to_owned();
         info!(unit = %unit_name, slice = APP_SLICE, core = %core, rom = %rom.display(), "starting retroarch transient launch service");
         let args = retroarch_argv(&self.retroarch.extra_args, core, rom);
         run_transient(
@@ -847,11 +866,16 @@ mod tests {
     }
 
     #[test]
-    fn unit_names_follow_desktop_app_convention() {
+    fn native_unit_names_follow_desktop_app_convention() {
         let first = unit_name("game-id");
         assert!(first.starts_with("app-game-id-"));
         assert!(first.ends_with(".service"));
         assert_eq!(first.len(), "app-game-id-".len() + 26 + ".service".len());
+    }
+
+    #[test]
+    fn retroarch_uses_a_stable_singleton_unit_name() {
+        assert_eq!(RETROARCH_UNIT_NAME, "marina-retroarch.service");
     }
 
     #[test]
