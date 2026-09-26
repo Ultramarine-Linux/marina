@@ -2,6 +2,7 @@ use super::*;
 
 /// Top-level Marina configuration file.
 #[derive(Clone, Debug, Default, Deserialize, ConfigTemplate, ConfigSettings)]
+#[serde(deny_unknown_fields)]
 pub(super) struct FileConfig {
     #[serde(default)]
     #[template(table)]
@@ -20,6 +21,7 @@ pub(super) struct FileConfig {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, ConfigTemplate, ConfigSettings)]
+#[serde(deny_unknown_fields)]
 pub(super) struct GeneralSection {
     #[serde(default)]
     #[template(table)]
@@ -33,6 +35,7 @@ pub(super) struct GeneralSection {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, ConfigTemplate, ConfigSettings)]
+#[serde(deny_unknown_fields)]
 pub(super) struct LibrarySection {
     #[serde(default)]
     #[template(table)]
@@ -64,6 +67,7 @@ pub(super) struct LibrarySection {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, ConfigTemplate, ConfigSettings)]
+#[serde(deny_unknown_fields)]
 pub(super) struct LocalLibrarySection {
     /// Root directory containing the local library (`roms/<platform>/...`).
     #[serde(default)]
@@ -86,6 +90,7 @@ pub(super) struct LocalLibrarySection {
 }
 
 #[derive(Clone, Debug, Default, Deserialize, ConfigTemplate, ConfigSettings)]
+#[serde(deny_unknown_fields)]
 pub(super) struct RuntimeSection {
     #[serde(default)]
     #[template(table)]
@@ -108,6 +113,7 @@ pub(super) struct RuntimeSection {
 }
 
 #[derive(Clone, Debug, Deserialize, ConfigTemplate, ConfigSettings)]
+#[serde(deny_unknown_fields)]
 pub(super) struct RetroArchConfig {
     /// RetroArch frontend binary, resolved via `PATH` when relative.
     #[serde(default = "default_retroarch_binary")]
@@ -115,7 +121,10 @@ pub(super) struct RetroArchConfig {
     #[setting(control = "path")]
     pub(super) binary: PathBuf,
     /// Directories scanned for libretro cores (`*_libretro.so`), in priority order.
-    #[serde(default = "default_cores_dirs")]
+    #[serde(
+        default = "default_cores_dirs",
+        deserialize_with = "deserialize_path_list"
+    )]
     #[setting(control = "list")]
     pub(super) cores_dir: Vec<PathBuf>,
     /// Extra frontend flags inserted before `-L <core> <rom>`.
@@ -142,6 +151,7 @@ impl Default for RetroArchConfig {
 }
 
 #[derive(Clone, Debug, Deserialize, ConfigTemplate, ConfigSettings)]
+#[serde(deny_unknown_fields)]
 pub(super) struct PortMasterRuntimeConfig {
     /// Host path containing `<port>.sh` launchers and the `PortMaster` tree.
     #[serde(default = "default_portmaster_ports_dir")]
@@ -169,8 +179,26 @@ fn default_cores_dirs() -> Vec<PathBuf> {
     ]
 }
 
+fn deserialize_path_list<'de, D>(deserializer: D) -> Result<Vec<PathBuf>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    #[derive(Deserialize)]
+    #[serde(untagged)]
+    enum PathList {
+        One(PathBuf),
+        Many(Vec<PathBuf>),
+    }
+
+    Ok(match PathList::deserialize(deserializer)? {
+        PathList::One(path) => vec![path],
+        PathList::Many(paths) => paths,
+    })
+}
+
 /// Top-bar digital clock settings.
 #[derive(Clone, Debug, Default, Deserialize, ConfigTemplate, ConfigSettings)]
+#[serde(deny_unknown_fields)]
 pub(super) struct ClockSection {
     /// Use 12-hour time (`9:05 PM`) instead of 24-hour time (`21:05`).
     #[serde(default, alias = "12hr")]
@@ -180,6 +208,7 @@ pub(super) struct ClockSection {
 
 /// A single store backend's file configuration.
 #[derive(Clone, Debug, Default, Deserialize, ConfigTemplate, ConfigSettings)]
+#[serde(deny_unknown_fields)]
 pub struct RommConfig {
     /// Whether the RomM store backend is enabled.
     #[serde(default)]
@@ -201,6 +230,7 @@ pub struct RommConfig {
 }
 
 #[derive(Clone, Debug, Deserialize, ConfigTemplate, ConfigSettings)]
+#[serde(deny_unknown_fields)]
 pub(super) struct PortMasterStoreConfig {
     #[serde(default)]
     #[template(env = "MARINA_ENABLE_PORTMASTER", example = "false")]

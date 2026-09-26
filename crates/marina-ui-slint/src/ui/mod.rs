@@ -7,6 +7,7 @@ pub(crate) mod data;
 pub(crate) mod launch;
 pub(crate) mod nav;
 pub(crate) mod networking;
+pub(crate) mod notifications;
 pub(crate) mod pages;
 pub(crate) mod profile;
 pub(crate) mod settings;

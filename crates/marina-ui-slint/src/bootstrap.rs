@@ -25,6 +25,7 @@ pub(crate) async fn run() -> Result<(), slint::PlatformError> {
     // asynchronously once the event loop is running.
     let username = std::env::var("USER").unwrap_or_else(|_| "user".into());
     let window = MainWindow::new()?;
+    ui::notifications::NOTIFICATION.configure(&window);
     let library_state: Arc<Mutex<Option<app::AppStateHandle>>> = Arc::new(Mutex::new(None));
     ui::settings::configure(&window, &library_state);
     // Controller events are allowed only while Marina owns the native window,
@@ -52,7 +53,6 @@ pub(crate) async fn run() -> Result<(), slint::PlatformError> {
     )))?;
     slint::set_xdg_app_id("org.ultramarinelinux.MarinaShell")?;
     info!("main window constructed; completing lightweight UI setup");
-    ui::controls::configure_toasts(&window);
     ui::controls::configure_navigation(&window);
     ui::controls::configure_profile_menu(&window);
 
@@ -199,6 +199,8 @@ pub(crate) async fn run() -> Result<(), slint::PlatformError> {
                 Ok(state) => state,
                 Err(error) => {
                     error!(%error, "application initialization failed");
+                    ui::notifications::NOTIFICATION
+                        .error(format!("Marina configuration or startup failed: {error}"));
                     return;
                 }
             };

@@ -12,12 +12,15 @@ mod tests {
 
     #[test]
     fn config_handle_replaces_snapshots() {
-        let handle = ConfigHandle(Arc::new(RwLock::new(Config::from_figment(Figment::new()))));
+        let handle = ConfigHandle(Arc::new(RwLock::new(
+            Config::from_figment(Figment::new()).unwrap(),
+        )));
         assert!(!handle.snapshot().clock_twelve_hour);
 
-        handle.replace(Config::from_figment(
-            Figment::new().merge(("general.time_date.twelve_hour", true)),
-        ));
+        handle.replace(
+            Config::from_figment(Figment::new().merge(("general.time_date.twelve_hour", true)))
+                .unwrap(),
+        );
 
         assert!(handle.snapshot().clock_twelve_hour);
     }
@@ -50,7 +53,8 @@ scan_on_startup = false
     fn portmaster_store_values_are_optional_and_blank_paths_use_defaults() {
         let default_config = Config::from_figment(
             Figment::new().merge(Toml::string("[library.portmaster]\nenable = true\n")),
-        );
+        )
+        .unwrap();
         assert_eq!(
             default_config
                 .portmaster_store
@@ -61,7 +65,8 @@ scan_on_startup = false
 
         let blank_override = Config::from_figment(Figment::new().merge(Toml::string(
             "[library.portmaster]\nenable = true\nrelease = \"   \"\n",
-        )));
+        )))
+        .unwrap();
         assert_eq!(
             blank_override
                 .portmaster_store
@@ -72,7 +77,8 @@ scan_on_startup = false
 
         let blank_path = Config::from_figment(Figment::new().merge(Toml::string(
             "[library.portmaster]\nenable = true\nports_dir = \"\"\n",
-        )));
+        )))
+        .unwrap();
         assert_eq!(
             blank_path
                 .portmaster_store
@@ -103,8 +109,12 @@ twelve_hour = true
         assert_eq!(config.general.time_date.twelve_hour, Some(true));
 
         let figment = Figment::new().merge(Toml::string("[general.time_date]\n12hr = true\n"));
-        assert!(Config::from_figment(figment).clock_twelve_hour);
-        assert!(!Config::from_figment(Figment::new()).clock_twelve_hour);
+        assert!(Config::from_figment(figment).unwrap().clock_twelve_hour);
+        assert!(
+            !Config::from_figment(Figment::new())
+                .unwrap()
+                .clock_twelve_hour
+        );
     }
 
     #[test]
@@ -117,11 +127,21 @@ twelve_hour = true
                 "library.romm.url",
                 "https://override.example.com".to_string(),
             ));
-        let config = Config::from_figment(figment);
+        let config = Config::from_figment(figment).unwrap();
         assert_eq!(
             config.romm_url.as_deref(),
             Some("https://override.example.com")
         );
+    }
+
+    #[test]
+    fn obsolete_store_section_is_rejected_instead_of_silently_disabling_backends() {
+        let error = Config::from_figment(
+            Figment::new().merge(Toml::string("[store.romm]\nenable = true\n")),
+        )
+        .unwrap_err();
+
+        assert!(error.to_string().contains("unknown field `store`"));
     }
 
     #[test]
@@ -194,7 +214,7 @@ twelve_hour = true
             ]
         );
 
-        let config = Config::from_figment(merge_config_files(Figment::new(), sources));
+        let config = Config::from_figment(merge_config_files(Figment::new(), sources)).unwrap();
         assert_eq!(config.retroarch.binary, PathBuf::from("/primary"));
         assert_eq!(
             config.retroarch.cores_dir,
@@ -416,7 +436,7 @@ cores_dir = ["/file/cores"]
             env::set_var("MARINA_RETROARCH_BINARY", "/env/retroarch");
         }
 
-        let config = Config::from_env();
+        let config = Config::from_env().unwrap();
         assert_eq!(config.romm_url.as_deref(), Some("https://env.example.com"));
         assert!(config.import_romm_on_startup);
         assert!(config.scan_on_startup);
@@ -458,7 +478,7 @@ cores_dir = ["/file/cores"]
             env::remove_var("MARINA_STORE_CACHE_URI");
         }
 
-        let config = Config::from_figment(Figment::new());
+        let config = Config::from_figment(Figment::new()).unwrap();
         assert_eq!(
             config.storage_uri,
             format!("sqlite://{}/marina/library.db", state.display())
@@ -528,7 +548,7 @@ backend = "native"
         let figment = Figment::new().merge(Toml::string(
             "[runtime.retroarch.platforms.\"gba\"]\nbackend = \"retroarch\"\n[runtime.retroarch.platforms.\"gba\".retroarch]\ncore = \"/opt/cores/mgba_libretro.so\"\n",
         ));
-        let config = Config::from_figment(figment);
+        let config = Config::from_figment(figment).unwrap();
         assert_eq!(
             config.platforms["gba"].retroarch.core.as_deref(),
             Some(std::path::Path::new("/opt/cores/mgba_libretro.so"))
@@ -564,7 +584,7 @@ backend = "native"
             "[runtime.retroarch.platforms.\"snes\".retroarch]\ncore = \"snes9x_libretro.so\"\n",
         )
         .unwrap();
-        let initial = Config::from_env();
+        let initial = Config::from_env().unwrap();
         assert_eq!(
             initial.platforms["snes"].retroarch.core.as_deref(),
             Some(std::path::Path::new("snes9x_libretro.so"))
@@ -575,7 +595,7 @@ backend = "native"
             "[runtime.retroarch.platforms.\"snes\".retroarch]\ncore = \"bsnes_libretro.so\"\n",
         )
         .unwrap();
-        let reloaded = Config::from_env();
+        let reloaded = Config::from_env().unwrap();
         assert_eq!(
             reloaded.platforms["snes"].retroarch.core.as_deref(),
             Some(std::path::Path::new("bsnes_libretro.so"))
@@ -593,13 +613,26 @@ backend = "native"
     }
 
     #[test]
+    fn legacy_single_retroarch_core_directory_is_accepted() {
+        let config = Config::from_figment(Figment::new().merge(Toml::string(
+            "[runtime.retroarch]\ncores_dir = \"/var/games/retroarch/cores\"\n",
+        )))
+        .unwrap();
+
+        assert_eq!(
+            config.retroarch.cores_dir,
+            vec![PathBuf::from("/var/games/retroarch/cores")]
+        );
+    }
+
+    #[test]
     fn retroarch_env_overrides_merge_over_file() {
         let figment = Figment::new()
             .merge(Toml::string(
                 "[runtime.retroarch]\nbinary = \"/file/retroarch\"\ncores_dir = [\"/file/cores\"]\n",
             ))
             .merge(("runtime.retroarch.binary", "/env/retroarch".to_string()));
-        let config = Config::from_figment(figment);
+        let config = Config::from_figment(figment).unwrap();
         assert_eq!(config.retroarch.binary, PathBuf::from("/env/retroarch"));
         assert_eq!(
             config.retroarch.cores_dir,

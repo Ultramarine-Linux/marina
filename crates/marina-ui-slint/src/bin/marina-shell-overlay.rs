@@ -174,8 +174,8 @@ impl ControllerState {
         self.volume = volume;
         self.clock_text = marina_ui_slint::clock_format::current_time_string(
             marina_ui_slint::config::shared()
-                .snapshot()
-                .clock_twelve_hour,
+                .map(|config| config.snapshot().clock_twelve_hour)
+                .unwrap_or(false),
         );
         self.battery = battery;
         self.network = network;
@@ -699,8 +699,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         loop {
             let clock = marina_ui_slint::clock_format::current_time_string(
                 marina_ui_slint::config::shared()
-                    .snapshot()
-                    .clock_twelve_hour,
+                    .map(|config| config.snapshot().clock_twelve_hour)
+                    .unwrap_or(false),
             );
             clock_state
                 .lock()

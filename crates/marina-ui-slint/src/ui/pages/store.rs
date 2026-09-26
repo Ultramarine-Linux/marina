@@ -15,9 +15,10 @@ use slint::{ComponentHandle, Image, Model, ModelRc, SharedString, VecModel};
 use tracing::{debug, error, info};
 
 use super::library as shelf;
+use crate::ui::notifications::NOTIFICATION;
 use crate::{
     GameCardData, HomeState, LibraryState, MainWindow, PlatformCardData, PreviewDetailsData,
-    StoreArtifact, StoreState, ToastQueue, ToastVariant, game_cards, platform_asset_path,
+    StoreArtifact, StoreState, game_cards, platform_asset_path,
 };
 use crate::{app, image};
 
@@ -383,7 +384,11 @@ pub(crate) fn install(
                         }
                     }
                     Err(error) => {
-                        error!(backend = %backend.id(), %error, "store platform refresh failed")
+                        error!(backend = %backend.id(), %error, "store platform refresh failed");
+                        NOTIFICATION.error(format!(
+                            "{} store failed to load: {error}",
+                            backend.display_name()
+                        ));
                     }
                 }
             }
@@ -434,10 +439,7 @@ pub(crate) fn install(
                     .global::<StoreState>()
                     .set_platforms(ModelRc::from(std::rc::Rc::new(VecModel::from(cards))));
                 window.global::<StoreState>().set_loading(false);
-                window.global::<ToastQueue>().invoke_show(
-                    SharedString::from(format!("Loaded {count} store platforms")),
-                    ToastVariant::Success,
-                );
+                NOTIFICATION.success(format!("Loaded {count} store platforms"));
             });
             for (slug, path) in icon_jobs {
                 let icon_window = window.clone();

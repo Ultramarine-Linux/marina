@@ -119,20 +119,30 @@ impl ConfigHandle {
 static SHARED_CONFIG: OnceLock<ConfigHandle> = OnceLock::new();
 
 /// Returns the process-wide configuration, loading it on first use.
-pub fn shared() -> ConfigHandle {
-    SHARED_CONFIG
-        .get_or_init(|| ConfigHandle(Arc::new(RwLock::new(Config::from_env()))))
-        .clone()
+pub fn shared() -> Result<ConfigHandle, figment::Error> {
+    if let Some(config) = SHARED_CONFIG.get() {
+        return Ok(config.clone());
+    }
+
+    let config = ConfigHandle(Arc::new(RwLock::new(Config::from_env()?)));
+    Ok(SHARED_CONFIG.get_or_init(|| config).clone())
 }
 
 /// Reloads every configuration source and publishes the new snapshot to all
-/// future readers.
-pub fn reload() {
-    shared().replace(Config::from_env());
+/// future readers. The previous valid snapshot remains active when loading
+/// fails.
+pub fn reload() -> Result<(), figment::Error> {
+    let config = Config::from_env()?;
+    if let Some(shared) = SHARED_CONFIG.get() {
+        shared.replace(config);
+    } else {
+        let _ = SHARED_CONFIG.set(ConfigHandle(Arc::new(RwLock::new(config))));
+    }
+    Ok(())
 }
 
 impl Config {
-    pub fn from_env() -> Self {
+    pub fn from_env() -> Result<Self, figment::Error> {
         if let Err(error) = ensure_config_file() {
             warn!(%error, "could not write default config file; continuing with defaults");
         }
@@ -144,14 +154,8 @@ impl Config {
         Self::from_figment(apply_env(figment))
     }
 
-    fn from_figment(figment: Figment) -> Self {
-        let file: FileConfig = match figment.extract() {
-            Ok(file) => file,
-            Err(error) => {
-                warn!(%error, "ignoring invalid config; using defaults");
-                FileConfig::default()
-            }
-        };
+    fn from_figment(figment: Figment) -> Result<Self, figment::Error> {
+        let file: FileConfig = figment.extract()?;
         let romm = &file.library.romm;
         let portmaster = &file.library.portmaster;
 
@@ -206,7 +210,7 @@ impl Config {
                     .unwrap_or_else(|| PathBuf::from(DEFAULT_PORTS_DIR)),
             });
 
-        Self {
+        Ok(Self {
             storage_uri: file
                 .library
                 .local
@@ -248,6 +252,6 @@ impl Config {
                 ports_dir: file.runtime.portmaster.ports_dir.clone(),
             },
             platforms: file.runtime.retroarch.platforms.clone(),
-        }
+        })
     }
 }

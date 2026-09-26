@@ -65,7 +65,8 @@ pub(crate) fn configure(
             tokio::spawn(async move {
                 let result = tokio::task::spawn_blocking(move || {
                     crate::config::write_scalar_setting(&path, value)?;
-                    crate::config::reload();
+                    crate::config::reload()
+                        .map_err(|error| format!("could not reload configuration: {error}"))?;
                     crate::config::read_scalar_settings()
                 })
                 .await;
@@ -87,8 +88,16 @@ pub(crate) fn configure(
                             }
                         });
                     }
-                    Ok(Err(error)) => warn!(%error, "could not save setting"),
-                    Err(error) => warn!(%error, "settings persistence task failed"),
+                    Ok(Err(error)) => {
+                        warn!(%error, "could not save setting");
+                        crate::ui::notifications::NOTIFICATION
+                            .error(format!("Could not save setting: {error}"));
+                    }
+                    Err(error) => {
+                        warn!(%error, "settings persistence task failed");
+                        crate::ui::notifications::NOTIFICATION
+                            .error(format!("Settings update failed: {error}"));
+                    }
                 }
             });
         });
@@ -96,10 +105,8 @@ pub(crate) fn configure(
 
 fn platform_names() -> Vec<String> {
     let mut names = crate::config::shared()
-        .snapshot()
-        .platforms
-        .into_keys()
-        .collect::<Vec<_>>();
+        .map(|config| config.snapshot().platforms.into_keys().collect::<Vec<_>>())
+        .unwrap_or_default();
     names.sort_unstable();
     names
 }
