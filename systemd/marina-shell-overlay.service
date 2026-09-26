@@ -7,7 +7,7 @@ PartOf=marina-shell.service
 [Service]
 Type=simple
 Environment=SLINT_SCALE_FACTOR=2.0
-Environment=RUST_LOG=debug
+Environment=RUST_LOG=info
 Environment=MALLOC_ARENA_MAX=2
 Environment=MALLOC_TRIM_THRESHOLD_=131072
 ExecStart=/usr/bin/marina-shell-overlay

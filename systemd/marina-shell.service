@@ -14,7 +14,7 @@ Environment=SLINT_SCALE_FACTOR=2.0
 # FemtoVG uses the handheld's EGL/OpenGL ES stack and matches the renderer
 # expected by the planned layer-shika Wayland shell integration.
 Environment=SLINT_BACKEND=winit-femtovg
-Environment=RUST_LOG=debug
+Environment=RUST_LOG=info
 # Image decoding uses blocking workers. Bound glibc's per-thread arenas so
 # released decode buffers do not leave one multi-megabyte arena per worker.
 Environment=MALLOC_ARENA_MAX=2
