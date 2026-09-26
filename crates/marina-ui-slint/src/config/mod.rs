@@ -17,7 +17,7 @@
 //! ```toml
 //! [runtime.retroarch]
 //! binary = "retroarch"
-//! cores_dir = "/var/games/retroarch/cores"
+//! cores_dir = ["/var/games/retroarch/cores"]
 //!
 //! [runtime.retroarch.platforms."gba"]
 //! backend = "retroarch"

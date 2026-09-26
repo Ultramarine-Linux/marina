@@ -11,6 +11,7 @@ install -d \
     "$root/usr/bin" \
     "$root/usr/lib/extension-release.d" \
     "$root/usr/share/marina" \
+    "$root/usr/share/marina/config.toml.d" \
     "$root/usr/share/icons/marina-assets/scalable" \
     "$root/usr/libexec/marina-portmaster" \
     "$root/usr/lib/systemd/system" \
@@ -22,6 +23,8 @@ install -d \
 
 install -m 0755 "$release/marina-ui-slint" "$root/usr/bin/marina-ui-slint"
 install -m 0755 "$release/marina-shell-overlay" "$root/usr/bin/marina-shell-overlay"
+install -m 0644 packaging/marina/config.toml.d/20-retroarch-cores.toml \
+    "$root/usr/share/marina/config.toml.d/20-retroarch-cores.toml"
 cp -R crates/marina-ui-slint/ui "$root/usr/share/marina/ui"
 install -m 0644 assets/icons/index.theme "$root/usr/share/icons/marina-assets/index.theme"
 cp -R assets/icons/scalable/. "$root/usr/share/icons/marina-assets/scalable/"

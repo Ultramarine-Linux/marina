@@ -24,13 +24,18 @@ const APP_SLICE: &str = "graphical-apps.slice";
 pub const DEFAULT_RETROARCH_BINARY: &str = "retroarch";
 /// Default directory scanned for libretro cores (`*_libretro.so`).
 pub const DEFAULT_CORES_DIR: &str = "/var/games/retroarch/cores";
+/// Default system directory scanned for libretro cores.
+pub const DEFAULT_SYSTEM_CORES_DIR: &str = "/usr/lib64/libretro/";
 
 fn default_retroarch_binary() -> PathBuf {
     PathBuf::from(DEFAULT_RETROARCH_BINARY)
 }
 
-fn default_cores_dir() -> PathBuf {
-    PathBuf::from(DEFAULT_CORES_DIR)
+fn default_cores_dirs() -> Vec<PathBuf> {
+    vec![
+        PathBuf::from(DEFAULT_CORES_DIR),
+        PathBuf::from(DEFAULT_SYSTEM_CORES_DIR),
+    ]
 }
 
 /// Frontend-level RetroArch configuration.
@@ -40,10 +45,9 @@ pub struct RetroArchConfig {
     #[serde(default = "default_retroarch_binary")]
     #[template(env = "MARINA_RETROARCH_BINARY")]
     pub binary: PathBuf,
-    /// Directory scanned for libretro cores (`*_libretro.so`).
-    #[serde(default = "default_cores_dir")]
-    #[template(env = "MARINA_RETROARCH_CORES_DIR")]
-    pub cores_dir: PathBuf,
+    /// Directories scanned for libretro cores (`*_libretro.so`), in priority order.
+    #[serde(default = "default_cores_dirs")]
+    pub cores_dir: Vec<PathBuf>,
     /// Extra frontend flags inserted before `-L <core> <rom>`,
     /// e.g. `["-f", "--verbose"]`.
     #[serde(default)]
@@ -54,7 +58,7 @@ impl Default for RetroArchConfig {
     fn default() -> Self {
         Self {
             binary: default_retroarch_binary(),
-            cores_dir: default_cores_dir(),
+            cores_dir: default_cores_dirs(),
             extra_args: Vec::new(),
         }
     }
@@ -64,7 +68,7 @@ impl Default for RetroArchConfig {
 #[derive(Clone, Debug, Default, Deserialize, ConfigTemplate, ConfigSettings)]
 pub struct RetroArchPlatformConfig {
     /// Core for this platform: either a bare file name resolved against the
-    /// `[retroarch] cores_dir` or a full path to the core.
+    /// `[retroarch] cores_dir` directories or a full path to the core.
     #[serde(default)]
     #[template(example = "mgba_libretro.so")]
     pub core: Option<PathBuf>,
@@ -146,26 +150,37 @@ pub struct RetroArchCore {
     pub path: PathBuf,
 }
 
-/// Scans `cores_dir` for libretro cores (`*_libretro.so`/`.dylib`/`.dll`),
+/// Scans `cores_dirs` for libretro cores (`*_libretro.so`/`.dylib`/`.dll`),
 /// sorted by file name. Used to validate configured cores and to produce
 /// helpful "available cores" errors.
-pub fn discover_cores(cores_dir: &Path) -> io::Result<Vec<RetroArchCore>> {
+pub fn discover_cores(cores_dirs: &[PathBuf]) -> io::Result<Vec<RetroArchCore>> {
     let mut cores = Vec::new();
-    for entry in std::fs::read_dir(cores_dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if !path.is_file() {
-            continue;
+    for cores_dir in cores_dirs {
+        let entries = match std::fs::read_dir(cores_dir) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                warn!(dir = %cores_dir.display(), "libretro core directory does not exist");
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
+        for entry in entries {
+            let entry = entry?;
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if !is_libretro_core(&name) {
+                continue;
+            }
+            debug!(core = %name, path = %path.display(), "discovered libretro core");
+            cores.push(RetroArchCore { name, path });
         }
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if !is_libretro_core(&name) {
-            continue;
-        }
-        debug!(core = %name, path = %path.display(), "discovered libretro core");
-        cores.push(RetroArchCore { name, path });
+        info!(dir = %cores_dir.display(), "libretro core directory scan completed");
     }
     cores.sort_by(|left, right| left.name.cmp(&right.name));
-    info!(count = cores.len(), dir = %cores_dir.display(), "libretro core scan completed");
+    info!(count = cores.len(), "libretro core scan completed");
     Ok(cores)
 }
 
@@ -180,13 +195,19 @@ fn is_libretro_core(file_name: &str) -> bool {
 
 /// Resolves a configured core value to a concrete path. Absolute paths (or
 /// values containing a path separator, e.g. `"subdir/core.so"`) are used
-/// as-is; bare file names are joined onto `cores_dir`.
-pub fn resolve_core_path(core: &Path, cores_dir: &Path) -> PathBuf {
+/// as-is; bare file names are joined onto the first configured core
+/// directory containing the file, or the first configured directory when the
+/// file is missing.
+pub fn resolve_core_path(core: &Path, cores_dirs: &[PathBuf]) -> PathBuf {
     if core.is_absolute() || core.components().count() > 1 {
-        core.to_owned()
-    } else {
-        cores_dir.join(core)
+        return core.to_owned();
     }
+    cores_dirs
+        .iter()
+        .map(|cores_dir| cores_dir.join(core))
+        .find(|path| path.is_file())
+        .or_else(|| cores_dirs.first().map(|cores_dir| cores_dir.join(core)))
+        .unwrap_or_else(|| core.to_owned())
 }
 
 /// The ROM content to hand to RetroArch. Unlike [`LaunchRequest::from_item`],
@@ -501,7 +522,15 @@ impl GameLauncher {
                 .map(|core| core.name)
                 .collect::<Vec<_>>();
             let hint = if available.is_empty() {
-                format!("no cores found in {}", self.retroarch.cores_dir.display())
+                format!(
+                    "no cores found in {}",
+                    self.retroarch
+                        .cores_dir
+                        .iter()
+                        .map(|dir| dir.display().to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
             } else {
                 format!("available: {}", available.join(", "))
             };
@@ -736,7 +765,10 @@ mod tests {
         assert_eq!(config.binary, PathBuf::from("retroarch"));
         assert_eq!(
             config.cores_dir,
-            PathBuf::from("/var/games/retroarch/cores")
+            vec![
+                PathBuf::from("/var/games/retroarch/cores"),
+                PathBuf::from("/usr/lib64/libretro/"),
+            ]
         );
         assert!(config.extra_args.is_empty());
     }
@@ -862,17 +894,49 @@ mod tests {
     fn core_names_resolve_against_cores_dir() {
         let cores_dir = Path::new("/var/games/retroarch/cores");
         assert_eq!(
-            resolve_core_path(Path::new("mgba_libretro.so"), cores_dir),
+            resolve_core_path(Path::new("mgba_libretro.so"), &[cores_dir.to_path_buf()],),
             cores_dir.join("mgba_libretro.so")
         );
         assert_eq!(
-            resolve_core_path(Path::new("/opt/cores/snes9x_libretro.so"), cores_dir),
+            resolve_core_path(
+                Path::new("/opt/cores/snes9x_libretro.so"),
+                &[cores_dir.to_path_buf()],
+            ),
             PathBuf::from("/opt/cores/snes9x_libretro.so")
         );
         assert_eq!(
-            resolve_core_path(Path::new("custom/snes9x_libretro.so"), cores_dir),
+            resolve_core_path(
+                Path::new("custom/snes9x_libretro.so"),
+                &[cores_dir.to_path_buf()],
+            ),
             PathBuf::from("custom/snes9x_libretro.so")
         );
+    }
+
+    #[test]
+    fn core_paths_and_discovery_support_multiple_directories() {
+        let first = temp_dir("cores-first");
+        let second = temp_dir("cores-second");
+        write_file(&second, "snes9x_libretro.so");
+
+        assert_eq!(
+            resolve_core_path(
+                Path::new("snes9x_libretro.so"),
+                &[first.clone(), second.clone()],
+            ),
+            second.join("snes9x_libretro.so")
+        );
+        assert_eq!(
+            discover_cores(&[first.clone(), second.clone()])
+                .unwrap()
+                .into_iter()
+                .map(|core| core.name)
+                .collect::<Vec<_>>(),
+            vec!["snes9x_libretro.so"]
+        );
+
+        std::fs::remove_dir_all(&first).unwrap();
+        std::fs::remove_dir_all(&second).unwrap();
     }
 
     #[test]
@@ -883,7 +947,7 @@ mod tests {
         write_file(&dir, "retroarch.cfg");
         write_file(&dir, "README.txt");
 
-        let cores = discover_cores(&dir).unwrap();
+        let cores = discover_cores(&[dir.clone()]).unwrap();
         assert_eq!(
             cores
                 .iter()
@@ -983,7 +1047,7 @@ mod tests {
         );
         let launcher = GameLauncher::new()
             .with_retroarch_config(RetroArchConfig {
-                cores_dir: cores_dir.clone(),
+                cores_dir: vec![cores_dir.clone()],
                 ..RetroArchConfig::default()
             })
             .with_platform_configs(platforms);
@@ -1030,12 +1094,12 @@ mod tests {
             "missing default value:\n{out}"
         );
         assert!(
-            out.contains("Directory scanned for libretro cores"),
+            out.contains("Directories scanned for libretro cores"),
             "missing doc comment:\n{out}"
         );
         assert!(
-            out.contains("MARINA_RETROARCH_CORES_DIR"),
-            "missing env note:\n{out}"
+            !out.contains("MARINA_RETROARCH_CORES_DIR"),
+            "vector fields should not render a scalar env override:\n{out}"
         );
     }
 }

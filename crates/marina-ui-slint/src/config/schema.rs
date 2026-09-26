@@ -114,11 +114,10 @@ pub(super) struct RetroArchConfig {
     #[template(env = "MARINA_RETROARCH_BINARY")]
     #[setting(control = "path")]
     pub(super) binary: PathBuf,
-    /// Directory scanned for libretro cores (`*_libretro.so`).
-    #[serde(default = "default_cores_dir")]
-    #[template(env = "MARINA_RETROARCH_CORES_DIR")]
-    #[setting(control = "path")]
-    pub(super) cores_dir: PathBuf,
+    /// Directories scanned for libretro cores (`*_libretro.so`), in priority order.
+    #[serde(default = "default_cores_dirs")]
+    #[setting(control = "list")]
+    pub(super) cores_dir: Vec<PathBuf>,
     /// Extra frontend flags inserted before `-L <core> <rom>`.
     #[serde(default)]
     #[setting(title = "Extra arguments", control = "list")]
@@ -163,8 +162,11 @@ fn default_retroarch_binary() -> PathBuf {
     PathBuf::from(marina_runtime::DEFAULT_RETROARCH_BINARY)
 }
 
-fn default_cores_dir() -> PathBuf {
-    PathBuf::from(marina_runtime::DEFAULT_CORES_DIR)
+fn default_cores_dirs() -> Vec<PathBuf> {
+    vec![
+        PathBuf::from(marina_runtime::DEFAULT_CORES_DIR),
+        PathBuf::from(marina_runtime::DEFAULT_SYSTEM_CORES_DIR),
+    ]
 }
 
 /// Top-bar digital clock settings.

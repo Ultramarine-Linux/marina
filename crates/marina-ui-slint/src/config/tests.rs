@@ -151,7 +151,7 @@ twelve_hour = true
         .unwrap();
         std::fs::write(
             shared_dropins.join("10-earlier.toml"),
-            "[runtime.retroarch]\nbinary = \"/shared-10\"\ncores_dir = \"/shared/cores\"\n",
+            "[runtime.retroarch]\nbinary = \"/shared-10\"\ncores_dir = [\"/shared/cores\"]\n",
         )
         .unwrap();
         std::fs::write(shared_dropins.join("README"), "not TOML").unwrap();
@@ -196,7 +196,10 @@ twelve_hour = true
 
         let config = Config::from_figment(merge_config_files(Figment::new(), sources));
         assert_eq!(config.retroarch.binary, PathBuf::from("/primary"));
-        assert_eq!(config.retroarch.cores_dir, PathBuf::from("/shared/cores"));
+        assert_eq!(
+            config.retroarch.cores_dir,
+            vec![PathBuf::from("/shared/cores")]
+        );
 
         std::fs::remove_dir_all(root).ok();
     }
@@ -239,8 +242,11 @@ twelve_hour = true
         assert_eq!(
             value["runtime"]["retroarch"]
                 .get("cores_dir")
-                .and_then(|v| v.as_str()),
-            Some("/var/games/retroarch/cores")
+                .and_then(|v| v.as_array()),
+            Some(&vec![
+                toml::Value::String("/var/games/retroarch/cores".to_owned()),
+                toml::Value::String("/usr/lib64/libretro/".to_owned()),
+            ])
         );
         // Optional leaves render as commented placeholders with docs + env.
         for key in [
@@ -272,7 +278,6 @@ twelve_hour = true
             "MARINA_SCAN_ON_STARTUP",
             "MARINA_CLOCK_12HR",
             "MARINA_RETROARCH_BINARY",
-            "MARINA_RETROARCH_CORES_DIR",
         ] {
             assert!(
                 template.contains(marker),
@@ -343,11 +348,6 @@ twelve_hour = true
             ("general.time_date.twelve_hour", "MARINA_CLOCK_12HR", true),
             ("library.local.root", "MARINA_LIBRARY_ROOT", false),
             ("runtime.retroarch.binary", "MARINA_RETROARCH_BINARY", false),
-            (
-                "runtime.retroarch.cores_dir",
-                "MARINA_RETROARCH_CORES_DIR",
-                false,
-            ),
         ] {
             let expected = (path.to_owned(), var, is_bool);
             assert!(
@@ -368,7 +368,6 @@ twelve_hour = true
             "MARINA_STORE_CACHE_DIR",
             "MARINA_LIBRARY_ROOT",
             "MARINA_RETROARCH_BINARY",
-            "MARINA_RETROARCH_CORES_DIR",
         ];
         let stashed: Vec<(String, Option<std::ffi::OsString>)> = TOUCHED
             .iter()
@@ -404,7 +403,7 @@ scan_on_startup = false
 
 [runtime.retroarch]
 binary = "/file/retroarch"
-cores_dir = "/file/cores"
+cores_dir = ["/file/cores"]
 "#,
         )
         .unwrap();
@@ -424,7 +423,10 @@ cores_dir = "/file/cores"
         assert_eq!(config.library_root, Some(PathBuf::from("/env/library")));
         assert_eq!(config.retroarch.binary, PathBuf::from("/env/retroarch"));
         // Nothing set in the environment: the file value survives.
-        assert_eq!(config.retroarch.cores_dir, PathBuf::from("/file/cores"));
+        assert_eq!(
+            config.retroarch.cores_dir,
+            vec![PathBuf::from("/file/cores")]
+        );
         assert_eq!(config.romm_token.as_deref(), Some("file-token"));
 
         std::fs::remove_dir_all(&dir).ok();
@@ -484,7 +486,7 @@ cores_dir = "/file/cores"
             r#"
 [runtime.retroarch]
 binary = "/usr/bin/retroarch"
-cores_dir = "/var/games/retroarch/cores"
+cores_dir = ["/var/games/retroarch/cores"]
 extra_args = ["-f"]
 
 [runtime.retroarch.platforms."gba"]
@@ -503,7 +505,7 @@ backend = "native"
         );
         assert_eq!(
             config.runtime.retroarch.cores_dir,
-            PathBuf::from("/var/games/retroarch/cores")
+            vec![PathBuf::from("/var/games/retroarch/cores")]
         );
         assert_eq!(config.runtime.retroarch.extra_args, vec!["-f"]);
         let gba = &config.runtime.retroarch.platforms["gba"];
@@ -536,11 +538,7 @@ backend = "native"
     #[test]
     fn runtime_config_reload_observes_core_file_edits() {
         let _guard = ENV_LOCK.lock().unwrap();
-        const TOUCHED: &[&str] = &[
-            "MARINA_CONFIG",
-            "MARINA_RETROARCH_BINARY",
-            "MARINA_RETROARCH_CORES_DIR",
-        ];
+        const TOUCHED: &[&str] = &["MARINA_CONFIG", "MARINA_RETROARCH_BINARY"];
         let stashed = TOUCHED
             .iter()
             .map(|var| ((*var).to_owned(), env::var_os(var)))
@@ -598,11 +596,14 @@ backend = "native"
     fn retroarch_env_overrides_merge_over_file() {
         let figment = Figment::new()
             .merge(Toml::string(
-                "[runtime.retroarch]\nbinary = \"/file/retroarch\"\ncores_dir = \"/file/cores\"\n",
+                "[runtime.retroarch]\nbinary = \"/file/retroarch\"\ncores_dir = [\"/file/cores\"]\n",
             ))
             .merge(("runtime.retroarch.binary", "/env/retroarch".to_string()));
         let config = Config::from_figment(figment);
         assert_eq!(config.retroarch.binary, PathBuf::from("/env/retroarch"));
-        assert_eq!(config.retroarch.cores_dir, PathBuf::from("/file/cores"));
+        assert_eq!(
+            config.retroarch.cores_dir,
+            vec![PathBuf::from("/file/cores")]
+        );
     }
 }
