@@ -70,24 +70,23 @@ pub(crate) fn string_model(values: Vec<String>) -> ModelRc<SharedString> {
     )))
 }
 
-pub(crate) fn platform_asset_path(root: &std::path::Path, slug: &str) -> Option<String> {
+pub(crate) fn platform_asset_path(slug: &str) -> Option<String> {
     let exact_name = match slug {
         "ndsi" => "nintendo-dsi",
         "win" => "pc-50x-family",
         _ => slug,
     };
-    let exact_path = root.join(format!("platform-{exact_name}.svg"));
-    if let Some(path) = marina_apps::resolve_icon(&exact_path.to_string_lossy()) {
+    let exact_icon = format!("platform-{exact_name}");
+    if let Some(path) = marina_apps::resolve_icon_in_theme(&exact_icon, "marina-assets") {
         return Some(path);
     }
 
     if let Some(prefix) = slug.split('-').next() {
-        let prefix_path = root.join(format!("platform-{prefix}.svg"));
-        if let Some(path) = marina_apps::resolve_icon(&prefix_path.to_string_lossy()) {
+        let prefix_icon = format!("platform-{prefix}");
+        if let Some(path) = marina_apps::resolve_icon_in_theme(&prefix_icon, "marina-assets") {
             return Some(path);
         }
     }
 
-    let default_path = root.join("platform-default.svg");
-    marina_apps::resolve_icon(&default_path.to_string_lossy())
+    marina_apps::resolve_icon_in_theme("platform-default", "marina-assets")
 }

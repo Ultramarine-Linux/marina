@@ -487,10 +487,7 @@ pub(crate) async fn refresh_platform_cards(
         for (index, slug) in icon_slugs.into_iter().enumerate() {
             let icon_window = window.as_weak();
             tokio::spawn(async move {
-                let Some(path) = platform_asset_path(
-                    &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("ui/assets"),
-                    &slug,
-                ) else {
+                let Some(path) = platform_asset_path(&slug) else {
                     return;
                 };
                 let Some(decoded) = image::load_path_scaled(path, "platform-icon", 256).await

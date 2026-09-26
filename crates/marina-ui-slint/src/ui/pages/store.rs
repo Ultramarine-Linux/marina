@@ -404,15 +404,14 @@ pub(crate) fn install(
                 });
                 return;
             }
-            let icon_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("ui/assets");
+
             // Publish the list immediately; icons resolve
             // concurrently per row instead of blocking the list on
             // a sequential await chain.
             let icon_jobs = platforms
                 .iter()
                 .filter_map(|platform| {
-                    platform_asset_path(&icon_root, &platform.slug)
-                        .map(|path| (platform.slug.clone(), path))
+                    platform_asset_path(&platform.slug).map(|path| (platform.slug.clone(), path))
                 })
                 .collect::<Vec<_>>();
             let count = platforms.len();
