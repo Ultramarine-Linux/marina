@@ -15,9 +15,10 @@ use slint::{ComponentHandle, Image, Model, ModelRc, SharedString, VecModel};
 use tracing::{debug, error, info};
 
 use super::library as shelf;
+use crate::ui::notifications::NOTIFICATION;
 use crate::{
     GameCardData, HomeState, LibraryState, MainWindow, PlatformCardData, PreviewDetailsData,
-    StoreArtifact, StoreState, ToastQueue, ToastVariant, game_cards, platform_asset_path,
+    StoreArtifact, StoreState, game_cards, platform_asset_path,
 };
 use crate::{app, image};
 
@@ -383,7 +384,11 @@ pub(crate) fn install(
                         }
                     }
                     Err(error) => {
-                        error!(backend = %backend.id(), %error, "store platform refresh failed")
+                        error!(backend = %backend.id(), %error, "store platform refresh failed");
+                        NOTIFICATION.error(format!(
+                            "{} store failed to load: {error}",
+                            backend.display_name()
+                        ));
                     }
                 }
             }
@@ -404,16 +409,14 @@ pub(crate) fn install(
                 });
                 return;
             }
-            let icon_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("ui/assets/platforms/systematic");
+
             // Publish the list immediately; icons resolve
             // concurrently per row instead of blocking the list on
             // a sequential await chain.
             let icon_jobs = platforms
                 .iter()
                 .filter_map(|platform| {
-                    platform_asset_path(&icon_root, &platform.slug)
-                        .map(|path| (platform.slug.clone(), path))
+                    platform_asset_path(&platform.slug).map(|path| (platform.slug.clone(), path))
                 })
                 .collect::<Vec<_>>();
             let count = platforms.len();
@@ -436,10 +439,7 @@ pub(crate) fn install(
                     .global::<StoreState>()
                     .set_platforms(ModelRc::from(std::rc::Rc::new(VecModel::from(cards))));
                 window.global::<StoreState>().set_loading(false);
-                window.global::<ToastQueue>().invoke_show(
-                    SharedString::from(format!("Loaded {count} store platforms")),
-                    ToastVariant::Success,
-                );
+                NOTIFICATION.success(format!("Loaded {count} store platforms"));
             });
             for (slug, path) in icon_jobs {
                 let icon_window = window.clone();

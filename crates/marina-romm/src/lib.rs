@@ -92,15 +92,17 @@
 //!
 //! ## Current scope
 //!
-//! The current client implements heartbeat, ROM listing, and platform listing.
-//! Downloading ROMs, save synchronization, collections, firmware, screenshots,
-//! and metadata operations are intentionally not included yet. They can be added
-//! as typed operations without changing the transport or authentication surface.
+//! The current client implements heartbeat, ROM and platform listing, downloads,
+//! per-user ROM activity updates, and bidirectional save synchronization. Collections,
+//! firmware, screenshots, and general metadata operations are not included yet. They
+//! can be added as typed operations without changing the transport or authentication
+//! surface.
 
 mod client;
 mod error;
 pub mod install;
 mod models;
+mod save_sync;
 mod store;
 
 pub use client::{Auth, Client};
@@ -110,6 +112,10 @@ pub use models::roms::RomFile;
 pub use models::{
     Heartbeat, Platform, PlatformQuery, PlatformQueryBuilder, Rom, RomPage, RomQuery,
     RomQueryBuilder, SystemInfo,
+};
+pub use save_sync::{
+    AUTOSAVE_SLOT, MARINA_SAVE_TAG, SaveDownloadReport, SaveSyncFailure, SaveSyncReport,
+    download_save_directory, upload_save_directory,
 };
 pub use store::RommStore;
 

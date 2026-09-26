@@ -1,0 +1,379 @@
+import { ListView } from "std-widgets.slint";
+import { Sheet, SheetSide } from "../slintcn/components/sheet.slint";
+import { Button, ButtonSize, ButtonVariant } from "../slintcn/components/button.slint";
+import { RadioGroup, RadioItem } from "../slintcn/components/radio-group.slint";
+import { Slider } from "../slintcn/components/slider.slint";
+import { FocusListScroll } from "../components/focus-list-scroll.slint";
+import { Tokens } from "../slintcn/theme/tokens.slint";
+import { BatteryIndicator, BatteryState } from "../components/battery-indicator.slint";
+import { ClockIndicator, ClockState } from "../components/clock-indicator.slint";
+import { NetworkIndicator, NetworkState } from "../components/network-indicator.slint";
+import { InputLegend } from "../components/input-legend.slint";
+
+export { BatteryState } from "../components/battery-indicator.slint";
+export { ClockState } from "../components/clock-indicator.slint";
+export { NetworkState } from "../components/network-indicator.slint";
+
+component QuickSettingsEntry inherits Rectangle {
+    in property <bool> highlighted: false;
+    in property <string> title;
+    in property <string> value;
+
+    height: 58px;
+    clip: true;
+    border-radius: Tokens.radius-md;
+    background: highlighted ? Tokens.color-accent : transparent;
+
+
+    VerticalLayout {
+        x: Tokens.spacing-lg;
+        width: parent.width - Tokens.spacing-xl;
+        height: parent.height;
+        alignment: center;
+        Text {
+            text: root.title;
+            color: Tokens.color-foreground;
+            font-size: 16px;
+        }
+        Text {
+            text: root.value;
+            color: Tokens.color-muted-foreground;
+            font-size: 12px;
+        }
+    }
+}
+
+
+export component WindowOverlay inherits Window {
+    callback dismissed();
+    callback control-requested();
+
+    in property <bool> overlay-open: false;
+    in property <bool> window-mode: false;
+    in property <string> active-title: "No active game";
+    in property <int> menu-selected: 0;
+    in property <string> selected-title: "No application windows";
+    in property <string> selected-app-id: "";
+    in property <string> selected-location: "";
+    in property <string> position-label: "0 of 0";
+    in property <[string]> window-titles: [];
+    in property <int> selected-index: 0;
+    in-out property <length> window-scroll-y: 0px;
+    in property <string> status-text: "";
+    in property <bool> quick-mode: false;
+    in property <bool> profile-mode: false;
+    in property <int> quick-selected: 0;
+    in property <int> brightness: 0;
+    in property <int> volume: 0;
+    in property <[RadioItem]> profile-items: [];
+    in property <string> active-profile: "";
+    in property <int> active-profile-index: -1;
+    in property <int> profile-selected: 0;
+    in-out property <length> profile-scroll-y: 0px;
+    in property <image> dpad-icon;
+    in property <image> accept-icon;
+    in property <image> back-icon;
+    in property <image> menu-icon;
+
+    background: transparent;
+
+    Sheet {
+        width: parent.width;
+        height: parent.height;
+        open: root.overlay-open && !root.quick-mode;
+        side: SheetSide.left;
+        panel-extent: min(parent.width * 0.56, 360px);
+        compact: true;
+        title: root.window-mode ? "Switch window" : "Game menu";
+        description: root.window-mode
+            ? "Bring another window to the front"
+            : root.active-title;
+        dismissed => { root.dismissed(); }
+
+        if !root.window-mode: VerticalLayout {
+            spacing: Tokens.spacing-lg;
+
+            Rectangle {
+                min-height: 72px;
+                border-radius: Tokens.radius-lg;
+                background: Tokens.color-surface-2;
+
+                VerticalLayout {
+                    padding: Tokens.spacing-lg;
+                    spacing: Tokens.spacing-xs;
+                    Text {
+                        text: root.active-title;
+                        color: Tokens.color-foreground;
+                        font-size: Tokens.typography-title-size;
+                        font-weight: Tokens.typography-weight-semibold;
+                        overflow: elide;
+                    }
+                    Text {
+                        text: "Active game";
+                        color: Tokens.color-muted-foreground;
+                        font-size: Tokens.typography-label-size;
+                    }
+                }
+            }
+
+            VerticalLayout {
+                spacing: Tokens.spacing-sm;
+                Button {
+                    width: parent.width;
+                    size: ButtonSize.lg;
+                    text: "Resume game";
+                    variant: root.menu-selected == 0 ? ButtonVariant.secondary : ButtonVariant.ghost;
+                }
+                Button {
+                    width: parent.width;
+                    size: ButtonSize.lg;
+                    text: "Switch window";
+                    variant: root.menu-selected == 1 ? ButtonVariant.secondary : ButtonVariant.ghost;
+                }
+                Button {
+                    width: parent.width;
+                    size: ButtonSize.lg;
+                    text: "Exit game";
+                    variant: ButtonVariant.destructive;
+                    opacity: root.menu-selected == 2 ? 1 : 0.72;
+                }
+            }
+            Rectangle { vertical-stretch: 1; }
+
+            if root.status-text == "": HorizontalLayout {
+                spacing: Tokens.spacing-md;
+                InputLegend { icon: root.dpad-icon; label: "Navigate"; }
+                InputLegend { icon: root.accept-icon; label: "Confirm"; }
+                InputLegend { icon: root.back-icon; label: "Back"; }
+            }
+            if root.status-text != "": Text {
+                text: root.status-text;
+                color: Tokens.color-destructive;
+                font-size: Tokens.typography-body-sm-size;
+            }
+        }
+
+        if root.window-mode: VerticalLayout {
+            spacing: Tokens.spacing-lg;
+
+            Rectangle {
+                min-height: 96px;
+                border-radius: Tokens.radius-lg;
+                background: Tokens.color-accent;
+                border-width: 2px;
+                border-color: Tokens.color-ring;
+
+                VerticalLayout {
+                    padding: Tokens.spacing-lg;
+                    spacing: Tokens.spacing-sm;
+
+                    Text {
+                        text: root.selected-title;
+                        color: Tokens.color-foreground;
+                        font-size: Tokens.typography-title-size;
+                        font-weight: Tokens.typography-weight-semibold;
+                        overflow: elide;
+                    }
+                    Text {
+                        text: root.selected-app-id;
+                        color: Tokens.color-muted-foreground;
+                        font-size: Tokens.typography-body-sm-size;
+                        overflow: elide;
+                    }
+                    Text {
+                        text: root.selected-location;
+                        color: Tokens.color-muted-foreground;
+                        font-size: Tokens.typography-label-size;
+                    }
+                }
+            }
+
+            if root.window-titles.length == 0: Text {
+                text: "No application windows are available.";
+                color: Tokens.color-muted-foreground;
+                font-size: Tokens.typography-body-size;
+                vertical-stretch: 1;
+                wrap: word-wrap;
+            }
+
+            if root.window-titles.length > 0: Rectangle {
+                vertical-stretch: 1;
+                window-list-scroll := FocusListScroll {
+                    selected-index: root.selected-index;
+                    item-count: root.window-titles.length;
+                    item-height: 42px;
+                    viewport-height: window-list.height;
+                    viewport-y <=> root.window-scroll-y;
+                }
+                window-list := ListView {
+                    width: parent.width;
+                    height: parent.height;
+                    viewport-y <=> root.window-scroll-y;
+                for title[index] in root.window-titles: Rectangle {
+                    height: 42px;
+                    border-radius: Tokens.radius-md;
+                    background: index == root.selected-index
+                        ? Tokens.color-accent
+                        : transparent;
+
+                    Text {
+                        x: Tokens.spacing-md;
+                        width: parent.width - Tokens.spacing-xl;
+                        height: parent.height;
+                        text: title;
+                        color: index == root.selected-index
+                            ? Tokens.color-foreground
+                            : Tokens.color-muted-foreground;
+                        font-size: Tokens.typography-body-size;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                }
+                }
+            }
+
+            HorizontalLayout {
+                spacing: Tokens.spacing-md;
+                Text {
+                    text: root.position-label;
+                    color: Tokens.color-muted-foreground;
+                    font-size: Tokens.typography-body-sm-size;
+                    vertical-alignment: center;
+                }
+                InputLegend { icon: root.back-icon; label: "Game menu"; }
+            }
+
+            if root.status-text != "": Text {
+                text: root.status-text;
+                color: Tokens.color-destructive;
+                font-size: Tokens.typography-body-sm-size;
+            }
+        }
+    }
+
+    Sheet {
+        width: parent.width;
+        height: parent.height;
+        open: root.overlay-open && root.quick-mode;
+        side: SheetSide.right;
+        panel-extent: min(parent.width * 0.56, 360px);
+        compact: true;
+        title: "";
+        description: "";
+        dismissed => { root.dismissed(); }
+
+        VerticalLayout {
+            spacing: Tokens.spacing-md;
+
+            HorizontalLayout {
+                height: Tokens.density-button-default;
+                spacing: Tokens.spacing-md;
+                alignment: end;
+                NetworkIndicator {}
+                BatteryIndicator {}
+                ClockIndicator {}
+            }
+
+            if !root.profile-mode: VerticalLayout {
+                spacing: Tokens.spacing-lg;
+
+            quick-list := VerticalLayout {
+                spacing: Tokens.spacing-sm;
+
+                QuickSettingsEntry {
+                    highlighted: root.quick-selected == 0;
+                    title: "Power profile";
+                    value: root.active-profile;
+                }
+
+                quick-brightness := Rectangle {
+                    height: 72px;
+                    border-radius: Tokens.radius-md;
+                    background: root.quick-selected == 1 ? Tokens.color-accent : transparent;
+                    VerticalLayout {
+                        padding: Tokens.spacing-md;
+                        spacing: Tokens.spacing-sm;
+                        HorizontalLayout {
+                            Text { text: "Brightness"; color: Tokens.color-foreground; font-size: 15px; }
+                            Text { text: root.brightness + "%"; color: Tokens.color-muted-foreground; horizontal-alignment: right; }
+                        }
+                        Slider {
+                            value: root.brightness;
+                            minimum: 1;
+                            maximum: 100;
+                        }
+                    }
+                }
+
+                quick-volume := Rectangle {
+                    height: 72px;
+                    border-radius: Tokens.radius-md;
+                    background: root.quick-selected == 2 ? Tokens.color-accent : transparent;
+                    VerticalLayout {
+                        padding: Tokens.spacing-md;
+                        spacing: Tokens.spacing-sm;
+                        HorizontalLayout {
+                            Text { text: "Volume"; color: Tokens.color-foreground; font-size: 15px; }
+                            Text { text: root.volume + "%"; color: Tokens.color-muted-foreground; horizontal-alignment: right; }
+                        }
+                        Slider {
+                            value: root.volume;
+                            minimum: 0;
+                            maximum: 100;
+                        }
+                    }
+                }
+            }
+
+            Rectangle { vertical-stretch: 1; }
+            if root.status-text == "": HorizontalLayout {
+                spacing: Tokens.spacing-md;
+                InputLegend { icon: root.dpad-icon; label: "Navigate / adjust"; }
+                InputLegend { icon: root.accept-icon; label: "Select"; }
+                InputLegend { icon: root.back-icon; label: "Back"; }
+            }
+            if root.status-text != "": Text {
+                text: root.status-text;
+                color: Tokens.color-destructive;
+                font-size: Tokens.typography-body-sm-size;
+                wrap: word-wrap;
+            }
+            }
+
+            if root.profile-mode: VerticalLayout {
+                spacing: Tokens.spacing-md;
+                Text {
+                    text: "Power profile";
+                    color: Tokens.color-foreground;
+                    font-size: Tokens.typography-title-size;
+                    font-weight: Tokens.typography-weight-semibold;
+                }
+                Text {
+                    text: "Choose a TuneD profile";
+                    color: Tokens.color-muted-foreground;
+                    font-size: Tokens.typography-body-sm-size;
+                }
+            RadioGroup {
+                vertical-stretch: 1;
+                width: parent.width;
+                items: root.profile-items;
+                selected: root.active-profile-index;
+                highlighted: root.profile-selected;
+                show-external-highlight: true;
+                scrollable: true;
+                scroll-y <=> root.profile-scroll-y;
+            }
+            if root.status-text == "": HorizontalLayout {
+                spacing: Tokens.spacing-md;
+                InputLegend { icon: root.accept-icon; label: "Apply profile"; }
+                InputLegend { icon: root.back-icon; label: "Back"; }
+            }
+            if root.status-text != "": Text {
+                text: root.status-text;
+                color: Tokens.color-destructive;
+                font-size: Tokens.typography-body-sm-size;
+            }
+            }
+        }
+    }
+}

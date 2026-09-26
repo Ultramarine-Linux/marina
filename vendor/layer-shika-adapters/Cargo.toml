@@ -1,0 +1,29 @@
+[package]
+name = "layer-shika-adapters"
+version = "0.3.1"
+edition = "2024"
+license = "AGPL-3.0-or-later"
+repository = "https://codeberg.org/waydeer/layer-shika"
+rust-version = "1.85"
+keywords = ["layer-shell", "wayland", "slint", "femtovg", "smithay"]
+categories = ["gui"]
+description = "Patched adapters layer for layer-shika"
+
+[dependencies]
+glutin = { version = "0.32.3", default-features = false, features = ["wayland"] }
+layer-shika-domain = { git = "https://github.com/waydeerwm/layer-shika", rev = "0a684334056e2ffb680ff38618ae1ceddb319218", version = "0.3.1" }
+log = { version = "0.4.29", optional = true }
+raw-window-handle = "0.6.2"
+slint = { version = "1.15.1", default-features = false, features = ["compat-1-2", "renderer-femtovg", "backend-winit-wayland"] }
+slint-interpreter = { version = "1.15.1", default-features = false, features = ["compat-1-2"] }
+smithay-client-toolkit = "0.20.0"
+thiserror = "2.0.18"
+tracing = { version = "0.1.44", default-features = false, features = ["std"], optional = true }
+wayland-client = "0.31.12"
+wayland-protocols = { version = "0.32.10", features = ["client", "staging"] }
+xkbcommon = { version = "0.9.0", features = ["wayland"] }
+
+[features]
+default = ["log"]
+log = ["dep:log"]
+tracing = ["dep:tracing"]

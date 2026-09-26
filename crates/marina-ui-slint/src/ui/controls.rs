@@ -1,22 +1,14 @@
-//! Shared input and notification event handling.
-
-use std::{cell::Cell, rc::Rc, time::Duration};
+//! Shared navigation and controller input handling.
 
 use marina_input::{InputAction, InputEvent, InputEventKind};
 use slint::{
-    ComponentHandle, Model, ModelRc, SharedString, VecModel,
+    ComponentHandle,
     platform::{Key, WindowEvent},
 };
 use tracing::error;
 
-use crate::ui::nav;
-use crate::{
-    MainWindow, ProfileAction, ShellPage, ShellState, StoreState, ToastItem, ToastQueue,
-    ToastVariant,
-};
-
-const TOAST_DURATION: Duration = Duration::from_secs(4);
-const TOAST_DISMISS_ANIMATION: Duration = Duration::from_millis(250);
+use crate::ui::{nav, notifications::NOTIFICATION};
+use crate::{MainWindow, ProfileAction, ShellPage, ShellState, StoreState};
 
 pub(crate) fn configure_navigation(window: &MainWindow) {
     let weak = window.as_weak();
@@ -83,16 +75,10 @@ pub(crate) fn configure_profile_menu(window: &MainWindow) {
                     }
                 }
                 ProfileAction::Shutdown => {
-                    let weak = window.as_weak();
                     tokio::spawn(async move {
                         if let Err(error) = marina_power::power_off().await {
                             error!(%error, "shutdown request failed");
-                            let _ = weak.upgrade_in_event_loop(move |window| {
-                                window.global::<ToastQueue>().invoke_show(
-                                    SharedString::from("Shutdown request failed"),
-                                    ToastVariant::Error,
-                                );
-                            });
+                            NOTIFICATION.error(format!("Shutdown request failed: {error}"));
                         }
                     });
                 }
@@ -132,7 +118,10 @@ pub(crate) fn dispatch_controller_action(window: &MainWindow, event: InputEvent)
             }
             return;
         }
-        InputAction::Menu => return,
+        InputAction::Menu => {
+            crate::window_overlay::toggle();
+            return;
+        }
         InputAction::Back if nav::dismiss_overlay(&window) => return,
         InputAction::ScrollUp
         | InputAction::ScrollDown
@@ -172,7 +161,10 @@ pub(crate) fn dispatch_controller_action(window: &MainWindow, event: InputEvent)
         | InputAction::ScrollDown
         | InputAction::ScrollLeft
         | InputAction::ScrollRight => return,
-        InputAction::PreviousTab | InputAction::NextTab | InputAction::Menu => return,
+        InputAction::PreviousTab
+        | InputAction::NextTab
+        | InputAction::Context
+        | InputAction::Menu => return,
     };
     window
         .window()
@@ -189,57 +181,4 @@ fn is_back_route(window: &MainWindow) -> bool {
         return true;
     }
     shell.get_page() == ShellPage::Store && window.global::<StoreState>().get_page() == 2
-}
-
-pub(crate) fn configure_toasts(window: &MainWindow) {
-    let items = Rc::new(VecModel::from(Vec::<ToastItem>::new()));
-    let toast_queue = window.global::<ToastQueue>();
-    toast_queue.set_items(ModelRc::from(items.clone()));
-
-    let dismiss_items = items.clone();
-    toast_queue.on_dismiss(move |id| {
-        dismiss_toast(dismiss_items.clone(), id);
-    });
-
-    let next_id = Rc::new(Cell::new(0_i32));
-    toast_queue.on_show(move |text, variant| {
-        let id = next_id.get();
-        next_id.set(id.saturating_add(1));
-        items.push(ToastItem {
-            id,
-            text,
-            variant,
-            dismissed: false,
-        });
-
-        let auto_dismiss_items = items.clone();
-        slint::Timer::single_shot(TOAST_DURATION, move || {
-            dismiss_toast(auto_dismiss_items, id);
-        });
-    });
-}
-
-fn dismiss_toast(items: Rc<VecModel<ToastItem>>, id: i32) {
-    let Some(index) = (0..items.row_count())
-        .find(|&index| items.row_data(index).is_some_and(|item| item.id == id))
-    else {
-        return;
-    };
-    let Some(mut item) = items.row_data(index) else {
-        return;
-    };
-    if item.dismissed {
-        return;
-    }
-
-    item.dismissed = true;
-    items.set_row_data(index, item);
-
-    slint::Timer::single_shot(TOAST_DISMISS_ANIMATION, move || {
-        if let Some(index) = (0..items.row_count())
-            .find(|&index| items.row_data(index).is_some_and(|item| item.id == id))
-        {
-            items.remove(index);
-        }
-    });
 }

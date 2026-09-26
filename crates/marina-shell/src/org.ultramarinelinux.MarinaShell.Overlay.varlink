@@ -1,0 +1,7 @@
+# Controls Marina's persistent controller-first window overlay.
+interface org.ultramarinelinux.MarinaShell.Overlay
+
+method Show() -> ()
+method Hide() -> ()
+method Toggle() -> ()
+method QuickSettings() -> ()

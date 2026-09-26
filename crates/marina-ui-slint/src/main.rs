@@ -1,13 +1,14 @@
 mod app;
 mod bootstrap;
 mod cache;
-mod config;
+pub(crate) use marina_ui_slint::config;
 mod covers;
 mod fixtures;
 mod image;
 mod startup;
 mod storage;
 mod ui;
+mod window_overlay;
 
 slint::include_modules!();
 

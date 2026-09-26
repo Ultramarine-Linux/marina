@@ -7,6 +7,7 @@ license.workspace = true
 [dependencies]
 marina-config-derive.workspace = true
 marina-core.workspace = true
+marina-systemd.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 thiserror.workspace = true

@@ -187,7 +187,7 @@ impl AppState {
     -> Result<AppStateHandle, Box<dyn std::error::Error + Send + Sync>> {
         let started = std::time::Instant::now();
         tracing::info!("initializing application state");
-        let config = config::shared();
+        let config = config::shared()?;
         let startup_config = config.snapshot();
 
         tracing::info!(

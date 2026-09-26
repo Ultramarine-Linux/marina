@@ -8,7 +8,11 @@ polkit.addRule(function(action, subject) {
 
     if (action.id == "org.freedesktop.systemd1.manage-units"
         || action.id.indexOf("org.freedesktop.NetworkManager.") == 0
-        || action.id.indexOf("org.freedesktop.tuned.") == 0) {
+        || action.id == "com.redhat.tuned.active_profile"
+        || action.id == "com.redhat.tuned.profiles2"
+        || action.id == "com.redhat.tuned.switch_profile"
+        || action.id == "org.shadowblip.Input.CompositeDevice.SetInterceptMode"
+        || action.id == "org.shadowblip.Input.CompositeDevice.SetInterceptActivation") {
         return polkit.Result.YES;
     }
 });

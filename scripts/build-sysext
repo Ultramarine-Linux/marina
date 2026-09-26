@@ -10,6 +10,9 @@ rm -rf "$root"
 install -d \
     "$root/usr/bin" \
     "$root/usr/lib/extension-release.d" \
+    "$root/usr/share/marina" \
+    "$root/usr/share/marina/config.toml.d" \
+    "$root/usr/share/icons/marina-assets/scalable" \
     "$root/usr/libexec/marina-portmaster" \
     "$root/usr/lib/systemd/system" \
     "$root/usr/lib/systemd/user" \
@@ -19,10 +22,17 @@ install -d \
     "$root/usr/share/polkit-1/rules.d"
 
 install -m 0755 "$release/marina-ui-slint" "$root/usr/bin/marina-ui-slint"
+install -m 0755 "$release/marina-shell-overlay" "$root/usr/bin/marina-shell-overlay"
+install -m 0644 packaging/marina/config.toml.d/20-retroarch-cores.toml \
+    "$root/usr/share/marina/config.toml.d/20-retroarch-cores.toml"
+cp -R crates/marina-ui-slint/ui "$root/usr/share/marina/ui"
+install -m 0644 assets/icons/index.theme "$root/usr/share/icons/marina-assets/index.theme"
+cp -R assets/icons/scalable/. "$root/usr/share/icons/marina-assets/scalable/"
 install -m 0755 "$release/marina-portmaster-runtime" "$root/usr/libexec/marina-portmaster-runtime"
 install -m 0755 "$release/marina-portmaster-launch" "$root/usr/libexec/marina-portmaster-launch"
 
 install -m 0644 systemd/marina-shell.service "$root/usr/lib/systemd/user/marina-shell.service"
+install -m 0644 systemd/marina-shell-overlay.service "$root/usr/lib/systemd/user/marina-shell-overlay.service"
 install -m 0644 systemd/portmaster@.service "$root/usr/lib/systemd/user/portmaster@.service"
 install -m 0644 systemd/portmaster-runtime@.service "$root/usr/lib/systemd/system/portmaster-runtime@.service"
 install -m 0644 scripts/portmaster/etc/tmpfiles.d/marina-portmaster.conf "$root/usr/lib/tmpfiles.d/marina-portmaster.conf"

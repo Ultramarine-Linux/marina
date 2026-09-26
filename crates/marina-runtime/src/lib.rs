@@ -4,33 +4,45 @@ use std::{
     collections::HashMap,
     io,
     path::{Path, PathBuf},
-    process::Stdio,
+    sync::{Arc, Mutex, OnceLock},
 };
 
 use marina_config_derive::{ConfigSettings, ConfigTemplate};
 use marina_core::LibraryItem;
 use serde::Deserialize;
 use thiserror::Error;
-use tokio::process::Command;
 use tracing::{debug, info, warn};
 use ulid::Ulid;
 
 pub mod portmaster;
 
-const SYSTEMD_RUN: &str = "systemd-run";
 const APP_SLICE: &str = "graphical-apps.slice";
+
+/// Stable user-service name for Marina's singleton RetroArch runtime.
+pub const RETROARCH_UNIT_NAME: &str = "marina-retroarch.service";
+
+/// Return whether Marina's singleton RetroArch runtime is active in the user
+/// systemd manager. This is safe to call from another Marina process.
+pub async fn retroarch_is_running() -> Result<bool, LaunchError> {
+    Ok(marina_systemd::user_unit_is_active(RETROARCH_UNIT_NAME).await?)
+}
 
 /// Default RetroArch frontend binary, resolved via `PATH`.
 pub const DEFAULT_RETROARCH_BINARY: &str = "retroarch";
 /// Default directory scanned for libretro cores (`*_libretro.so`).
 pub const DEFAULT_CORES_DIR: &str = "/var/games/retroarch/cores";
+/// Default system directory scanned for libretro cores.
+pub const DEFAULT_SYSTEM_CORES_DIR: &str = "/usr/lib64/libretro/";
 
 fn default_retroarch_binary() -> PathBuf {
     PathBuf::from(DEFAULT_RETROARCH_BINARY)
 }
 
-fn default_cores_dir() -> PathBuf {
-    PathBuf::from(DEFAULT_CORES_DIR)
+fn default_cores_dirs() -> Vec<PathBuf> {
+    vec![
+        PathBuf::from(DEFAULT_CORES_DIR),
+        PathBuf::from(DEFAULT_SYSTEM_CORES_DIR),
+    ]
 }
 
 /// Frontend-level RetroArch configuration.
@@ -40,10 +52,9 @@ pub struct RetroArchConfig {
     #[serde(default = "default_retroarch_binary")]
     #[template(env = "MARINA_RETROARCH_BINARY")]
     pub binary: PathBuf,
-    /// Directory scanned for libretro cores (`*_libretro.so`).
-    #[serde(default = "default_cores_dir")]
-    #[template(env = "MARINA_RETROARCH_CORES_DIR")]
-    pub cores_dir: PathBuf,
+    /// Directories scanned for libretro cores (`*_libretro.so`), in priority order.
+    #[serde(default = "default_cores_dirs")]
+    pub cores_dir: Vec<PathBuf>,
     /// Extra frontend flags inserted before `-L <core> <rom>`,
     /// e.g. `["-f", "--verbose"]`.
     #[serde(default)]
@@ -54,7 +65,7 @@ impl Default for RetroArchConfig {
     fn default() -> Self {
         Self {
             binary: default_retroarch_binary(),
-            cores_dir: default_cores_dir(),
+            cores_dir: default_cores_dirs(),
             extra_args: Vec::new(),
         }
     }
@@ -64,7 +75,7 @@ impl Default for RetroArchConfig {
 #[derive(Clone, Debug, Default, Deserialize, ConfigTemplate, ConfigSettings)]
 pub struct RetroArchPlatformConfig {
     /// Core for this platform: either a bare file name resolved against the
-    /// `[retroarch] cores_dir` or a full path to the core.
+    /// `[retroarch] cores_dir` directories or a full path to the core.
     #[serde(default)]
     #[template(example = "mgba_libretro.so")]
     pub core: Option<PathBuf>,
@@ -146,26 +157,37 @@ pub struct RetroArchCore {
     pub path: PathBuf,
 }
 
-/// Scans `cores_dir` for libretro cores (`*_libretro.so`/`.dylib`/`.dll`),
+/// Scans `cores_dirs` for libretro cores (`*_libretro.so`/`.dylib`/`.dll`),
 /// sorted by file name. Used to validate configured cores and to produce
 /// helpful "available cores" errors.
-pub fn discover_cores(cores_dir: &Path) -> io::Result<Vec<RetroArchCore>> {
+pub fn discover_cores(cores_dirs: &[PathBuf]) -> io::Result<Vec<RetroArchCore>> {
     let mut cores = Vec::new();
-    for entry in std::fs::read_dir(cores_dir)? {
-        let entry = entry?;
-        let path = entry.path();
-        if !path.is_file() {
-            continue;
+    for cores_dir in cores_dirs {
+        let entries = match std::fs::read_dir(cores_dir) {
+            Ok(entries) => entries,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {
+                warn!(dir = %cores_dir.display(), "libretro core directory does not exist");
+                continue;
+            }
+            Err(error) => return Err(error),
+        };
+        for entry in entries {
+            let entry = entry?;
+            let path = entry.path();
+            if !path.is_file() {
+                continue;
+            }
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if !is_libretro_core(&name) {
+                continue;
+            }
+            debug!(core = %name, path = %path.display(), "discovered libretro core");
+            cores.push(RetroArchCore { name, path });
         }
-        let name = entry.file_name().to_string_lossy().into_owned();
-        if !is_libretro_core(&name) {
-            continue;
-        }
-        debug!(core = %name, path = %path.display(), "discovered libretro core");
-        cores.push(RetroArchCore { name, path });
+        info!(dir = %cores_dir.display(), "libretro core directory scan completed");
     }
     cores.sort_by(|left, right| left.name.cmp(&right.name));
-    info!(count = cores.len(), dir = %cores_dir.display(), "libretro core scan completed");
+    info!(count = cores.len(), "libretro core scan completed");
     Ok(cores)
 }
 
@@ -180,13 +202,19 @@ fn is_libretro_core(file_name: &str) -> bool {
 
 /// Resolves a configured core value to a concrete path. Absolute paths (or
 /// values containing a path separator, e.g. `"subdir/core.so"`) are used
-/// as-is; bare file names are joined onto `cores_dir`.
-pub fn resolve_core_path(core: &Path, cores_dir: &Path) -> PathBuf {
+/// as-is; bare file names are joined onto the first configured core
+/// directory containing the file, or the first configured directory when the
+/// file is missing.
+pub fn resolve_core_path(core: &Path, cores_dirs: &[PathBuf]) -> PathBuf {
     if core.is_absolute() || core.components().count() > 1 {
-        core.to_owned()
-    } else {
-        cores_dir.join(core)
+        return core.to_owned();
     }
+    cores_dirs
+        .iter()
+        .map(|cores_dir| cores_dir.join(core))
+        .find(|path| path.is_file())
+        .or_else(|| cores_dirs.first().map(|cores_dir| cores_dir.join(core)))
+        .unwrap_or_else(|| core.to_owned())
 }
 
 /// The ROM content to hand to RetroArch. Unlike [`LaunchRequest::from_item`],
@@ -259,6 +287,45 @@ pub struct LaunchedGame {
     pub unit_name: String,
 }
 
+impl LaunchedGame {
+    /// Return whether systemd still considers this launched game unit active or
+    /// in an active transition. This works for transient Native/RetroArch units
+    /// and installed PortMaster template instances.
+    pub async fn is_active(&self) -> Result<bool, LaunchError> {
+        Ok(marina_systemd::user_unit_is_active(&self.unit_name).await?)
+    }
+}
+
+/// A Marina-created transient game service that systemd still reports as active.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RunningGame {
+    pub unit_name: String,
+    pub item_id: String,
+    pub application_id: String,
+    pub title: String,
+    pub platform_slug: Option<String>,
+    pub backend: RuntimeBackend,
+}
+
+#[derive(Debug, Default)]
+struct LaunchRegistryState {
+    launching: bool,
+    running: Option<RunningGame>,
+}
+
+#[derive(Debug, Default)]
+struct LaunchRegistry {
+    state: Mutex<LaunchRegistryState>,
+}
+
+static TRANSIENT_LAUNCH_REGISTRY: OnceLock<Arc<LaunchRegistry>> = OnceLock::new();
+
+fn transient_launch_registry() -> Arc<LaunchRegistry> {
+    TRANSIENT_LAUNCH_REGISTRY
+        .get_or_init(|| Arc::new(LaunchRegistry::default()))
+        .clone()
+}
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub enum RuntimeBackend {
     #[default]
@@ -278,10 +345,16 @@ pub enum LaunchError {
     MissingCore { platform: String },
     #[error("RetroArch core not found: {core} ({hint})")]
     CoreNotFound { core: String, hint: String },
-    #[error("failed to invoke systemd-run: {0}")]
+    #[error("failed to invoke a system utility: {0}")]
     Spawn(#[source] std::io::Error),
-    #[error("systemd-run failed with status {status}: {stderr}")]
+    #[error("system utility failed with status {status}: {stderr}")]
     Systemd { status: String, stderr: String },
+    #[error("failed to launch through the systemd user manager: {0}")]
+    SystemdDbus(#[from] marina_systemd::Error),
+    #[error("a Marina transient game launch is already in progress")]
+    LaunchInProgress,
+    #[error("a Marina game is already running: {unit_name} ({title})")]
+    GameAlreadyRunning { unit_name: String, title: String },
     #[error("runtime backend is not implemented: {0}")]
     UnsupportedBackend(String),
     #[error("invalid PortMaster launcher path: {path}")]
@@ -295,12 +368,128 @@ pub enum LaunchError {
 }
 
 /// Launches games as transient per-user systemd services in `graphical-apps.slice`.
-#[derive(Clone, Debug, Default)]
+#[derive(Clone, Debug)]
 pub struct GameLauncher {
     backend: RuntimeBackend,
     retroarch: RetroArchConfig,
     portmaster: portmaster::Config,
     platforms: HashMap<String, PlatformRuntimeConfig>,
+    registry: Arc<LaunchRegistry>,
+}
+
+impl Default for GameLauncher {
+    fn default() -> Self {
+        Self {
+            backend: RuntimeBackend::default(),
+            retroarch: RetroArchConfig::default(),
+            portmaster: portmaster::Config::default(),
+            platforms: HashMap::new(),
+            registry: transient_launch_registry(),
+        }
+    }
+}
+
+struct LaunchPermit {
+    registry: Arc<LaunchRegistry>,
+    committed: bool,
+}
+
+impl LaunchRegistry {
+    async fn reserve(self: &Arc<Self>) -> Result<LaunchPermit, LaunchError> {
+        let running = {
+            let mut state = self.state.lock().expect("launch registry lock poisoned");
+            if state.launching {
+                return Err(LaunchError::LaunchInProgress);
+            }
+            state.launching = true;
+            state.running.clone()
+        };
+
+        if let Some(running) = running {
+            match marina_systemd::user_unit_is_active(&running.unit_name).await {
+                Ok(true) => {
+                    self.release_reservation();
+                    return Err(LaunchError::GameAlreadyRunning {
+                        unit_name: running.unit_name,
+                        title: running.title,
+                    });
+                }
+                Ok(false) => {
+                    let mut state = self.state.lock().expect("launch registry lock poisoned");
+                    if state
+                        .running
+                        .as_ref()
+                        .is_some_and(|current| current.unit_name == running.unit_name)
+                    {
+                        state.running = None;
+                    }
+                }
+                Err(error) => {
+                    self.release_reservation();
+                    return Err(error.into());
+                }
+            }
+        }
+
+        Ok(LaunchPermit {
+            registry: self.clone(),
+            committed: false,
+        })
+    }
+
+    async fn running_games(&self) -> Result<Vec<RunningGame>, LaunchError> {
+        let running = self
+            .state
+            .lock()
+            .expect("launch registry lock poisoned")
+            .running
+            .clone();
+        let Some(running) = running else {
+            return Ok(Vec::new());
+        };
+
+        if marina_systemd::user_unit_is_active(&running.unit_name).await? {
+            return Ok(vec![running]);
+        }
+
+        let mut state = self.state.lock().expect("launch registry lock poisoned");
+        if state
+            .running
+            .as_ref()
+            .is_some_and(|current| current.unit_name == running.unit_name)
+        {
+            state.running = None;
+        }
+        Ok(Vec::new())
+    }
+
+    fn commit(&self, running: RunningGame) {
+        let mut state = self.state.lock().expect("launch registry lock poisoned");
+        state.running = Some(running);
+        state.launching = false;
+    }
+
+    fn release_reservation(&self) {
+        self.state
+            .lock()
+            .expect("launch registry lock poisoned")
+            .launching = false;
+    }
+}
+
+impl LaunchPermit {
+    fn commit(mut self, running: RunningGame) {
+        self.registry.commit(running);
+        self.committed = true;
+    }
+}
+
+impl Drop for LaunchPermit {
+    fn drop(&mut self) {
+        if !self.committed {
+            self.registry.release_reservation();
+        }
+    }
 }
 
 impl RuntimeBackend {
@@ -391,6 +580,13 @@ impl GameLauncher {
         &self.platforms
     }
 
+    /// Return Marina-created transient game services that systemd still reports
+    /// as active. This is the runtime snapshot used to prevent duplicate
+    /// launches and will later drive input-profile selection.
+    pub async fn running_games(&self) -> Result<Vec<RunningGame>, LaunchError> {
+        self.registry.running_games().await
+    }
+
     pub async fn launch_item(&self, item: &LibraryItem) -> Result<LaunchedGame, LaunchError> {
         debug!(
             game_id = %item.id,
@@ -410,7 +606,28 @@ impl GameLauncher {
             self.backend.clone()
         };
         debug!(game_id = %item.id, backend = ?backend, "dispatching launch request");
-        match backend {
+        let tracked = matches!(
+            &backend,
+            RuntimeBackend::Native | RuntimeBackend::RetroArch(_)
+        );
+        let permit = if tracked {
+            Some(self.registry.reserve().await?)
+        } else {
+            None
+        };
+        let running = tracked.then(|| RunningGame {
+            unit_name: String::new(),
+            item_id: item.id.to_string(),
+            application_id: item
+                .provider_ids
+                .get("xdg.desktop")
+                .cloned()
+                .unwrap_or_else(|| item.id.to_string()),
+            title: item.title.clone(),
+            platform_slug: item.platform_slug.clone(),
+            backend: backend.clone(),
+        });
+        let result = match backend {
             RuntimeBackend::Native => {
                 let request = LaunchRequest::from_item(item).ok_or_else(|| {
                     warn!(game_id = %item.id, "launch request has no executable path");
@@ -439,7 +656,8 @@ impl GameLauncher {
                     "Runtime({runtime})"
                 )))
             }
-        }
+        };
+        self.finish_tracked_launch(result, permit, running)
     }
 
     pub async fn launch(&self, request: LaunchRequest) -> Result<LaunchedGame, LaunchError> {
@@ -451,7 +669,24 @@ impl GameLauncher {
             backend = ?self.backend,
             "launch backend invoked"
         );
-        match &self.backend {
+        let tracked = matches!(
+            &self.backend,
+            RuntimeBackend::Native | RuntimeBackend::RetroArch(_)
+        );
+        let permit = if tracked {
+            Some(self.registry.reserve().await?)
+        } else {
+            None
+        };
+        let running = tracked.then(|| RunningGame {
+            unit_name: String::new(),
+            item_id: request.item_id.clone(),
+            application_id: request.application_id.clone(),
+            title: request.title.clone(),
+            platform_slug: None,
+            backend: self.backend.clone(),
+        });
+        let result = match &self.backend {
             RuntimeBackend::Native => self.launch_native(request).await,
             RuntimeBackend::Runtime(runtime) => {
                 warn!(runtime = %runtime, "runtime backend is not implemented");
@@ -470,6 +705,25 @@ impl GameLauncher {
                 self.launch_retroarch(&item, &core, &request.executable)
                     .await
             }
+        };
+        self.finish_tracked_launch(result, permit, running)
+    }
+
+    fn finish_tracked_launch(
+        &self,
+        result: Result<LaunchedGame, LaunchError>,
+        permit: Option<LaunchPermit>,
+        running: Option<RunningGame>,
+    ) -> Result<LaunchedGame, LaunchError> {
+        match result {
+            Ok(launched) => {
+                if let (Some(permit), Some(mut running)) = (permit, running) {
+                    running.unit_name.clone_from(&launched.unit_name);
+                    permit.commit(running);
+                }
+                Ok(launched)
+            }
+            Err(error) => Err(error),
         }
     }
 
@@ -501,7 +755,15 @@ impl GameLauncher {
                 .map(|core| core.name)
                 .collect::<Vec<_>>();
             let hint = if available.is_empty() {
-                format!("no cores found in {}", self.retroarch.cores_dir.display())
+                format!(
+                    "no cores found in {}",
+                    self.retroarch
+                        .cores_dir
+                        .iter()
+                        .map(|dir| dir.display().to_string())
+                        .collect::<Vec<_>>()
+                        .join(", ")
+                )
             } else {
                 format!("available: {}", available.join(", "))
             };
@@ -511,12 +773,13 @@ impl GameLauncher {
                 hint,
             });
         }
-        let application_id = item
-            .provider_ids
-            .get("xdg.desktop")
-            .cloned()
-            .unwrap_or_else(|| item.id.to_string());
-        let unit_name = unit_name(&application_id);
+        if retroarch_is_running().await? {
+            return Err(LaunchError::GameAlreadyRunning {
+                unit_name: RETROARCH_UNIT_NAME.to_owned(),
+                title: "RetroArch".to_owned(),
+            });
+        }
+        let unit_name = RETROARCH_UNIT_NAME.to_owned();
         info!(unit = %unit_name, slice = APP_SLICE, core = %core, rom = %rom.display(), "starting retroarch transient launch service");
         let args = retroarch_argv(&self.retroarch.extra_args, core, rom);
         run_transient(
@@ -541,22 +804,8 @@ pub(crate) async fn start_user_service(
     unit_name: &str,
     title: &str,
 ) -> Result<LaunchedGame, LaunchError> {
-    let output = Command::new("systemctl")
-        .args(["--user", "start", "--no-block", unit_name])
-        .stdin(Stdio::null())
-        .output()
-        .await
-        .map_err(LaunchError::Spawn)?;
-    if !output.status.success() {
-        return Err(LaunchError::Systemd {
-            status: output
-                .status
-                .code()
-                .map_or_else(|| "signal".to_owned(), |code| code.to_string()),
-            stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
-        });
-    }
-    tracing::info!(unit = %unit_name, title = %title, "launched user service");
+    let job = marina_systemd::start_user_unit(unit_name).await?;
+    tracing::info!(unit = %unit_name, title = %title, job = %job, "queued user service launch");
     Ok(LaunchedGame {
         unit_name: unit_name.to_owned(),
     })
@@ -569,34 +818,17 @@ async fn run_transient(
     working_directory: Option<&Path>,
     title: &str,
 ) -> Result<LaunchedGame, LaunchError> {
-    let mut command = Command::new(SYSTEMD_RUN);
-    command.args(systemd_run_args(unit_name));
-    if let Some(working_directory) = working_directory {
-        command.args([
-            "--working-directory",
-            working_directory.to_string_lossy().as_ref(),
-        ]);
-    }
-    let output = command
-        .arg(executable)
-        .args(arguments)
-        .stdin(Stdio::null())
-        .output()
-        .await
-        .map_err(LaunchError::Spawn)?;
+    let service = marina_systemd::TransientService {
+        unit_name: unit_name.to_owned(),
+        description: title.to_owned(),
+        executable: executable.to_string_lossy().into_owned(),
+        arguments: arguments.to_vec(),
+        working_directory: working_directory.map(|path| path.to_string_lossy().into_owned()),
+        slice: APP_SLICE.to_owned(),
+    };
+    let job = marina_systemd::start_transient_user_service(&service).await?;
 
-    if !output.status.success() {
-        warn!(unit = %unit_name, status = ?output.status, "transient launch service failed");
-        return Err(LaunchError::Systemd {
-            status: output
-                .status
-                .code()
-                .map_or_else(|| "signal".to_owned(), |code| code.to_string()),
-            stderr: String::from_utf8_lossy(&output.stderr).trim().to_owned(),
-        });
-    }
-
-    tracing::info!(unit = %unit_name, title = %title, path = %executable.display(), "launched game");
+    tracing::info!(unit = %unit_name, title = %title, path = %executable.display(), job = %job, "queued game launch");
     Ok(LaunchedGame {
         unit_name: unit_name.to_owned(),
     })
@@ -608,19 +840,6 @@ fn unit_name(application_id: &str) -> String {
 
 fn ulid() -> String {
     Ulid::new().to_string()
-}
-
-fn systemd_run_args(unit_name: &str) -> [&str; 8] {
-    [
-        "--user",
-        "--no-block",
-        "--collect",
-        "--quiet",
-        "--unit",
-        unit_name,
-        "--slice",
-        APP_SLICE,
-    ]
 }
 
 #[cfg(test)]
@@ -647,11 +866,16 @@ mod tests {
     }
 
     #[test]
-    fn unit_names_follow_desktop_app_convention() {
+    fn native_unit_names_follow_desktop_app_convention() {
         let first = unit_name("game-id");
         assert!(first.starts_with("app-game-id-"));
         assert!(first.ends_with(".service"));
         assert_eq!(first.len(), "app-game-id-".len() + 26 + ".service".len());
+    }
+
+    #[test]
+    fn retroarch_uses_a_stable_singleton_unit_name() {
+        assert_eq!(RETROARCH_UNIT_NAME, "marina-retroarch.service");
     }
 
     #[test]
@@ -663,6 +887,75 @@ mod tests {
                 .bytes()
                 .all(|byte| byte.is_ascii_digit() || (b'A'..=b'Z').contains(&byte))
         );
+    }
+
+    fn running_game(unit_name: &str) -> RunningGame {
+        RunningGame {
+            unit_name: unit_name.to_owned(),
+            item_id: "item-1".to_owned(),
+            application_id: "example.desktop".to_owned(),
+            title: "Example".to_owned(),
+            platform_slug: Some("apps".to_owned()),
+            backend: RuntimeBackend::Native,
+        }
+    }
+
+    #[test]
+    fn launch_permit_releases_an_unsuccessful_reservation() {
+        let registry = Arc::new(LaunchRegistry {
+            state: Mutex::new(LaunchRegistryState {
+                launching: true,
+                running: None,
+            }),
+        });
+        let permit = LaunchPermit {
+            registry: registry.clone(),
+            committed: false,
+        };
+
+        drop(permit);
+
+        assert!(
+            !registry
+                .state
+                .lock()
+                .expect("launch registry lock poisoned")
+                .launching
+        );
+    }
+
+    #[test]
+    fn launch_permit_commits_the_running_game() {
+        let registry = Arc::new(LaunchRegistry {
+            state: Mutex::new(LaunchRegistryState {
+                launching: true,
+                running: None,
+            }),
+        });
+        let permit = LaunchPermit {
+            registry: registry.clone(),
+            committed: false,
+        };
+
+        permit.commit(running_game("app-example.service"));
+
+        let state = registry
+            .state
+            .lock()
+            .expect("launch registry lock poisoned");
+        assert!(!state.launching);
+        assert_eq!(
+            state.running.as_ref().map(|game| game.unit_name.as_str()),
+            Some("app-example.service")
+        );
+    }
+
+    #[test]
+    fn launchers_share_the_transient_registry() {
+        let first = GameLauncher::new();
+        let second = GameLauncher::new();
+
+        assert!(Arc::ptr_eq(&first.registry, &second.registry));
     }
 
     #[test]
@@ -736,7 +1029,10 @@ mod tests {
         assert_eq!(config.binary, PathBuf::from("retroarch"));
         assert_eq!(
             config.cores_dir,
-            PathBuf::from("/var/games/retroarch/cores")
+            vec![
+                PathBuf::from("/var/games/retroarch/cores"),
+                PathBuf::from("/usr/lib64/libretro/"),
+            ]
         );
         assert!(config.extra_args.is_empty());
     }
@@ -862,17 +1158,49 @@ mod tests {
     fn core_names_resolve_against_cores_dir() {
         let cores_dir = Path::new("/var/games/retroarch/cores");
         assert_eq!(
-            resolve_core_path(Path::new("mgba_libretro.so"), cores_dir),
+            resolve_core_path(Path::new("mgba_libretro.so"), &[cores_dir.to_path_buf()],),
             cores_dir.join("mgba_libretro.so")
         );
         assert_eq!(
-            resolve_core_path(Path::new("/opt/cores/snes9x_libretro.so"), cores_dir),
+            resolve_core_path(
+                Path::new("/opt/cores/snes9x_libretro.so"),
+                &[cores_dir.to_path_buf()],
+            ),
             PathBuf::from("/opt/cores/snes9x_libretro.so")
         );
         assert_eq!(
-            resolve_core_path(Path::new("custom/snes9x_libretro.so"), cores_dir),
+            resolve_core_path(
+                Path::new("custom/snes9x_libretro.so"),
+                &[cores_dir.to_path_buf()],
+            ),
             PathBuf::from("custom/snes9x_libretro.so")
         );
+    }
+
+    #[test]
+    fn core_paths_and_discovery_support_multiple_directories() {
+        let first = temp_dir("cores-first");
+        let second = temp_dir("cores-second");
+        write_file(&second, "snes9x_libretro.so");
+
+        assert_eq!(
+            resolve_core_path(
+                Path::new("snes9x_libretro.so"),
+                &[first.clone(), second.clone()],
+            ),
+            second.join("snes9x_libretro.so")
+        );
+        assert_eq!(
+            discover_cores(&[first.clone(), second.clone()])
+                .unwrap()
+                .into_iter()
+                .map(|core| core.name)
+                .collect::<Vec<_>>(),
+            vec!["snes9x_libretro.so"]
+        );
+
+        std::fs::remove_dir_all(&first).unwrap();
+        std::fs::remove_dir_all(&second).unwrap();
     }
 
     #[test]
@@ -883,7 +1211,7 @@ mod tests {
         write_file(&dir, "retroarch.cfg");
         write_file(&dir, "README.txt");
 
-        let cores = discover_cores(&dir).unwrap();
+        let cores = discover_cores(&[dir.clone()]).unwrap();
         assert_eq!(
             cores
                 .iter()
@@ -983,7 +1311,7 @@ mod tests {
         );
         let launcher = GameLauncher::new()
             .with_retroarch_config(RetroArchConfig {
-                cores_dir: cores_dir.clone(),
+                cores_dir: vec![cores_dir.clone()],
                 ..RetroArchConfig::default()
             })
             .with_platform_configs(platforms);
@@ -1030,12 +1358,12 @@ mod tests {
             "missing default value:\n{out}"
         );
         assert!(
-            out.contains("Directory scanned for libretro cores"),
+            out.contains("Directories scanned for libretro cores"),
             "missing doc comment:\n{out}"
         );
         assert!(
-            out.contains("MARINA_RETROARCH_CORES_DIR"),
-            "missing env note:\n{out}"
+            !out.contains("MARINA_RETROARCH_CORES_DIR"),
+            "vector fields should not render a scalar env override:\n{out}"
         );
     }
 }
