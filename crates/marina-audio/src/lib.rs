@@ -1,4 +1,4 @@
-//! Native PipeWire volume controls for Marina.
+//! PipeWire volume controls for Marina.
 
 use thiserror::Error;
 
@@ -17,18 +17,14 @@ pub enum AudioError {
 }
 
 mod backend {
-    use std::{cell::RefCell, io::Cursor, rc::Rc, time::Duration};
+    use std::{cell::RefCell, process::Command, rc::Rc, time::Duration};
 
     use pipewire as pw;
     use pw::{
         node::{Node, NodeListener},
         spa::{
             param::ParamType,
-            pod::{
-                Object, Pod, Property, PropertyFlags, Value, ValueArray,
-                deserialize::PodDeserializer, serialize::PodSerializer,
-            },
-            utils::SpaTypes,
+            pod::{Pod, Value, ValueArray, deserialize::PodDeserializer},
         },
         types::ObjectType,
     };
@@ -99,55 +95,22 @@ mod backend {
     }
 
     pub fn set_volume(percent: u8) -> Result<(), AudioError> {
-        pw::init();
-        let main_loop = pw::main_loop::MainLoopRc::new(None).map_err(error)?;
-        let context = pw::context::ContextRc::new(&main_loop, None).map_err(error)?;
-        let core = context.connect_rc(None).map_err(error)?;
-        let registry = core.get_registry_rc().map_err(error)?;
-        let sink = Rc::new(RefCell::new(None::<SinkProxy>));
-        let applied = Rc::new(RefCell::new(false));
+        let volume = format!("{}%", percent.min(100));
+        let output = Command::new("wpctl")
+            .args(["set-volume", "@DEFAULT_AUDIO_SINK@", &volume])
+            .output()
+            .map_err(|error| AudioError::PipeWire(format!("failed to run wpctl: {error}")))?;
 
-        let registry_weak = registry.downgrade();
-        let loop_weak = main_loop.downgrade();
-        let sink_for_global = sink.clone();
-        let applied_for_global = applied.clone();
-        let timeout_loop = main_loop.clone();
-        let timeout = main_loop.loop_().add_timer(move |_| timeout_loop.quit());
-        let _ = timeout.update_timer(Some(Duration::from_secs(1)), None);
-        let _registry_listener = registry
-            .add_listener_local()
-            .global(move |object| {
-                if sink_for_global.borrow().is_some() || !is_audio_sink(object) {
-                    return;
-                }
-                let Some(registry) = registry_weak.upgrade() else {
-                    return;
-                };
-                let Ok(node) = registry.bind::<Node, _>(object) else {
-                    return;
-                };
-                if let Ok(bytes) = volume_pod(percent) {
-                    if let Some(pod) = Pod::from_bytes(&bytes) {
-                        node.set_param(ParamType::Props, 0, pod);
-                        *applied_for_global.borrow_mut() = true;
-                    }
-                }
-                *sink_for_global.borrow_mut() = Some(SinkProxy {
-                    _node: node,
-                    _listener: None,
-                });
-                if let Some(main_loop) = loop_weak.upgrade() {
-                    main_loop.quit();
-                }
-            })
-            .register();
-
-        main_loop.run();
-        if *applied.borrow() {
-            Ok(())
-        } else {
-            Err(AudioError::NoSink)
+        if output.status.success() {
+            return Ok(());
         }
+
+        let message = String::from_utf8_lossy(&output.stderr).trim().to_owned();
+        Err(AudioError::PipeWire(if message.is_empty() {
+            format!("wpctl exited with {}", output.status)
+        } else {
+            message
+        }))
     }
 
     fn is_audio_sink(object: &pw::registry::GlobalObject<&pw::spa::utils::dict::DictRef>) -> bool {
@@ -183,29 +146,37 @@ mod backend {
             }
         }
         Some(VolumeState {
-            percent: (volume? * 100.0).round().clamp(0.0, 100.0) as u8,
+            percent: (raw_volume_to_normalized(volume?) * 100.0)
+                .round()
+                .clamp(0.0, 100.0) as u8,
             muted,
         })
     }
 
-    fn volume_pod(percent: u8) -> Result<Vec<u8>, AudioError> {
-        let volume = f32::from(percent.min(100)) / 100.0;
-        let object = Object {
-            type_: SpaTypes::ObjectParamProps.as_raw(),
-            id: ParamType::Props.as_raw(),
-            properties: vec![Property {
-                key: pw::spa::sys::SPA_PROP_volume,
-                flags: PropertyFlags::empty(),
-                value: Value::Float(volume),
-            }],
-        };
-        PodSerializer::serialize(Cursor::new(Vec::new()), &Value::Object(object))
-            .map(|success| success.0.into_inner())
-            .map_err(|error| AudioError::PipeWire(error.to_string()))
+    // SPA stores volume on a cubic scale, while WirePlumber tools such as wpctl
+    // expose the cube root as the user-facing normalized volume.
+    fn raw_volume_to_normalized(volume: f32) -> f32 {
+        volume.max(0.0).cbrt()
     }
 
     fn error(error: pw::Error) -> AudioError {
         AudioError::PipeWire(error.to_string())
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::raw_volume_to_normalized;
+
+        #[test]
+        fn converts_pipewire_cubic_volume_to_normalized_scale() {
+            assert!((raw_volume_to_normalized(0.125) - 0.5).abs() < f32::EPSILON);
+            assert!((raw_volume_to_normalized(0.512) - 0.8).abs() < f32::EPSILON);
+        }
+
+        #[test]
+        fn volume_scale_conversion_clamps_negative_values() {
+            assert_eq!(raw_volume_to_normalized(-0.1), 0.0);
+        }
     }
 }
 
