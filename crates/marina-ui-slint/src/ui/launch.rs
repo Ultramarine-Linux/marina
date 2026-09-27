@@ -88,6 +88,7 @@ fn report_romm_play_activity(target: RommSessionTarget) {
 }
 
 async fn download_romm_save_snapshots(target: &RommSessionTarget) {
+    NOTIFICATION.info("Checking RomM saves…");
     match marina_romm::download_save_directory(
         &target.client,
         target.rom_id,
@@ -111,6 +112,10 @@ async fn download_romm_save_snapshots(target: &RommSessionTarget) {
                     report.downloaded,
                     if report.downloaded == 1 { "" } else { "s" }
                 ));
+            } else if report.failures.is_empty() && report.available > 0 {
+                NOTIFICATION.info("RomM saves are up to date");
+            } else if report.failures.is_empty() {
+                NOTIFICATION.info("No RomM saves found");
             }
             if !report.failures.is_empty() {
                 NOTIFICATION.error(format!(
@@ -252,6 +257,16 @@ async fn monitor_launched_game(
     }
 }
 
+fn begin_launch(window: &MainWindow, game_id: &SharedString) -> bool {
+    let game = window.global::<GameState>();
+    if game.get_launching_game_id() == *game_id || game.get_playing_game_id() == *game_id {
+        return false;
+    }
+    game.set_launch_sheet_open(false);
+    game.set_launching_game_id(game_id.clone());
+    true
+}
+
 fn select_launch_artifact(item: &mut LibraryItem, index: usize) -> bool {
     if index >= item.files.len() {
         return false;
@@ -352,6 +367,7 @@ fn queue_launch(
                     }
                     Err(error) => {
                         error!(%error, game_id = %game_id, "failed to launch game");
+                        NOTIFICATION.error_with_title("Launch failed", error.to_string());
                         publish_launch_status(&window, game_id, LaunchUiStatus::Idle);
                     }
                 }
@@ -382,11 +398,9 @@ pub(crate) fn install(
         let Some(window) = play_window.upgrade() else {
             return;
         };
-        let game = window.global::<GameState>();
-        if game.get_launching_game_id() == id || game.get_playing_game_id() == id {
+        if !begin_launch(&window, &id) {
             return;
         }
-        game.set_launching_game_id(id.clone());
         drop(window);
 
         let state = play_state
@@ -418,12 +432,9 @@ pub(crate) fn install(
             let Some(window) = artifact_window.upgrade() else {
                 return;
             };
-            let game = window.global::<GameState>();
-            if game.get_launching_game_id() == id || game.get_playing_game_id() == id {
+            if !begin_launch(&window, &id) {
                 return;
             }
-            game.set_launch_sheet_open(false);
-            game.set_launching_game_id(id.clone());
             drop(window);
 
             let state = artifact_state

@@ -9,7 +9,7 @@ use std::{
 
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 
-use crate::{MainWindow, ToastItem, ToastQueue, ToastVariant};
+use crate::{ErrorSheetState, MainWindow, ToastItem, ToastQueue, ToastVariant};
 
 const TOAST_DURATION: Duration = Duration::from_secs(4);
 const TOAST_DISMISS_ANIMATION: Duration = Duration::from_millis(250);
@@ -84,7 +84,31 @@ impl NotificationService {
     }
 
     pub(crate) fn error(&self, text: impl Into<String>) {
-        self.show(text, ToastVariant::Error);
+        self.error_with_title("Something went wrong", text);
+    }
+
+    pub(crate) fn error_with_title(&self, title: impl Into<String>, message: impl Into<String>) {
+        let Some(window) = self.window.get().map(|window| {
+            window
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .clone()
+        }) else {
+            tracing::warn!(message = %message.into(), "error notification dropped before UI initialization");
+            return;
+        };
+        let title = title.into();
+        let message = message.into();
+        let _ = window.upgrade_in_event_loop(move |window| {
+            let error = window.global::<ErrorSheetState>();
+            error.set_title(SharedString::from(title));
+            error.set_message(SharedString::from(message));
+            error.set_open(true);
+        });
+    }
+
+    pub(crate) fn info(&self, text: impl Into<String>) {
+        self.show(text, ToastVariant::Default);
     }
 
     pub(crate) fn success(&self, text: impl Into<String>) {

@@ -15,8 +15,8 @@
 use std::sync::{Mutex, OnceLock};
 
 use crate::{
-    BreadcrumbItem, GameState, HomeState, LibraryState, MainWindow, ShellPage, ShellState,
-    StoreState,
+    BreadcrumbItem, ErrorSheetState, GameState, HomeState, LibraryState, MainWindow, ShellPage,
+    ShellState, StoreState,
 };
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 
@@ -243,6 +243,12 @@ fn pop() -> Option<Crumb> {
 /// entry editing, …) register an arm here instead of growing tab-specific
 /// helpers.
 pub(crate) fn dismiss_overlay(window: &MainWindow) -> bool {
+    let error = window.global::<ErrorSheetState>();
+    if error.get_open() {
+        error.set_open(false);
+        return true;
+    }
+
     match window.global::<ShellState>().get_page() {
         ShellPage::GameDetails => {
             let game = window.global::<GameState>();

@@ -12,6 +12,7 @@ import { PreviewDetailsData } from "../components/preview-details.slint";
 import { CrumbHeader } from "../components/crumb-header.slint";
 import { FocusListScroll } from "../components/focus-list-scroll.slint";
 import { ShellState } from "../components/app-shell.slint";
+import { Badge, BadgeSize, BadgeVariant } from "../slintcn/components/badge.slint";
 
 export global LibraryState {
     in-out property <[PlatformCardData]> platforms;
@@ -208,47 +209,41 @@ export component LibraryPage inherits Rectangle {
                 border-width: i == root.selected-platform-index && page-focus.has-focus ? Tokens.focus-ring-width : 0px;
                 border-color: Tokens.color-ring-muted;
 
+                HorizontalLayout {
+                    padding-left: Tokens.spacing-2xl;
+                    padding-right: Tokens.spacing-2xl;
+                    spacing: Tokens.spacing-md;
 
-                Image {
-                    x: Tokens.spacing-2xl;
-                    y: 8px;
-                    width: 36px;
-                    height: 36px;
-                    source: platform.icon;
-                    image-fit: contain;
-                }
-                // Text {
-                //     x: Tokens.spacing-sm;
-                //     y: 8px;
-                //     width: 36px;
-                //     height: 36px;
-                //     text: platform.icon;
-                //     font-size: 22px;
-                //     horizontal-alignment: center;
-                //     vertical-alignment: center;
-                // }
-
-                Typography {
-                    x: Tokens.spacing-2xl + 48px;
-                    y: 0px;
-                    width: parent.width - 2 * Tokens.spacing-2xl - 48px - 88px;
-                    height: parent.height;
-                    text: platform.name;
-                    variant: TextVariant.body-lg;
-                    vertical-alignment: center;
-                    overflow: elide;
-                }
-
-                Typography {
-                    x: parent.width - Tokens.spacing-2xl - 72px;
-                    y: 0px;
-                    width: 72px;
-                    height: parent.height;
-                    text: platform.game-count;
-                    variant: TextVariant.caption;
-                    tone: TextTone.muted;
-                    horizontal-alignment: right;
-                    vertical-alignment: center;
+                    Image {
+                        width: 36px;
+                        height: 36px;
+                        source: platform.icon;
+                        image-fit: contain;
+                    }
+                    Typography {
+                        horizontal-stretch: 1;
+                        text: platform.name;
+                        variant: TextVariant.body-lg;
+                        vertical-alignment: center;
+                        overflow: elide;
+                    }
+                    VerticalLayout {
+                        horizontal-stretch: 0;
+                        alignment: center;
+                        Badge {
+                            text: platform.slug;
+                            variant: BadgeVariant.outline;
+                            size: BadgeSize.sm;
+                        }
+                    }
+                    Typography {
+                        width: 96px;
+                        text: platform.game-count;
+                        variant: TextVariant.caption;
+                        tone: TextTone.muted;
+                        horizontal-alignment: right;
+                        vertical-alignment: center;
+                    }
                 }
 
                 platform-touch := TouchArea {

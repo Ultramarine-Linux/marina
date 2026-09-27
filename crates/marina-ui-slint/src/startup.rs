@@ -194,11 +194,14 @@ pub(crate) async fn hydrate_startup_platforms(
 
     let cards = platforms
         .into_iter()
-        .map(|platform| PlatformCardMetadata {
-            icon_path: platform_asset_path(&platform.slug),
-            slug: platform.slug,
-            name: platform.name,
-            game_count: "Loading…".to_owned(),
+        .map(|platform| {
+            let name = crate::ui::platform_names::display_name(&platform.slug, &platform.name);
+            PlatformCardMetadata {
+                icon_path: platform_asset_path(&platform.slug),
+                slug: platform.slug,
+                name,
+                game_count: "Loading…".to_owned(),
+            }
         })
         .collect::<Vec<_>>();
     let icon_jobs = cards

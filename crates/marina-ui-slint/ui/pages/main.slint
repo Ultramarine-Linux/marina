@@ -5,6 +5,7 @@ import { NetworkState } from "../components/network-indicator.slint";
 import { ClockState } from "../components/clock-indicator.slint";
 import { PageRouter } from "../components/page-router.slint";
 import { Toaster } from "../slintcn/components/toast.slint";
+import { ErrorSheet, ErrorSheetState } from "../slintcn/components/error-sheet.slint";
 import { ShellPage } from "route.slint";
 import { ShellState } from "../components/app-shell.slint";
 import { HomeState } from "../components/shelf.slint";
@@ -13,6 +14,7 @@ import { GameState } from "../components/game-details-view.slint";
 import { StoreState } from "store.slint";
 
 export { ToastQueue, ToastItem, ToastVariant } from "../slintcn/components/toast.slint";
+export { ErrorSheetState } from "../slintcn/components/error-sheet.slint";
 export { ShellPage } from "route.slint";
 export { ShellState } from "../components/app-shell.slint";
 export { BatteryState } from "../components/battery-indicator.slint";
@@ -65,6 +67,11 @@ export component MainWindow inherits Window {
     focus-content => { ShellState.content-focus-request += 1; }
 
     Toaster {
+        width: parent.width;
+        height: parent.height;
+    }
+
+    ErrorSheet {
         width: parent.width;
         height: parent.height;
     }

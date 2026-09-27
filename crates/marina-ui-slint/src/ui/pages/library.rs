@@ -499,7 +499,10 @@ pub(crate) async fn refresh_platform_cards(
     };
     let platform_names = platforms
         .into_iter()
-        .map(|platform| (platform.slug, platform.name))
+        .map(|platform| {
+            let name = super::super::platform_names::display_name(&platform.slug, &platform.name);
+            (platform.slug, name)
+        })
         .collect::<BTreeMap<_, _>>();
 
     let initial_platforms = platform_names
