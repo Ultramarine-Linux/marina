@@ -5,7 +5,7 @@ use slint::{
     ComponentHandle,
     platform::{Key, WindowEvent},
 };
-use tracing::error;
+use tracing::{debug, error};
 
 use crate::ui::{nav, notifications::NOTIFICATION};
 use crate::{MainWindow, ProfileAction, ShellPage, ShellState, StoreState};
@@ -54,8 +54,10 @@ pub(crate) fn configure_navigation(window: &MainWindow) {
 ///
 /// This is deliberately independent of controller discovery: keyboard and
 /// pointer users need the same focus guarantee after a compositor focus reset.
+#[tracing::instrument(skip_all)]
 pub(crate) fn restore_content_focus(window: &MainWindow) {
     let shell = window.global::<ShellState>();
+    debug!("Restoring content focus");
     shell.set_content_focus_request(shell.get_content_focus_request() + 1);
 }
 

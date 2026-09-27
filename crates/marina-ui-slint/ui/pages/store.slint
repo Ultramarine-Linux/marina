@@ -229,6 +229,7 @@ export component StorePage inherits Rectangle {
                 if (root.page == 1 && root.games.length > 0) {
                     root.select-game(root.selected-game-index);
                     root.page = 2;
+                    root.details-focus-request += 1;
                     return accept;
                 }
             }
@@ -310,7 +311,10 @@ export component StorePage inherits Rectangle {
             details-loading <=> root.details-loading;
             keyboard-active: page-focus.has-focus;
             selected(id, index) => { root.game-selected(id, index); }
-            activate-requested => { root.page = 2; }
+            activate-requested => {
+                root.page = 2;
+                root.details-focus-request += 1;
+            }
             focus-header => { root.focus-header(); }
             vertical-stretch: 1;
         }
@@ -323,6 +327,7 @@ export component StorePage inherits Rectangle {
         tags: root.tags;
         loading: root.details-loading;
         action-label: "Download";
+        suspend-action-focus: root.artifact-sheet-open || root.install-status != "";
         focus-request: root.details-focus-request;
         action-requested => {
             if root.direct-install {

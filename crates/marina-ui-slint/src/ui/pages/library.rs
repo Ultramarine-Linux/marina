@@ -222,6 +222,7 @@ pub(crate) fn install(
                 // Publish again now that the route matches: the title crumb
                 // only appends on the details route.
                 crate::ui::nav::publish(&window);
+                crate::ui::controls::restore_content_focus(&window);
             });
         });
 
@@ -271,6 +272,7 @@ pub(crate) fn install(
             // Publish again now that the route matches: the title crumb
             // only appends on the details route.
             crate::ui::nav::publish(&window);
+            crate::ui::controls::restore_content_focus(&window);
         });
 
         let state = open_state

@@ -49,11 +49,19 @@ export component GameDetailsView inherits Rectangle {
     in property <bool> loading: false;
     in property <string> action-label: "Play";
     in property <bool> action-disabled: false;
+    // Parent-owned overlays (for example Store artifact/install sheets) suspend
+    // action focus while they own controller input.
+    in property <bool> suspend-action-focus: false;
     in property <int> focus-request: 0;
     private property <int> gallery-selected: 0;
     private property <length> launch-list-scroll-y: 0px;
     private property <length> launch-marquee-offset: 0px;
     private property <int> scroll-focus-request: 0;
+    private property <length> details-scroll-y: 0px;
+    private property <length> gallery-section-y: 0px;
+    private property <length> gallery-section-height: 0px;
+    private property <bool> action-focus-owned: true;
+    private property <bool> action-focus-active: action-button.keyboard-focused;
     private property <length> scroll-content-height:
         max(root.height, details-content.preferred-height + Tokens.spacing-2xl);
     // Keep the details column aligned while sizing each cover to its natural
@@ -74,18 +82,61 @@ export component GameDetailsView inherits Rectangle {
     // be nonzero on remount, and a synchronous grab inside setup can run
     // within an accessibility tree rebuild and panic the backend. A timer
     // always lands on a clean stack.
-    init => { focus-defer-timer.start(); }
+    init => {
+        root.action-focus-owned = true;
+        focus-defer-timer.start();
+    }
     changed focus-request => {
+        root.action-focus-owned = true;
         focus-defer-timer.stop();
         focus-defer-timer.start();
     }
+    changed action-focus-active => {
+        if (!root.action-focus-active && root.action-focus-owned && !root.action-disabled) {
+            focus-defer-timer.stop();
+            focus-defer-timer.start();
+        }
+    }
+    changed action-disabled => {
+        if (!root.action-disabled && root.action-focus-owned) {
+            focus-defer-timer.stop();
+            focus-defer-timer.start();
+        }
+    }
+    changed suspend-action-focus => {
+        focus-defer-timer.stop();
+        root.action-focus-owned = !root.suspend-action-focus;
+        if (!root.suspend-action-focus && !root.action-disabled) {
+            focus-defer-timer.start();
+        }
+    }
     changed gallery => { root.gallery-selected = 0; }
+
+    function focus-action() {
+        root.action-focus-owned = true;
+        action-button.focus();
+        // Play/Download belongs to the opening details section. Returning focus
+        // there should restore the page start, not center the button and crop
+        // the title/cover above it.
+        details-scroll.scroll-to-start();
+    }
+
+    function focus-gallery() {
+        root.action-focus-owned = false;
+        gallery-focus.focus();
+        details-scroll.center-on(
+            root.gallery-section-y,
+            root.gallery-section-height,
+        );
+    }
 
     focus-defer-timer := Timer {
         interval: 50ms;
         triggered => {
             self.stop();
-            action-button.focus();
+            if (root.action-focus-owned && !root.action-disabled && !root.suspend-action-focus) {
+                root.focus-action();
+            }
         }
     }
 
@@ -102,10 +153,11 @@ export component GameDetailsView inherits Rectangle {
                 return accept;
             }
             if (event.text == Key.UpArrow) {
-                action-button.focus();
+                root.focus-action();
                 return accept;
             }
             if (event.text == Key.DownArrow) {
+                root.action-focus-owned = false;
                 root.scroll-focus-request += 1;
                 return accept;
             }
@@ -122,10 +174,11 @@ export component GameDetailsView inherits Rectangle {
             crumb-navigate(index) => { ShellState.crumb-navigate(index); }
         }
 
-        ScrollArea {
+        details-scroll := ScrollArea {
             width: parent.width;
+            viewport-y <=> root.details-scroll-y;
             focus-request: root.scroll-focus-request;
-            focus-content => { action-button.focus(); }
+            focus-content => { root.focus-action(); }
             vertical-stretch: 1;
             content-height: root.scroll-content-height;
             details-content := VerticalLayout {
@@ -172,12 +225,16 @@ export component GameDetailsView inherits Rectangle {
                             text: root.action-label;
                             disabled: root.action-disabled;
                             directional-navigation: true;
+                            force-focus-ring: root.action-focus-owned
+                                && !root.action-disabled
+                                && !root.suspend-action-focus;
                             navigation-requested(direction) => {
                                 if (direction == "up") {
+                                    root.action-focus-owned = false;
                                     root.focus-header();
                                 } else if (direction == "down") {
                                     if (root.gallery.length > 0) {
-                                        gallery-focus.focus();
+                                        root.focus-gallery();
                                     } else {
                                         root.scroll-focus-request += 1;
                                     }
@@ -196,8 +253,14 @@ export component GameDetailsView inherits Rectangle {
                         Rectangle { vertical-stretch: 1; }
                     }
                 }
-                if root.gallery.length > 0: VerticalLayout {
+                if root.gallery.length > 0: gallery-section := VerticalLayout {
                     spacing: Tokens.spacing-sm;
+                    init => {
+                        root.gallery-section-y = self.y;
+                        root.gallery-section-height = self.height;
+                    }
+                    changed y => { root.gallery-section-y = self.y; }
+                    changed height => { root.gallery-section-height = self.height; }
                     Typography { text: "Gallery"; variant: TextVariant.title; }
                     Rectangle {
                         height: 148px;
@@ -227,11 +290,17 @@ export component GameDetailsView inherits Rectangle {
                                     private property <bool> selected: i == root.gallery-selected;
                                     changed selected => {
                                         if (self.selected) {
-                                            if (self.x + gallery-scroll.viewport-x < 0px) {
-                                                gallery-scroll.viewport-x = -self.x;
-                                            } else if (self.x + self.width + gallery-scroll.viewport-x > gallery-scroll.width) {
-                                                gallery-scroll.viewport-x = min(0px, gallery-scroll.width - self.x - self.width);
-                                            }
+                                            let minimum-viewport-x = min(
+                                                0px,
+                                                gallery-scroll.width - gallery-row.preferred-width,
+                                            );
+                                            let target = gallery-scroll.width / 2
+                                                - self.x
+                                                - self.width / 2;
+                                            gallery-scroll.viewport-x = min(
+                                                0px,
+                                                max(minimum-viewport-x, target),
+                                            );
                                         }
                                     }
                                     Image {
@@ -273,13 +342,19 @@ export component GameDetailsView inherits Rectangle {
         title: "Choose game file";
         description: "Select the artifact to launch";
         opened => {
+            root.action-focus-owned = false;
             GameState.selected-launch-artifact = 0;
             root.launch-list-scroll-y = 0px;
             root.launch-marquee-offset = 0px;
             launch-focus-timer.start();
             launch-marquee-timer.start();
         }
-        dismissed => { GameState.launch-sheet-open = false; }
+        dismissed => {
+            GameState.launch-sheet-open = false;
+            root.action-focus-owned = true;
+            focus-defer-timer.stop();
+            focus-defer-timer.start();
+        }
 
         launch-focus := FocusScope {
             width: 0px;
@@ -302,7 +377,7 @@ export component GameDetailsView inherits Rectangle {
                 }
                 if (event.text == "\u{1b}") {
                     GameState.launch-sheet-open = false;
-                    action-button.focus();
+                    root.focus-action();
                     return accept;
                 }
                 return reject;
