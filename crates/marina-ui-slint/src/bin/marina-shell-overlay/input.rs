@@ -177,10 +177,26 @@ mod tests {
             ),
             DbusOverlayAction::ShowQuickSettings
         );
+        assert_eq!(
+            router.route(
+                event(InputAction::Menu, InputEventKind::Released),
+                true,
+                true
+            ),
+            DbusOverlayAction::Ignore
+        );
+        assert_eq!(
+            router.route(
+                event(InputAction::Back, InputEventKind::Pressed),
+                true,
+                true
+            ),
+            DbusOverlayAction::Dispatch(event(InputAction::Back, InputEventKind::Pressed))
+        );
     }
 
     #[test]
-    fn guide_north_selects_the_game_menu() {
+    fn guide_north_opens_the_game_menu_without_reopening_after_back() {
         let mut router = DbusOverlayRouter::default();
         assert_eq!(
             router.route(
@@ -201,10 +217,18 @@ mod tests {
         assert_eq!(
             router.route(
                 event(InputAction::Menu, InputEventKind::Released),
-                false,
+                true,
                 true
             ),
             DbusOverlayAction::Ignore
+        );
+        assert_eq!(
+            router.route(
+                event(InputAction::Back, InputEventKind::Pressed),
+                true,
+                true
+            ),
+            DbusOverlayAction::Dispatch(event(InputAction::Back, InputEventKind::Pressed))
         );
     }
 
