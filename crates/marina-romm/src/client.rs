@@ -65,6 +65,12 @@ impl Client {
             return path.to_owned();
         }
         let path = path.trim_start_matches('/');
+        // RomM metadata can refer directly to API content endpoints (for
+        // example, user screenshots). Those paths are already rooted at the
+        // server and must not be rewritten into the asset namespace.
+        if path.starts_with("api/") {
+            return format!("{}/{path}", self.base_url);
+        }
         let path = if path.starts_with("assets/romm/resources/") {
             path.to_owned()
         } else {
@@ -247,7 +253,6 @@ impl Client {
         file_id: Option<i32>,
         destination: impl AsRef<Path>,
     ) -> Result<(), Error> {
-        info!(rom_id, file_name, ?file_id, "starting RomM file download");
         let mut url = format!(
             "{}/api/roms/{}/content/{}",
             self.base_url,
@@ -258,6 +263,13 @@ impl Client {
             url.push_str(&format!("?file_ids={file_id}"));
         }
         let endpoint = url.strip_prefix(&self.base_url).unwrap_or(&url).to_owned();
+        info!(
+            rom_id,
+            file_name,
+            ?file_id,
+            endpoint = %endpoint,
+            "starting RomM file download"
+        );
         debug!(
             rom_id,
             file_name,
@@ -452,6 +464,20 @@ mod tests {
     #[test]
     fn encodes_basic_auth_bytes() {
         assert_eq!(STANDARD.encode(b"user:password"), "dXNlcjpwYXNzd29yZA==");
+    }
+
+    #[test]
+    fn resolves_api_content_paths_without_asset_namespace() {
+        let client = Client::new("https://romm.example.com/");
+
+        assert_eq!(
+            client.resource_url("/api/screenshots/37/content?timestamp=2026-08-23"),
+            "https://romm.example.com/api/screenshots/37/content?timestamp=2026-08-23"
+        );
+        assert_eq!(
+            client.resource_url("roms/13/3552/screenshots/0.jpg"),
+            "https://romm.example.com/assets/romm/resources/roms/13/3552/screenshots/0.jpg"
+        );
     }
 
     #[test]
