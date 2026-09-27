@@ -23,6 +23,7 @@ import { IconSet } from "@lucide/lucide.slint";
 import { CrumbHeader } from "../components/crumb-header.slint";
 import { FocusListScroll } from "../components/focus-list-scroll.slint";
 import { Progress } from "../slintcn/components/progress.slint";
+import { MarqueeText } from "../slintcn/components/marquee-text.slint";
 
 export struct StoreArtifact {
     path: string,
@@ -403,7 +404,11 @@ export component StorePage inherits Rectangle {
         title: "Download Artifacts";
         description: "";
         dismiss-on-backdrop: root.install-status == "";
-        opened => { nav-focus-timer.start(); }
+        opened => {
+            nav-focus-timer.start();
+            sheet-body.marquee-offset = 0px;
+            marquee-timer.start();
+        }
         artifact-nav := FocusScope {
             width: 0px;
             height: 0px;
@@ -466,6 +471,17 @@ export component StorePage inherits Rectangle {
                 artifact-nav.focus();
             }
         }
+        marquee-timer := Timer {
+            interval: 24ms;
+            triggered => {
+                if (root.artifact-sheet-open) {
+                    sheet-body.marquee-offset += 1px;
+                } else {
+                    self.stop();
+                }
+            }
+        }
+
         sheet-body := VerticalLayout {
             vertical-stretch: 1;
             padding-left: Tokens.spacing-lg;
@@ -475,7 +491,9 @@ export component StorePage inherits Rectangle {
             // Download button below. Uniform rows keep offsets exact without
             // needing prefix sums.
             property <int> row-cursor: 0;
+            property <length> marquee-offset: 0px;
             property <length> artifact-row-height: 40px;
+            changed row-cursor => { self.marquee-offset = 0px; }
             property <length> list-scroll: 0px;
             // Reported by the list itself: elements inside conditionals
             // aren't referenceable from outside them.
@@ -566,13 +584,21 @@ export component StorePage inherits Rectangle {
                                         }
                                     }
                                 }
-                                Typography {
+
+                                Rectangle {
+                                    // weird marquee scroll broken
+                                    min-width: 256px;
+                                    // preferred-width: 500px;
                                     horizontal-stretch: 1;
-                                    text: artifact.path;
-                                    variant: TextVariant.body-sm;
-                                    font-family: "monospace";
-                                    vertical-alignment: center;
-                                    overflow: elide;
+                                    clip: true;
+                                    MarqueeText {
+                                        width: parent.width;
+                                        height: parent.height;
+                                        text: artifact.path;
+                                        active: artifact-nav.has-focus && i == sheet-body.row-cursor;
+                                        scroll-offset: sheet-body.marquee-offset;
+                                        font-family: "monospace";
+                                    }
                                 }
                                 Typography {
                                     width: 72px;
