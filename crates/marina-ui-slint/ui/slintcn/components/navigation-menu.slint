@@ -16,13 +16,49 @@ export component NavigationMenu inherits Rectangle {
     // Fired when an item is clicked; `active` is updated first.
     callback navigate(int);
 
+    private property <length> active-indicator-x: 0px;
+    private property <length> active-indicator-width: 0px;
+
     background: transparent;
     preferred-width: row.preferred-width;
     preferred-height: row.preferred-height;
 
+    active-indicator := Rectangle {
+        x: root.active-indicator-x;
+        y: 0px;
+        width: root.active-indicator-width;
+        height: root.height;
+        border-radius: Tokens.radius-sm;
+        background: root.show-active ? Tokens.color-surface-2 : transparent;
+
+        animate x, width, background {
+            duration: Tokens.motion-slow;
+            easing: Tokens.motion-easing-standard;
+        }
+    }
+
     row := HorizontalLayout {
         spacing: Tokens.spacing-xs;
         for it[i] in root.items: Rectangle {
+            private property <bool> selected: root.show-active && i == root.active;
+            changed selected => {
+                if (self.selected) {
+                    root.active-indicator-x = self.x;
+                    root.active-indicator-width = self.width;
+                }
+            }
+            changed x => {
+                if (self.selected) { root.active-indicator-x = self.x; }
+            }
+            changed width => {
+                if (self.selected) { root.active-indicator-width = self.width; }
+            }
+            init => {
+                if (self.selected) {
+                    root.active-indicator-x = self.x;
+                    root.active-indicator-width = self.width;
+                }
+            }
             height: Tokens.density-button-default;
             // Intrinsic width must live on the item itself: the label now sits
             // inside `surface` (width: parent.width), so without this the item
@@ -35,9 +71,9 @@ export component NavigationMenu inherits Rectangle {
                 width: parent.width;
                 height: parent.height;
                 border-radius: Tokens.radius-sm;
-                background: root.show-active && i == root.active
-                    ? Tokens.color-surface-2
-                    : (ta.has-hover ? Tokens.color-surface-1 : transparent);
+                background: !(root.show-active && i == root.active) && ta.has-hover
+                    ? Tokens.color-surface-1
+                    : transparent;
 
                 HorizontalLayout {
                     padding-left: Tokens.spacing-md;

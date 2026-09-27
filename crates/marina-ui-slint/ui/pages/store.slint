@@ -484,6 +484,10 @@ export component StorePage inherits Rectangle {
                     width: parent.width;
                     height: parent.height;
                     viewport-y <=> sheet-body.list-scroll;
+                    animate viewport-y {
+                        duration: Tokens.motion-scroll;
+                        easing: Tokens.motion-easing-scroll;
+                    }
                     // changed alone misses the initial value, leaving
                     // list-height 0 and scrolling every row out of view.
                     init => { sheet-body.list-height = self.height; }

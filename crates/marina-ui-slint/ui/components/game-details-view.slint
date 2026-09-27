@@ -208,6 +208,10 @@ export component GameDetailsView inherits Rectangle {
                             height: parent.height;
                             viewport-width: gallery-row.preferred-width;
                             viewport-height: parent.height;
+                            animate viewport-x {
+                                duration: Tokens.motion-scroll;
+                                easing: Tokens.motion-easing-scroll;
+                            }
                             gallery-row := HorizontalLayout {
                                 height: parent.height;
                                 spacing: Tokens.spacing-sm;

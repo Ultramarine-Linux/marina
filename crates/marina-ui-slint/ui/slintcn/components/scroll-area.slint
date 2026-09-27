@@ -18,6 +18,10 @@ export component ScrollArea inherits Rectangle {
         height: parent.height;
         viewport-width: parent.width;
         viewport-height: root.content-height;
+        animate viewport-y {
+            duration: Tokens.motion-scroll;
+            easing: Tokens.motion-easing-scroll;
+        }
         @children
     }
 

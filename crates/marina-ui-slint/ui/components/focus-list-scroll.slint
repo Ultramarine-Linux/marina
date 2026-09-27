@@ -1,3 +1,5 @@
+import { Tokens } from "../slintcn/theme/tokens.slint";
+
 // Keeps a fixed-height ListView row selected by controller input visible.
 // Bind `viewport-y` to the list's viewport and give this controller the
 // selected index, row count, and rendered ListView height.
@@ -14,6 +16,11 @@ export component FocusListScroll inherits Rectangle {
 
     width: 0px;
     height: 0px;
+
+    animate viewport-y {
+        duration: Tokens.motion-scroll;
+        easing: Tokens.motion-easing-scroll;
+    }
 
     function ensure-visible() {
         if (root.viewport-height <= 0px || (!root.use-explicit-focus && (root.item-count <= 0 || root.item-height <= 0px))) {
