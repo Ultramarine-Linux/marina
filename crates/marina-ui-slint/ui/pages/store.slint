@@ -378,10 +378,10 @@ export component StorePage inherits Rectangle {
 
 
     // Install progress/result rides the shared Sheet: scrim, focus grab,
-    // backdrop + Back dismissal come for free. Mounted while status text
-    // is set; clearing it (dismissed, backdrop, Back) unmounts.
-    if root.install-status != "": Sheet {
-        open: true;
+    // backdrop + Back dismissal come for free. Keep it mounted while closed
+    // so status changes toggle `open` and receive the shared slide animation.
+    Sheet {
+        open: root.install-status != "";
         side: SheetSide.bottom;
         panel-extent: 220px;
         title: "Install";
@@ -394,7 +394,7 @@ export component StorePage inherits Rectangle {
         }
     }
 
-    if root.artifact-sheet-open && root.games.length > 0: Sheet {
+    if root.games.length > 0: Sheet {
         open <=> root.artifact-sheet-open;
         side: SheetSide.right;
         panel-extent: 440px;
@@ -403,13 +403,10 @@ export component StorePage inherits Rectangle {
         title: "Download Artifacts";
         description: "";
         dismiss-on-backdrop: root.install-status == "";
+        opened => { nav-focus-timer.start(); }
         artifact-nav := FocusScope {
             width: 0px;
             height: 0px;
-            // Deferred past mount settling: init-order between the sheet and
-            // its body is undefined, so a timer wins deterministically over
-            // the sheet's own mount focus grab.
-            init => { nav-focus-timer.start(); }
             key-pressed(event) => {
                 // Virtual cursor spans every list row plus the Download
                 // button past the end, so focus never leaves this scope:

@@ -226,7 +226,7 @@ fn display_artifact_path(file: &marina_romm::RomFile) -> String {
 fn artifact_path(file_name: &str, category: Option<&str>) -> String {
     let category = category
         .map(str::trim)
-        .filter(|category| !category.is_empty())
+        .filter(|category| !category.is_empty() && !category.eq_ignore_ascii_case("game"))
         .map(|category| category.replace(['/', '\\'], "_"));
     match category {
         Some(category) => format!("{category}/{file_name}"),
@@ -248,6 +248,14 @@ mod tests {
         assert_eq!(
             artifact_path("track02.bin", Some("Disc 1")),
             "Disc 1/track02.bin"
+        );
+    }
+
+    #[test]
+    fn default_game_category_keeps_artifacts_as_siblings() {
+        assert_eq!(
+            artifact_path("Example Game.z64", Some("game")),
+            "Example Game.z64"
         );
     }
 }
