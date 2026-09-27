@@ -160,8 +160,8 @@ export component StorePage inherits Rectangle {
     }
 
     page-focus := FocusScope {
-        width: 0px;
-        height: 0px;
+        width: parent.width;
+        height: parent.height;
         key-pressed(event) => {
             if (event.text == "\u{1b}") {
                 if (root.artifact-sheet-open) {
@@ -234,7 +234,6 @@ export component StorePage inherits Rectangle {
             }
             return reject;
         }
-    }
 
     if root.page == 0: VerticalLayout {
         spacing: Tokens.spacing-lg;
@@ -310,7 +309,8 @@ export component StorePage inherits Rectangle {
             scroll-y <=> root.game-list-scroll-y;
             details-loading <=> root.details-loading;
             keyboard-active: page-focus.has-focus;
-            selected(id, index) => { root.game-selected(id, index); root.page = 2; }
+            selected(id, index) => { root.game-selected(id, index); }
+            activate-requested => { root.page = 2; }
             focus-header => { root.focus-header(); }
             vertical-stretch: 1;
         }
@@ -587,5 +587,6 @@ export component StorePage inherits Rectangle {
                 }
             }
         }
+    }
     }
 }

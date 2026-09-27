@@ -25,25 +25,64 @@ export component PlatformGameList inherits Rectangle {
     callback activate-requested;
     callback focus-header;
 
+    private property <int> game-count: root.games.length;
     private property <int> safe-index:
-        min(max(root.selected-index, 0), max(root.games.length - 1, 0));
+        min(max(root.selected-index, 0), max(root.game-count - 1, 0));
+    private property <bool> focus-active: list-focus.has-focus || root.keyboard-active;
+    // Logical ownership remains with the selected row while an asynchronous
+    // focus repair is pending, preventing the controller ring from blinking out.
+    private property <bool> show-focus: root.focus-active || root.focus-recovery-enabled;
+    private property <bool> focus-recovery-enabled: true;
     private property <length> marquee-offset: 0px;
 
     background: transparent;
     forward-focus: list-focus;
-    changed focus-request => { list-focus.focus(); }
+    init => {
+        focus-defer-timer.start();
+        marquee-timer.start();
+    }
+    changed focus-request => {
+        root.focus-recovery-enabled = true;
+        focus-defer-timer.stop();
+        focus-defer-timer.start();
+    }
+    changed game-count => {
+        if (root.game-count > 0) {
+            root.selected-index = min(max(root.selected-index, 0), root.game-count - 1);
+            root.focus-recovery-enabled = true;
+            focus-defer-timer.stop();
+            focus-defer-timer.start();
+        }
+    }
+    changed focus-active => {
+        if (!root.focus-active && root.focus-recovery-enabled && root.game-count > 0) {
+            focus-defer-timer.stop();
+            focus-defer-timer.start();
+        }
+    }
+
+    // Conditional page mounts and ListView row realization can both invalidate
+    // focus. Always settle focus on the list scope after the first row exists.
+    focus-defer-timer := Timer {
+        interval: 50ms;
+        triggered => {
+            self.stop();
+            if (root.game-count > 0 && root.focus-recovery-enabled) {
+                list-focus.focus();
+            }
+        }
+    }
 
     marquee-timer := Timer {
         interval: 24ms;
         triggered => {
-            if (list-focus.has-focus || root.keyboard-active) {
+            if (root.show-focus) {
                 root.marquee-offset += 1px;
             } else {
                 root.marquee-offset = 0px;
             }
         }
     }
-    init => { marquee-timer.start(); }
 
     function select-index(index: int) {
         if (root.games.length <= 0) { return; }
@@ -57,7 +96,6 @@ export component PlatformGameList inherits Rectangle {
         width: 0px;
         height: 0px;
         key-pressed(event) => {
-
             if (event.text == Key.PageUp) {
                 root.select-index(root.safe-index - max(1, Math.floor(list.height / 42px)));
                 return accept;
@@ -68,6 +106,7 @@ export component PlatformGameList inherits Rectangle {
             }
             if (event.text == Key.UpArrow) {
                 if (root.safe-index == 0) {
+                    root.focus-recovery-enabled = false;
                     root.focus-header();
                 } else {
                     root.select-index(root.safe-index - 1);
@@ -116,7 +155,7 @@ export component PlatformGameList inherits Rectangle {
                         ? Tokens.color-surface-3
                         : (item-touch.has-hover ? Tokens.color-surface-2 : transparent);
                     border-radius: Tokens.radius-sm;
-                    border-width: (list-focus.has-focus || root.keyboard-active) && i == root.safe-index ? Tokens.focus-ring-width : 0px;
+                    border-width: root.show-focus && i == root.safe-index ? Tokens.focus-ring-width : 0px;
                     border-color: Tokens.color-ring-muted;
 
                     MarqueeText {
@@ -125,8 +164,7 @@ export component PlatformGameList inherits Rectangle {
                         height: parent.height;
                         text: game.title;
                         font-size: 16px;
-                        active: (list-focus.has-focus || root.keyboard-active)
-                            && i == root.safe-index;
+                        active: root.show-focus && i == root.safe-index;
                         scroll-offset: root.marquee-offset;
                     }
 
