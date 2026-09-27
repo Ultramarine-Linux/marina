@@ -12,7 +12,8 @@ polkit.addRule(function(action, subject) {
         || action.id == "com.redhat.tuned.profiles2"
         || action.id == "com.redhat.tuned.switch_profile"
         || action.id == "org.shadowblip.Input.CompositeDevice.SetInterceptMode"
-        || action.id == "org.shadowblip.Input.CompositeDevice.SetInterceptActivation") {
+        || action.id == "org.shadowblip.Input.CompositeDevice.SetInterceptActivation"
+        || action.id == "org.shadowblip.Input.CompositeDevice.SendButtonChord") {
         return polkit.Result.YES;
     }
 });

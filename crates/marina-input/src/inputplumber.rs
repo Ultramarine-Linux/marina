@@ -104,6 +104,9 @@ pub trait CompositeDevice {
     #[zbus(property)]
     fn set_intercept_mode(&self, mode: u32) -> zbus::Result<()>;
 
+    /// Replay a button chord to the ordinary virtual controller targets.
+    fn send_button_chord(&self, events: Vec<String>) -> zbus::Result<()>;
+
     /// Configure the button chord that activates interception and the event
     /// emitted to D-Bus targets when that chord completes.
     fn set_intercept_activation(
@@ -196,6 +199,17 @@ impl Client {
             self.composite_device(&path)
                 .await?
                 .set_intercept_mode(mode.into())
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// Replay a button chord through every managed controller's ordinary targets.
+    pub async fn send_button_chord(&self, events: Vec<String>) -> zbus::Result<()> {
+        for path in self.composite_devices().await? {
+            self.composite_device(&path)
+                .await?
+                .send_button_chord(events.clone())
                 .await?;
         }
         Ok(())

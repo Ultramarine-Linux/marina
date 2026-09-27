@@ -189,6 +189,7 @@ fn spawn_quick_settings_hydration(
 fn spawn_runtime_input_profile_monitor(
     runtime: &Arc<tokio::runtime::Runtime>,
     inputplumber: marina_input::inputplumber::InterceptControl,
+    retroarch_active: Arc<AtomicBool>,
 ) {
     runtime.spawn(async move {
         let mut last_retroarch_state = None;
@@ -198,12 +199,10 @@ fn spawn_runtime_input_profile_monitor(
                 Ok(retroarch_running) => {
                     error_reported = false;
                     if last_retroarch_state != Some(retroarch_running) {
-                        let activation = if retroarch_running {
-                            marina_input::inputplumber::InterceptActivation::guide_north()
-                        } else {
-                            marina_input::inputplumber::InterceptActivation::guide()
-                        };
-                        inputplumber.set_activation(activation);
+                        retroarch_active.store(retroarch_running, Ordering::Release);
+                        inputplumber.set_activation(
+                            marina_input::inputplumber::InterceptActivation::guide(),
+                        );
                         last_retroarch_state = Some(retroarch_running);
                         info!(
                             retroarch_running,
@@ -241,12 +240,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     );
     let state = Arc::new(Mutex::new(ControllerState::new(manager)));
     let visible = Arc::new(AtomicBool::new(false));
+    let retroarch_active = Arc::new(AtomicBool::new(false));
     let (inputplumber_control, inputplumber_modes, inputplumber_activations) =
         marina_input::inputplumber::intercept_control(
             marina_input::inputplumber::InterceptMode::Pass,
             marina_input::inputplumber::InterceptActivation::guide(),
         );
-    spawn_runtime_input_profile_monitor(&runtime, inputplumber_control.clone());
+    spawn_runtime_input_profile_monitor(
+        &runtime,
+        inputplumber_control.clone(),
+        retroarch_active.clone(),
+    );
 
     let mut shell = build_overlay_shell(&ui_path)?;
     let control = capture_shell_control(&shell)?;
@@ -475,6 +479,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let dbus_visible = visible.clone();
     let dbus_request = request_handler.clone();
     let dbus_inputplumber = inputplumber_control.clone();
+    let dbus_runtime = runtime.clone();
+    let dbus_retroarch_active = retroarch_active.clone();
     let dbus_router = Arc::new(Mutex::new(input::DbusOverlayRouter::default()));
     input::spawn_inputplumber(
         &runtime,
@@ -484,7 +490,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let action = dbus_router
                 .lock()
                 .expect("InputPlumber router lock poisoned")
-                .route(event, dbus_visible.load(Ordering::Acquire));
+                .route(
+                    event,
+                    dbus_visible.load(Ordering::Acquire),
+                    dbus_retroarch_active.load(Ordering::Acquire),
+                );
             match action {
                 input::DbusOverlayAction::ShowGameMenu => {
                     dbus_inputplumber.observe_mode(marina_input::inputplumber::InterceptMode::All);
@@ -493,6 +503,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 input::DbusOverlayAction::ShowQuickSettings => {
                     dbus_inputplumber.observe_mode(marina_input::inputplumber::InterceptMode::All);
                     dbus_request(OverlayRequest::QuickSettings);
+                }
+                input::DbusOverlayAction::ReplayGuide => {
+                    dbus_inputplumber.observe_mode(marina_input::inputplumber::InterceptMode::Pass);
+                    dbus_runtime.spawn(async {
+                        let result = async {
+                            let client = marina_input::inputplumber::Client::connect().await?;
+                            client
+                                .set_intercept_mode(marina_input::inputplumber::InterceptMode::Pass)
+                                .await?;
+                            client
+                                .send_button_chord(vec![
+                                    marina_input::inputplumber::GUIDE_CAPABILITY.to_owned(),
+                                ])
+                                .await
+                        }
+                        .await;
+                        if let Err(error) = result {
+                            warn!(%error, "failed to replay Guide to RetroArch");
+                        }
+                    });
                 }
                 input::DbusOverlayAction::Dispatch(event) => dbus_dispatch(event),
                 input::DbusOverlayAction::Ignore => {}

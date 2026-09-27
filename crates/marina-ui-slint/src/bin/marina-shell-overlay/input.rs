@@ -7,6 +7,7 @@ use tracing::error;
 pub(super) enum DbusOverlayAction {
     ShowGameMenu,
     ShowQuickSettings,
+    ReplayGuide,
     Dispatch(InputEvent),
     Ignore,
 }
@@ -19,7 +20,12 @@ pub(super) struct DbusOverlayRouter {
 }
 
 impl DbusOverlayRouter {
-    pub(super) fn route(&mut self, event: InputEvent, visible: bool) -> DbusOverlayAction {
+    pub(super) fn route(
+        &mut self,
+        event: InputEvent,
+        visible: bool,
+        replay_plain_guide: bool,
+    ) -> DbusOverlayAction {
         if event.action == InputAction::Menu {
             match event.kind {
                 InputEventKind::Pressed => {
@@ -41,6 +47,8 @@ impl DbusOverlayRouter {
                             action: InputAction::Menu,
                             kind: InputEventKind::Pressed,
                         })
+                    } else if replay_plain_guide {
+                        DbusOverlayAction::ReplayGuide
                     } else {
                         DbusOverlayAction::ShowGameMenu
                     };
@@ -107,16 +115,46 @@ mod tests {
     }
 
     #[test]
-    fn intercepted_guide_north_signal_opens_the_game_menu_on_release() {
+    fn plain_guide_opens_the_game_menu_outside_retroarch() {
         let mut router = DbusOverlayRouter::default();
 
         assert_eq!(
-            router.route(event(InputAction::Menu, InputEventKind::Pressed), false),
+            router.route(
+                event(InputAction::Menu, InputEventKind::Pressed),
+                false,
+                false
+            ),
             DbusOverlayAction::Ignore
         );
         assert_eq!(
-            router.route(event(InputAction::Menu, InputEventKind::Released), false),
+            router.route(
+                event(InputAction::Menu, InputEventKind::Released),
+                false,
+                false
+            ),
             DbusOverlayAction::ShowGameMenu
+        );
+    }
+
+    #[test]
+    fn plain_guide_is_replayed_to_retroarch() {
+        let mut router = DbusOverlayRouter::default();
+
+        assert_eq!(
+            router.route(
+                event(InputAction::Menu, InputEventKind::Pressed),
+                false,
+                true
+            ),
+            DbusOverlayAction::Ignore
+        );
+        assert_eq!(
+            router.route(
+                event(InputAction::Menu, InputEventKind::Released),
+                false,
+                true
+            ),
+            DbusOverlayAction::ReplayGuide
         );
     }
 
@@ -124,11 +162,19 @@ mod tests {
     fn guide_south_opens_quick_settings_without_dispatching_accept() {
         let mut router = DbusOverlayRouter::default();
         assert_eq!(
-            router.route(event(InputAction::Menu, InputEventKind::Pressed), false),
+            router.route(
+                event(InputAction::Menu, InputEventKind::Pressed),
+                false,
+                true
+            ),
             DbusOverlayAction::Ignore
         );
         assert_eq!(
-            router.route(event(InputAction::Accept, InputEventKind::Pressed), true),
+            router.route(
+                event(InputAction::Accept, InputEventKind::Pressed),
+                false,
+                true
+            ),
             DbusOverlayAction::ShowQuickSettings
         );
     }
@@ -137,15 +183,27 @@ mod tests {
     fn guide_north_selects_the_game_menu() {
         let mut router = DbusOverlayRouter::default();
         assert_eq!(
-            router.route(event(InputAction::Menu, InputEventKind::Pressed), true),
+            router.route(
+                event(InputAction::Menu, InputEventKind::Pressed),
+                false,
+                true
+            ),
             DbusOverlayAction::Ignore
         );
         assert_eq!(
-            router.route(event(InputAction::Context, InputEventKind::Pressed), true),
+            router.route(
+                event(InputAction::Context, InputEventKind::Pressed),
+                false,
+                true
+            ),
             DbusOverlayAction::ShowGameMenu
         );
         assert_eq!(
-            router.route(event(InputAction::Menu, InputEventKind::Released), true),
+            router.route(
+                event(InputAction::Menu, InputEventKind::Released),
+                false,
+                true
+            ),
             DbusOverlayAction::Ignore
         );
     }
@@ -154,11 +212,19 @@ mod tests {
     fn plain_guide_tap_closes_an_existing_overlay_on_release() {
         let mut router = DbusOverlayRouter::default();
         assert_eq!(
-            router.route(event(InputAction::Menu, InputEventKind::Pressed), true),
+            router.route(
+                event(InputAction::Menu, InputEventKind::Pressed),
+                true,
+                true
+            ),
             DbusOverlayAction::Ignore
         );
         assert_eq!(
-            router.route(event(InputAction::Menu, InputEventKind::Released), true),
+            router.route(
+                event(InputAction::Menu, InputEventKind::Released),
+                true,
+                true
+            ),
             DbusOverlayAction::Dispatch(event(InputAction::Menu, InputEventKind::Pressed))
         );
     }
