@@ -11,8 +11,8 @@ import { Sheet, SheetSide } from "../slintcn/components/sheet.slint";
 import { Checkbox } from "../slintcn/components/checkbox.slint";
 import { FocusRing } from "../slintcn/components/focus-ring.slint";
 import { Card, CardPadding, CardRadius } from "../slintcn/components/card.slint";
-import { Badge, BadgeSize, BadgeVariant } from "../slintcn/components/badge.slint";
 import { PlatformCardData } from "../components/platform-card.slint";
+import { PlatformListRow } from "../components/platform-list-row.slint";
 import { GameCardData } from "../components/card.slint";
 import { ShellState } from "../components/app-shell.slint";
 import { PlatformGameList } from "../components/platform-game-list.slint";
@@ -273,56 +273,13 @@ export component StorePage inherits Rectangle {
                 width: parent.width;
                 height: parent.height;
                 viewport-y <=> root.platform-list-scroll-y;
-            for platform[i] in root.platforms: Rectangle {
+            for platform[i] in root.platforms: PlatformListRow {
                 width: parent.width;
-                height: 52px;
-                background: i == root.selected-platform-index && page-focus.has-focus
-                    ? Tokens.color-surface-3
-                    : (touch.has-hover ? Tokens.color-surface-2 : transparent);
-                border-radius: Tokens.radius-sm;
-                border-width: i == root.selected-platform-index && page-focus.has-focus ? Tokens.focus-ring-width : 0px;
-                border-color: Tokens.color-ring-muted;
-                HorizontalLayout {
-                    padding-left: Tokens.spacing-2xl;
-                    padding-right: Tokens.spacing-2xl;
-                    spacing: Tokens.spacing-md;
-                    Image {
-                        width: 36px;
-                        height: 36px;
-                        source: platform.icon;
-                        image-fit: contain;
-                    }
-                    Typography {
-                        horizontal-stretch: 1;
-                        text: platform.name;
-                        variant: TextVariant.body-lg;
-                        vertical-alignment: center;
-                        overflow: elide;
-                    }
-                    VerticalLayout {
-                        horizontal-stretch: 0;
-                        alignment: center;
-                        Badge {
-                            text: platform.slug;
-                            variant: BadgeVariant.outline;
-                            size: BadgeSize.sm;
-                        }
-                    }
-                    Typography {
-                        width: 96px;
-                        text: platform.game-count;
-                        variant: TextVariant.caption;
-                        tone: TextTone.muted;
-                        horizontal-alignment: right;
-                        vertical-alignment: center;
-                    }
-                }
-                touch := TouchArea {
-                    mouse-cursor: pointer;
-                    clicked => {
-                        page-focus.focus();
-                        root.open-platform(i);
-                    }
+                platform: platform;
+                selected: i == root.selected-platform-index && page-focus.has-focus;
+                clicked => {
+                    page-focus.focus();
+                    root.open-platform(i);
                 }
             }
         }

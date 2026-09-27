@@ -1,0 +1,70 @@
+import { Tokens } from "../slintcn/theme/tokens.slint";
+import { Badge, BadgeSize, BadgeVariant } from "../slintcn/components/badge.slint";
+import { Text as Typography, TextVariant, TextTone } from "../slintcn/components/text.slint";
+import { PlatformCardData } from "platform-card.slint";
+
+export component PlatformListRow inherits Rectangle {
+    in property <PlatformCardData> platform;
+    in property <bool> selected: false;
+    callback clicked;
+
+    height: 52px;
+    background: root.selected
+        ? Tokens.color-surface-3
+        : (row-touch.has-hover ? Tokens.color-surface-2 : transparent);
+    border-radius: Tokens.radius-sm;
+    border-width: root.selected ? Tokens.focus-ring-width : 0px;
+    border-color: Tokens.color-ring-muted;
+
+    HorizontalLayout {
+        padding-left: Tokens.spacing-2xl;
+        padding-right: Tokens.spacing-2xl;
+        spacing: Tokens.spacing-md;
+
+        Rectangle {
+            width: 36px;
+            vertical-stretch: 1;
+
+            Image {
+                y: (parent.height - self.height) / 2;
+                width: parent.width;
+                height: 36px;
+                source: root.platform.icon;
+                image-fit: contain;
+            }
+        }
+
+        Typography {
+            horizontal-stretch: 1;
+            text: root.platform.name;
+            variant: TextVariant.body-lg;
+            vertical-alignment: center;
+            overflow: elide;
+        }
+
+        VerticalLayout {
+            horizontal-stretch: 0;
+            alignment: center;
+
+            Badge {
+                text: root.platform.slug;
+                variant: BadgeVariant.outline;
+                size: BadgeSize.sm;
+            }
+        }
+
+        Typography {
+            width: 96px;
+            text: root.platform.game-count;
+            variant: TextVariant.caption;
+            tone: TextTone.muted;
+            horizontal-alignment: right;
+            vertical-alignment: center;
+        }
+    }
+
+    row-touch := TouchArea {
+        mouse-cursor: pointer;
+        clicked => { root.clicked(); }
+    }
+}
