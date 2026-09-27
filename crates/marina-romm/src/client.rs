@@ -252,6 +252,7 @@ impl Client {
         file_name: &str,
         file_id: Option<i32>,
         destination: impl AsRef<Path>,
+        on_progress: Option<&(dyn Fn(u64, Option<u64>) + Send + Sync)>,
     ) -> Result<(), Error> {
         let mut url = format!(
             "{}/api/roms/{}/content/{}",
@@ -300,14 +301,23 @@ impl Client {
                 body: response.text().await?,
             });
         }
+        let total = response.content_length();
+        if let Some(on_progress) = on_progress {
+            on_progress(0, total);
+        }
         let destination = destination.as_ref();
         if let Some(parent) = destination.parent() {
             tokio::fs::create_dir_all(parent).await?;
         }
+        let mut downloaded = 0_u64;
         let mut output = tokio::fs::File::create(destination).await?;
         let mut response = response;
         while let Some(chunk) = response.chunk().await? {
             output.write_all(&chunk).await?;
+            downloaded += chunk.len() as u64;
+            if let Some(on_progress) = on_progress {
+                on_progress(downloaded, total);
+            }
         }
         output.flush().await?;
         info!(rom_id, file_name, "RomM file download completed");
@@ -319,6 +329,7 @@ impl Client {
         &self,
         url: &str,
         destination: impl AsRef<Path>,
+        on_progress: Option<&(dyn Fn(u64, Option<u64>) + Send + Sync)>,
     ) -> Result<(), Error> {
         let endpoint = url.strip_prefix(&self.base_url).unwrap_or(url);
         debug!(
@@ -340,14 +351,23 @@ impl Client {
                 body: response.text().await?,
             });
         }
+        let total = response.content_length();
+        if let Some(on_progress) = on_progress {
+            on_progress(0, total);
+        }
         let destination = destination.as_ref();
         if let Some(parent) = destination.parent() {
             tokio::fs::create_dir_all(parent).await?;
         }
+        let mut downloaded = 0_u64;
         let mut output = tokio::fs::File::create(destination).await?;
         let mut response = response;
         while let Some(chunk) = response.chunk().await? {
             output.write_all(&chunk).await?;
+            downloaded += chunk.len() as u64;
+            if let Some(on_progress) = on_progress {
+                on_progress(downloaded, total);
+            }
         }
         output.flush().await?;
         Ok(())

@@ -6,7 +6,10 @@ use std::{
 };
 
 use async_trait::async_trait;
-use marina_store::{InstallMode, StoreBackend, StoreEntry, StoreError, StorePlatform, StoreQuery};
+use marina_store::{
+    InstallMode, InstallProgressCallback, StoreBackend, StoreEntry, StoreError, StorePlatform,
+    StoreQuery,
+};
 
 use crate::{Auth, Client, PlatformQuery, Rom, RomQuery};
 
@@ -220,6 +223,7 @@ impl StoreBackend for RommStore {
         &self,
         library: &(dyn marina_library::Library + Send + Sync),
         request: marina_store::InstallRequest,
+        progress: InstallProgressCallback,
     ) -> Result<marina_core::LibraryItem, StoreError> {
         let resolved = crate::install::resolve(
             &self.client,
@@ -229,7 +233,7 @@ impl StoreBackend for RommStore {
         )
         .await
         .map_err(crate::install::map_error)?;
-        crate::install::install(&self.client, library, resolved)
+        crate::install::install(&self.client, library, resolved, progress)
             .await
             .map_err(crate::install::map_error)
     }

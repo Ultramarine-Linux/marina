@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 use marina_core::LibraryItem;
 use marina_library::{Library, query::SearchQuery};
-use marina_store::StoreError;
+use marina_store::{InstallProgress, InstallProgressCallback, StoreError};
 use thiserror::Error;
 use tracing::debug;
 
@@ -78,6 +78,7 @@ pub async fn install(
     client: &Client,
     library: &(dyn Library + Send + Sync),
     request: ResolvedInstall,
+    progress: InstallProgressCallback,
 ) -> Result<LibraryItem, InstallError> {
     let title = request
         .rom
@@ -113,8 +114,19 @@ pub async fn install(
             } else {
                 file.rom_id
             };
+            let message = format!("Downloading ROM: {}", file.file_name);
+            progress(InstallProgress::status(message.clone()));
+            let on_progress = |completed, total| {
+                progress(InstallProgress::bytes(message.clone(), completed, total));
+            };
             client
-                .download_file(rom_id, &file.file_name, Some(file.id), &temporary)
+                .download_file(
+                    rom_id,
+                    &file.file_name,
+                    Some(file.id),
+                    &temporary,
+                    Some(&on_progress),
+                )
                 .await?;
             let actual = tokio::fs::metadata(&temporary).await?.len();
             if actual != expected {
@@ -167,9 +179,17 @@ pub async fn install(
         };
         let extension = asset_extension(&source);
         let destination = asset_dir.join(format!("{suffix}-{index}.{extension}"));
-        client.download_url(&source_url, &destination).await?;
+        let message = format!("Downloading {suffix}");
+        progress(InstallProgress::status(message.clone()));
+        let on_progress = |completed, total| {
+            progress(InstallProgress::bytes(message.clone(), completed, total));
+        };
+        client
+            .download_url(&source_url, &destination, Some(&on_progress))
+            .await?;
         asset.local_path = Some(destination.to_string_lossy().into_owned());
     }
+    progress(InstallProgress::status("Adding game to library"));
     let existing = library
         .search(SearchQuery::new().platform(platform).limit(usize::MAX))
         .await?

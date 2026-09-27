@@ -22,6 +22,7 @@ import { LucideIcon } from "../slintcn/components/lucide-icon.slint";
 import { IconSet } from "@lucide/lucide.slint";
 import { CrumbHeader } from "../components/crumb-header.slint";
 import { FocusListScroll } from "../components/focus-list-scroll.slint";
+import { Progress } from "../slintcn/components/progress.slint";
 
 export struct StoreArtifact {
     path: string,
@@ -50,6 +51,7 @@ export global StoreState {
     in-out property <bool> details-loading: false;
     in-out property <string> install-status;
     in-out property <float> install-progress: 0;
+    in-out property <bool> install-indeterminate: false;
     // Sheet/modal visibility lives here so Rust back-handling can dismiss.
     in-out property <bool> artifact-sheet-open;
     in-out property <bool> direct-install;
@@ -83,6 +85,7 @@ export component StorePage inherits Rectangle {
     in-out property <bool> details-loading: false;
     in-out property <string> install-status;
     in-out property <float> install-progress: 0;
+    in-out property <bool> install-indeterminate: false;
     in-out property <bool> artifact-sheet-open: false;
     in property <bool> direct-install: false;
 
@@ -384,11 +387,10 @@ export component StorePage inherits Rectangle {
         title: "Install";
         description: root.install-status;
         dismissed() => { root.install-status = ""; }
-        Rectangle {
-            height: 5px;
-            background: Tokens.color-accent;
-            width: parent.width * root.install-progress;
-            border-radius: 3px;
+        Progress {
+            width: parent.width;
+            value: root.install-progress * 100;
+            indeterminate: root.install-indeterminate;
         }
     }
 

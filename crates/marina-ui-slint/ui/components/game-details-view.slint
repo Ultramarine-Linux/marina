@@ -31,6 +31,15 @@ export component GameDetailsView inherits Rectangle {
     private property <int> scroll-focus-request: 0;
     private property <length> scroll-content-height:
         max(root.height, details-content.preferred-height + Tokens.spacing-2xl);
+    // Keep the details column aligned while sizing each cover to its natural
+    // aspect ratio inside a transparent, fixed-width cover slot.
+    private property <float> cover-ratio:
+        min(max(root.game.cover-ratio, 0.4), 2.0);
+    private property <length> cover-width: 220px;
+    private property <length> cover-slot-height: 220px;
+    private property <length> cover-image-height:
+        min(root.cover-slot-height,
+            max(120px, root.cover-width / root.cover-ratio));
     callback action-requested;
     callback focus-header;
 
@@ -76,18 +85,28 @@ export component GameDetailsView inherits Rectangle {
                 padding-bottom: Tokens.spacing-2xl;
                 spacing: Tokens.spacing-lg;
                 HorizontalLayout {
-                    height: 300px;
+                    height: root.cover-slot-height;
                     spacing: Tokens.spacing-lg;
-                    Rectangle {
-                        width: 220px;
-                        background: Tokens.color-surface-1;
-                        border-radius: Tokens.radius-md;
+                    details-cover := Rectangle {
+                        width: root.cover-width;
+                        height: root.cover-slot-height;
                         clip: true;
-                        if root.game.cover.width == 0: Skeleton { width: parent.width; height: parent.height; radius: Tokens.radius-md; }
-                        if root.game.cover.width > 0: Image { width: parent.width; height: parent.height; source: root.game.cover; image-fit: contain; }
+                        if root.game.cover.width == 0: Skeleton {
+                            y: (parent.height - root.cover-image-height) / 2;
+                            width: parent.width;
+                            height: root.cover-image-height;
+                            radius: Tokens.radius-md;
+                        }
+                        if root.game.cover.width > 0: Image {
+                            y: (parent.height - root.cover-image-height) / 2;
+                            width: parent.width;
+                            height: root.cover-image-height;
+                            source: root.game.cover;
+                            image-fit: contain;
+                        }
                     }
                     VerticalLayout {
-                        width: parent.width - 220px - Tokens.spacing-lg;
+                        width: parent.width - details-cover.width - Tokens.spacing-lg;
                         spacing: Tokens.spacing-md;
                         Typography {
                             width: parent.width;
