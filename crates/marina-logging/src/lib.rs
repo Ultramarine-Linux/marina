@@ -10,9 +10,10 @@ use tracing_subscriber::{EnvFilter, layer::SubscriberExt, util::SubscriberInitEx
 
 /// Loads environment configuration and installs the workspace tracing subscriber.
 ///
-/// `RUST_LOG` controls the filter. systemd sets `INVOCATION_ID` for processes
-/// it starts as a unit, which selects direct structured journald logging over
-/// terminal output. A pre-existing global subscriber is left in place.
+/// `RUST_LOG` controls the filter. When stdout is connected to the journal by
+/// systemd, the matching `JOURNAL_STREAM` marker selects direct structured
+/// journald logging over terminal output. A pre-existing global subscriber is
+/// left in place.
 pub fn init() {
     dotenvy::dotenv().ok();
     let filter = EnvFilter::from_default_env();
@@ -41,5 +42,35 @@ pub fn init() {
 }
 
 fn is_systemd_service() -> bool {
-    std::env::var_os("INVOCATION_ID").is_some_and(|value| !value.is_empty())
+    // Both INVOCATION_ID and JOURNAL_STREAM can be inherited by an interactive
+    // child process. JOURNAL_STREAM is only authoritative when it identifies
+    // this process's current stdout, rather than the parent service's stream.
+    let Some(stream) = std::env::var_os("JOURNAL_STREAM") else {
+        return false;
+    };
+    let Some((device, inode)) = stream
+        .to_str()
+        .and_then(|stream| stream.split_once(':'))
+        .and_then(|(device, inode)| {
+            Some((device.parse::<u64>().ok()?, inode.parse::<u64>().ok()?))
+        })
+    else {
+        return false;
+    };
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+
+        let Ok(stdout) = std::fs::metadata("/proc/self/fd/1") else {
+            return false;
+        };
+        stdout.dev() == device && stdout.ino() == inode
+    }
+
+    #[cfg(not(unix))]
+    {
+        let _ = (device, inode);
+        false
+    }
 }
