@@ -1224,12 +1224,12 @@ mod tests {
 
     #[test]
     fn rom_path_prefers_file_entries_and_ignores_desktop_commands() {
-        let mut item = LibraryItem::new_game("Pokemon");
-        item.local_path = Some("/games/gba/Pokemon".into());
+        let mut item = LibraryItem::new_game("Example Game");
+        item.local_path = Some("/games/gba/Example Game".into());
         item.files.push(marina_core::LibraryItemFile {
             provider_id: None,
-            name: "pokemon.gba".into(),
-            path: "/games/gba/Pokemon/pokemon.gba".into(),
+            name: "example-game.gba".into(),
+            path: "/games/gba/Example Game/example-game.gba".into(),
             size_bytes: Some(42),
         });
         item.provider_ids.insert(
@@ -1238,7 +1238,7 @@ mod tests {
         );
         assert_eq!(
             rom_path_for_item(&item),
-            Some(PathBuf::from("/games/gba/Pokemon/pokemon.gba"))
+            Some(PathBuf::from("/games/gba/Example Game/example-game.gba"))
         );
     }
 
@@ -1247,11 +1247,16 @@ mod tests {
         let argv = retroarch_argv(
             &["-f".to_owned()],
             "/cores/mgba_libretro.so",
-            Path::new("/games/pokemon.gba"),
+            Path::new("/games/example-game.gba"),
         );
         assert_eq!(
             argv,
-            vec!["-f", "-L", "/cores/mgba_libretro.so", "/games/pokemon.gba"]
+            vec![
+                "-f",
+                "-L",
+                "/cores/mgba_libretro.so",
+                "/games/example-game.gba"
+            ]
         );
     }
 
@@ -1277,9 +1282,9 @@ mod tests {
 
     #[tokio::test]
     async fn launch_item_without_core_reports_missing_core() {
-        let mut item = LibraryItem::new_game("Pokemon");
+        let mut item = LibraryItem::new_game("Example Game");
         item.platform_slug = Some("gba".into());
-        item.local_path = Some("/games/pokemon.gba".into());
+        item.local_path = Some("/games/example-game.gba".into());
         let mut platforms = HashMap::new();
         platforms.insert(
             "gba".to_owned(),
@@ -1301,9 +1306,9 @@ mod tests {
     async fn launch_item_with_missing_core_file_lists_available_cores() {
         let cores_dir = temp_dir("missing-core-file");
         write_file(&cores_dir, "mgba_libretro.so");
-        let mut item = LibraryItem::new_game("Pokemon");
+        let mut item = LibraryItem::new_game("Example Game");
         item.platform_slug = Some("gba".into());
-        item.local_path = Some("/games/pokemon.gba".into());
+        item.local_path = Some("/games/example-game.gba".into());
         let mut platforms = HashMap::new();
         platforms.insert(
             "gba".to_owned(),
@@ -1334,9 +1339,9 @@ mod tests {
 
     #[tokio::test]
     async fn launch_item_on_unconfigured_platform_infers_retroarch() {
-        let mut item = LibraryItem::new_game("Pokemon");
+        let mut item = LibraryItem::new_game("Example Game");
         item.platform_slug = Some("gba".into());
-        item.local_path = Some("/games/pokemon.gba".into());
+        item.local_path = Some("/games/example-game.gba".into());
         let launcher = GameLauncher::new();
         let error = launcher
             .launch_item(&item)

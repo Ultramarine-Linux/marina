@@ -61,13 +61,13 @@ mod tests {
     #[test]
     fn builder_is_composable() {
         let query = SearchQuery::new()
-            .text("zelda")
+            .text("example")
             .platform("snes")
             .sort(SearchSort::LastUpdated)
             .limit(20)
             .offset(40);
 
-        assert_eq!(query.text.as_deref(), Some("zelda"));
+        assert_eq!(query.text.as_deref(), Some("example"));
         assert_eq!(query.platform.as_deref(), Some("snes"));
         assert_eq!(query.sort, SearchSort::LastUpdated);
         assert_eq!(query.limit, Some(20));

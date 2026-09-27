@@ -3,7 +3,7 @@
 use slint::{Image, ModelRc, SharedString, VecModel};
 
 use crate::ui::pages::library as shelf;
-use crate::{GameCardData, PreviewDetailsData};
+use crate::{GalleryImageData, GameCardData, PreviewDetailsData};
 
 pub(crate) struct PlatformCardMetadata {
     pub(crate) slug: String,
@@ -59,6 +59,10 @@ pub(crate) fn preview_details(item: marina_core::LibraryItem) -> PreviewDetailsD
         regions: SharedString::from(item.regions.join(", ")),
         tags: SharedString::from(item.tags.join(", ")),
     }
+}
+
+pub(crate) fn gallery_model(values: Vec<GalleryImageData>) -> ModelRc<GalleryImageData> {
+    ModelRc::from(std::rc::Rc::new(VecModel::from(values)))
 }
 
 pub(crate) fn string_model(values: Vec<String>) -> ModelRc<SharedString> {

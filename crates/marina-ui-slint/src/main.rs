@@ -13,8 +13,8 @@ mod window_overlay;
 slint::include_modules!();
 
 pub(crate) use ui::data::{
-    PlatformCardMetadata, empty_game_card, empty_preview_details, game_cards, platform_asset_path,
-    preview_details, string_model,
+    PlatformCardMetadata, empty_game_card, empty_preview_details, gallery_model, game_cards,
+    platform_asset_path, preview_details, string_model,
 };
 pub(crate) use ui::store_details::populate_store_details;
 

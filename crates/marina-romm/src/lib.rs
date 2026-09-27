@@ -29,7 +29,7 @@
 //!     let page = client
 //!         .list_roms(
 //!             &RomQueryBuilder::new()
-//!                 .search_term("zelda")
+//!                 .search_term("example")
 //!                 .limit(25)
 //!                 .build(),
 //!         )

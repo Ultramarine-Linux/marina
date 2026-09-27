@@ -136,6 +136,9 @@ pub(crate) async fn run() -> Result<(), slint::PlatformError> {
             SharedString,
         >::new(
         )))));
+    window
+        .global::<GameState>()
+        .set_gallery(crate::gallery_model(Vec::new()));
 
     window.global::<HomeState>().set_loading(true);
     window.global::<LibraryState>().set_loading(false);

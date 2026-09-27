@@ -10,10 +10,17 @@ import { GameCardData } from "card.slint";
 import { PreviewDetailsData } from "preview-details.slint";
 import { ShellState } from "app-shell.slint";
 
+export struct GalleryImageData {
+    image: image,
+    label: string,
+    ratio: float,
+}
+
 export global GameState {
     in-out property <GameCardData> selected-game;
     in-out property <PreviewDetailsData> details;
     in-out property <[string]> tags;
+    in-out property <[GalleryImageData]> gallery;
     in-out property <bool> details-loading: false;
     in-out property <string> launching-game-id;
     in-out property <string> playing-game-id;
@@ -24,10 +31,12 @@ export component GameDetailsView inherits Rectangle {
     in property <GameCardData> game;
     in property <PreviewDetailsData> details;
     in property <[string]> tags: [];
+    in property <[GalleryImageData]> gallery: [];
     in property <bool> loading: false;
     in property <string> action-label: "Play";
     in property <bool> action-disabled: false;
     in property <int> focus-request: 0;
+    private property <int> gallery-selected: 0;
     private property <int> scroll-focus-request: 0;
     private property <length> scroll-content-height:
         max(root.height, details-content.preferred-height + Tokens.spacing-2xl);
@@ -54,12 +63,37 @@ export component GameDetailsView inherits Rectangle {
         focus-defer-timer.stop();
         focus-defer-timer.start();
     }
+    changed gallery => { root.gallery-selected = 0; }
 
     focus-defer-timer := Timer {
         interval: 50ms;
         triggered => {
             self.stop();
             action-button.focus();
+        }
+    }
+
+    gallery-focus := FocusScope {
+        width: 0px;
+        height: 0px;
+        key-pressed(event) => {
+            if (event.text == Key.LeftArrow) {
+                root.gallery-selected = max(0, root.gallery-selected - 1);
+                return accept;
+            }
+            if (event.text == Key.RightArrow) {
+                root.gallery-selected = min(root.gallery.length - 1, root.gallery-selected + 1);
+                return accept;
+            }
+            if (event.text == Key.UpArrow) {
+                action-button.focus();
+                return accept;
+            }
+            if (event.text == Key.DownArrow) {
+                root.scroll-focus-request += 1;
+                return accept;
+            }
+            return reject;
         }
     }
 
@@ -126,7 +160,11 @@ export component GameDetailsView inherits Rectangle {
                                 if (direction == "up") {
                                     root.focus-header();
                                 } else if (direction == "down") {
-                                    root.scroll-focus-request += 1;
+                                    if (root.gallery.length > 0) {
+                                        gallery-focus.focus();
+                                    } else {
+                                        root.scroll-focus-request += 1;
+                                    }
                                 }
                             }
                             clicked => { root.action-requested(); }
@@ -140,6 +178,51 @@ export component GameDetailsView inherits Rectangle {
                             }
                         }
                         Rectangle { vertical-stretch: 1; }
+                    }
+                }
+                if root.gallery.length > 0: VerticalLayout {
+                    spacing: Tokens.spacing-sm;
+                    Typography { text: "Gallery"; variant: TextVariant.title; }
+                    Rectangle {
+                        height: 148px;
+                        clip: true;
+
+                        gallery-scroll := Flickable {
+                            width: parent.width;
+                            height: parent.height;
+                            viewport-width: gallery-row.preferred-width;
+                            viewport-height: parent.height;
+                            gallery-row := HorizontalLayout {
+                                height: parent.height;
+                                spacing: Tokens.spacing-sm;
+                                for asset[i] in root.gallery: Rectangle {
+                                    width: 132px * min(max(asset.ratio, 0.8), 1.8);
+                                    height: parent.height;
+                                    border-radius: Tokens.radius-md;
+                                    border-width: gallery-focus.has-focus && i == root.gallery-selected
+                                        ? Tokens.focus-ring-width
+                                        : 0px;
+                                    border-color: Tokens.color-ring;
+                                    clip: true;
+                                    private property <bool> selected: i == root.gallery-selected;
+                                    changed selected => {
+                                        if (self.selected) {
+                                            if (self.x + gallery-scroll.viewport-x < 0px) {
+                                                gallery-scroll.viewport-x = -self.x;
+                                            } else if (self.x + self.width + gallery-scroll.viewport-x > gallery-scroll.width) {
+                                                gallery-scroll.viewport-x = min(0px, gallery-scroll.width - self.x - self.width);
+                                            }
+                                        }
+                                    }
+                                    Image {
+                                        width: parent.width;
+                                        height: parent.height;
+                                        source: asset.image;
+                                        image-fit: contain;
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 Typography { text: root.loading ? "Loading details..." : "Description"; variant: TextVariant.title; }

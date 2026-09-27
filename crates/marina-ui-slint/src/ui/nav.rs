@@ -320,6 +320,7 @@ fn unload_game_details(window: &MainWindow) {
     game.set_selected_game(crate::empty_game_card());
     game.set_details(crate::empty_preview_details());
     game.set_tags(crate::string_model(Vec::new()));
+    game.set_gallery(crate::gallery_model(Vec::new()));
     game.set_details_loading(false);
 }
 

@@ -147,14 +147,14 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        let game = root.join("roms").join("snes").join("Super Mario World");
+        let game = root.join("roms").join("snes").join("Example Game");
         fs::create_dir_all(game.join(".media")).unwrap();
-        fs::write(game.join("Super Mario World.sfc"), b"rom").unwrap();
+        fs::write(game.join("Example Game.sfc"), b"rom").unwrap();
         fs::write(game.join(".media").join("box.png"), b"art").unwrap();
 
         let items = scan(&root).unwrap();
         assert_eq!(items.len(), 1);
-        assert_eq!(items[0].title, "Super Mario World");
+        assert_eq!(items[0].title, "Example Game");
         assert_eq!(items[0].files.len(), 1);
         assert_eq!(items[0].platform_slug.as_deref(), Some("snes"));
 

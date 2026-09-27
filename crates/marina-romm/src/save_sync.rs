@@ -261,19 +261,19 @@ mod tests {
         let timestamp = Utc.with_ymd_and_hms(2026, 9, 12, 21, 6, 42).unwrap();
         assert_eq!(
             snapshot_name(
-                "Mother 3 (Japan) [T-en]",
+                "Example Game (Region) [Translation]",
                 Path::new("profile/anything.sav"),
                 timestamp
             ),
-            "Mother 3 (Japan) [T-en] [2026-09-12_21-06-42].sav"
+            "Example Game (Region) [Translation] [2026-09-12_21-06-42].sav"
         );
         assert_eq!(
             snapshot_name(
-                "Star Fox (USA)",
+                "Sample Game (Region)",
                 Path::new("profile/core-save.srm"),
                 timestamp
             ),
-            "Star Fox (USA) [2026-09-12_21-06-42].srm"
+            "Sample Game (Region) [2026-09-12_21-06-42].srm"
         );
     }
 
@@ -298,10 +298,10 @@ mod tests {
     fn downloads_to_rom_basename_with_srm_extension() {
         assert_eq!(
             download_save_path(
-                Path::new("/var/games/saves/Mother 3"),
-                "Mother 3 (Japan) [T-en]"
+                Path::new("/var/games/saves/Example Game"),
+                "Example Game (Region) [Translation]"
             ),
-            Path::new("/var/games/saves/Mother 3/Mother 3 (Japan) [T-en].srm")
+            Path::new("/var/games/saves/Example Game/Example Game (Region) [Translation].srm")
         );
     }
 
@@ -313,7 +313,7 @@ mod tests {
             Utc::now().timestamp_nanos_opt().unwrap()
         ));
         tokio::fs::create_dir_all(&root).await.unwrap();
-        let destination = root.join("Mother 3 (Japan) [T-en].srm");
+        let destination = root.join("Example Game (Region) [Translation].srm");
         tokio::fs::write(&destination, b"local-save").await.unwrap();
         let timestamp = Utc.with_ymd_and_hms(2026, 9, 12, 21, 6, 42).unwrap();
 
@@ -323,7 +323,8 @@ mod tests {
         let backup_directory = root.join(".marina-backups");
         assert_eq!(
             tokio::fs::read(
-                backup_directory.join("Mother 3 (Japan) [T-en] [2026-09-12_21-06-42].srm")
+                backup_directory
+                    .join("Example Game (Region) [Translation] [2026-09-12_21-06-42].srm")
             )
             .await
             .unwrap(),
@@ -331,7 +332,7 @@ mod tests {
         );
         assert!(
             backup_directory
-                .join("Mother 3 (Japan) [T-en] [2026-09-12_21-06-42-1].srm")
+                .join("Example Game (Region) [Translation] [2026-09-12_21-06-42-1].srm")
                 .is_file()
         );
         assert_eq!(regular_files(&root).await.unwrap(), vec![destination]);
