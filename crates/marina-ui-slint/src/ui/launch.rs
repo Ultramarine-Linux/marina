@@ -118,7 +118,7 @@ async fn download_romm_save_snapshots(target: &RommSessionTarget) {
                 NOTIFICATION.info("No RomM saves found");
             }
             if !report.failures.is_empty() {
-                NOTIFICATION.error(format!(
+                NOTIFICATION.error_toast(format!(
                     "Failed to download {} RomM save{}",
                     report.failures.len(),
                     if report.failures.len() == 1 { "" } else { "s" }
@@ -140,7 +140,7 @@ async fn download_romm_save_snapshots(target: &RommSessionTarget) {
                 save_directory = %target.save_directory.display(),
                 "failed to synchronize RomM saves before launch"
             );
-            NOTIFICATION.error(format!("Could not download RomM saves: {error}"));
+            NOTIFICATION.error_toast(format!("Could not download RomM saves: {error}"));
         }
     }
 }
@@ -172,7 +172,7 @@ fn upload_romm_save_snapshots(target: RommSessionTarget) {
                     ));
                 }
                 if !report.failures.is_empty() {
-                    NOTIFICATION.error(format!(
+                    NOTIFICATION.error_toast(format!(
                         "Failed to upload {} RomM save{}",
                         report.failures.len(),
                         if report.failures.len() == 1 { "" } else { "s" }
@@ -194,7 +194,7 @@ fn upload_romm_save_snapshots(target: RommSessionTarget) {
                     save_directory = %target.save_directory.display(),
                     "failed to scan game saves for RomM upload"
                 );
-                NOTIFICATION.error(format!("Could not upload saves to RomM: {error}"));
+                NOTIFICATION.error_toast(format!("Could not upload saves to RomM: {error}"));
             }
         }
     });

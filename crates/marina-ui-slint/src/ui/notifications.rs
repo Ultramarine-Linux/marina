@@ -114,6 +114,10 @@ impl NotificationService {
     pub(crate) fn success(&self, text: impl Into<String>) {
         self.show(text, ToastVariant::Success);
     }
+
+    pub(crate) fn error_toast(&self, text: impl Into<String>) {
+        self.show(text, ToastVariant::Error);
+    }
 }
 
 fn dismiss_toast(items: Rc<VecModel<ToastItem>>, id: i32) {
