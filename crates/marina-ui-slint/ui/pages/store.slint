@@ -409,10 +409,16 @@ export component StorePage inherits Rectangle {
         title: "Install";
         description: root.install-status;
         dismissed() => { root.install-status = ""; }
-        Progress {
-            width: parent.width;
-            value: root.install-progress * 100;
-            indeterminate: root.install-indeterminate;
+        VerticalLayout {
+            padding-left: Tokens.spacing-lg;
+            padding-right: Tokens.spacing-lg;
+            padding-top: Tokens.spacing-md;
+            padding-bottom: Tokens.spacing-lg;
+            Progress {
+                width: parent.width;
+                value: root.install-progress * 100;
+                indeterminate: root.install-indeterminate;
+            }
         }
     }
 
