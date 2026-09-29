@@ -299,6 +299,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let (_token, sender) =
         handle.add_channel(move |message: OverlayMessage, app_state| match message {
             OverlayMessage::Show(presentation) => {
+                debug!(
+                    quick_mode = presentation.quick_mode,
+                    window_mode = presentation.window_mode,
+                    profile_mode = presentation.profile_mode,
+                    "showing overlay"
+                );
                 event_inputplumber.set_mode(marina_input::inputplumber::InterceptMode::All);
                 for surface in app_state.all_outputs() {
                     apply_presentation_to_component(surface.component_instance(), &presentation);
@@ -315,6 +321,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             OverlayMessage::Hide => {
+                debug!("hiding overlay");
                 event_inputplumber.set_mode(marina_input::inputplumber::InterceptMode::Pass);
                 event_visible.store(false, Ordering::Release);
                 for surface in app_state.all_outputs() {
@@ -424,19 +431,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let request_visible = visible.clone();
     let request_inputplumber = inputplumber_control.clone();
     let request_handler: Arc<dyn Fn(OverlayRequest) + Send + Sync> = Arc::new(move |request| {
-        match reserve_overlay_request(&request_visible, request) {
+        let disposition = reserve_overlay_request(&request_visible, request);
+        debug!(
+            ?request,
+            ?disposition,
+            visible = request_visible.load(Ordering::Acquire),
+            "routed overlay request"
+        );
+        match disposition {
             OverlayRequestDisposition::Hide => {
                 request_inputplumber.set_mode(marina_input::inputplumber::InterceptMode::Pass);
                 send_overlay_message(&request_sender, OverlayMessage::Hide);
                 return;
             }
-            OverlayRequestDisposition::Ignore => {
-                debug!(
-                    ?request,
-                    "ignored overlay request while another overlay is open"
-                );
-                return;
-            }
+            OverlayRequestDisposition::Ignore => return,
             OverlayRequestDisposition::Show => {}
         }
 
@@ -480,7 +488,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let input_runtime = runtime.clone();
     let dispatch_inputplumber = inputplumber_control.clone();
     let dispatch_visible: Arc<dyn Fn(InputEvent) + Send + Sync> = Arc::new(move |event| {
-        if !input_visible.load(Ordering::Acquire) {
+        let overlay_visible = input_visible.load(Ordering::Acquire);
+        debug!(
+            ?event,
+            overlay_visible, "dispatching overlay controller event"
+        );
+        if !overlay_visible {
             return;
         }
         let message = input_state
@@ -511,7 +524,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
 
     let gilrs_dispatch = dispatch_visible.clone();
-    input::spawn_gilrs(move |event| gilrs_dispatch(event))?;
+    input::spawn_gilrs(move |event| {
+        debug!(?event, "received gilrs overlay input event");
+        gilrs_dispatch(event);
+    })?;
 
     let dbus_dispatch = dispatch_visible.clone();
     let dbus_visible = visible.clone();

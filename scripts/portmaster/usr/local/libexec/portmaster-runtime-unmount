@@ -2,7 +2,7 @@
 set -eu
 
 encoded_runtime=${1:?missing runtime instance}
-runtime="$(systemd-escape --unescape --path "$encoded_runtime")"
+runtime="$(systemd-escape --unescape "$encoded_runtime")"
 runtime=${runtime#/}
 case "$runtime" in
     ''|*/*|*'..'*|*[!A-Za-z0-9_.-]*)
@@ -11,8 +11,19 @@ case "$runtime" in
         ;;
 esac
 
+image="/var/games/ports/PortMaster/libs/$runtime.squashfs"
 mountpoint="/run/portmaster/runtimes/$runtime"
 if mountpoint -q "$mountpoint"; then
     umount "$mountpoint"
 fi
+
+# `mount -o loop` normally marks its loop device autoclear. Explicitly detach
+# any association left after unmount so failed or older mounts cannot leak it.
+losetup --associated "$image" --noheadings --output NAME 2>/dev/null \
+    | while IFS= read -r loop; do
+        if [ -n "$loop" ]; then
+            # The kernel may complete autoclear between enumeration and detach.
+            losetup --detach "$loop" 2>/dev/null || true
+        fi
+    done
 rmdir "$mountpoint" 2>/dev/null || true

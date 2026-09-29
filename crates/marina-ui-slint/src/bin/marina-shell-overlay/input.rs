@@ -1,7 +1,7 @@
 use std::{io, sync::Arc, thread};
 
 use marina_input::{InputAction, InputConfig, InputEvent, InputEventKind, InputLoop, inputplumber};
-use tracing::{error, info};
+use tracing::{debug, error};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum DbusOverlayAction {
@@ -31,7 +31,7 @@ impl DbusOverlayRouter {
         let guide_chorded_before = self.guide_chorded;
         let back_held_before = self.back_held;
         let action = self.route_inner(event, visible, replay_plain_guide);
-        info!(
+        debug!(
             ?event,
             visible,
             replay_plain_guide,

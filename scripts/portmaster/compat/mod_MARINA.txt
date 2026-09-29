@@ -8,6 +8,25 @@ if [ -z "${SWAYSOCK:-}" ]; then
     export SWAYSOCK
 fi
 
+
+pm_message() {
+    message="$*"
+    [ -n "$message" ] || return 0
+
+    if command -v gdbus >/dev/null 2>&1 \
+        && gdbus call --session \
+            --dest org.freedesktop.Notifications \
+            --object-path /org/freedesktop/Notifications \
+            --method org.freedesktop.Notifications.Notify \
+            "PortMaster" 0 "" "PortMaster" "$message" '[]' '{}' 5000 \
+            >/dev/null 2>&1; then
+        return 0
+    fi
+
+    printf 'PortMaster: %s\n' "$message" >&2
+    return 0
+}
+
 pm_platform_helper() {
     # Upstream launchers call this before starting the game binary. Scope
     # process discovery to this systemd service, then match the Sway window

@@ -13,7 +13,6 @@ ProtectSystem=strict
 ProtectHome=read-only
 RuntimeDirectory=portmaster/home portmaster/runtimes
 RuntimeDirectoryMode=0755
-TemporaryFileSystem=/roms
 BindPaths=/var/games/saves/ports
 
 
@@ -46,6 +45,7 @@ Environment=RUST_BACKTRACE=full
 
 ExecStart=/usr/libexec/marina-portmaster-launch %i
 ExecStartPost=/usr/libexec/marina-portmaster/portmaster-focus %i
+ExecStopPost=-/usr/libexec/marina-portmaster-launch --stop-runtimes %i
 ExecStopPost=/usr/libexec/marina-portmaster/portmaster-restore-marina %i
 Restart=no
 
