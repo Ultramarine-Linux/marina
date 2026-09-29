@@ -200,7 +200,10 @@ export component Shelf inherits Rectangle {
                 height: parent.height;
                 viewport-height: parent.height;
                 viewport-width: root.content-width;
-                animate viewport-x { duration: 200ms; easing: cubic-bezier(0.33, 1, 0.68, 1); }
+                animate viewport-x {
+                    duration: Tokens.motion-scroll;
+                    easing: Tokens.motion-easing-emphasized;
+                }
                 changed viewport-x => { root.report-viewport(); }
                 changed width => { root.report-viewport(); }
                 changed viewport-width => { root.report-viewport(); }

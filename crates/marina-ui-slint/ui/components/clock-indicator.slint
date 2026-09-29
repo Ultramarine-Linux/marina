@@ -1,0 +1,15 @@
+import { Tokens } from "../slintcn/theme/tokens.slint";
+import { Text as Typography, TextVariant, TextTone } from "../slintcn/components/text.slint";
+
+export global ClockState {
+    in-out property <string> time: "--:--";
+}
+
+export component ClockIndicator inherits Typography {
+    text: ClockState.time;
+    height: Tokens.density-button-default;
+    variant: TextVariant.label;
+    tone: TextTone.muted;
+    vertical-alignment: center;
+    font-size: 18px;
+}

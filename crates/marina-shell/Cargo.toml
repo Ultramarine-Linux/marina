@@ -1,0 +1,19 @@
+[package]
+name = "marina-shell"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[build-dependencies]
+varlink_generator.workspace = true
+
+[dependencies]
+layer-shika.workspace = true
+serde.workspace = true
+serde_derive.workspace = true
+serde_json.workspace = true
+spin_on.workspace = true
+swayipc.workspace = true
+thiserror.workspace = true
+tracing.workspace = true
+varlink.workspace = true

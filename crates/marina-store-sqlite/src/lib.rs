@@ -645,7 +645,7 @@ mod tests {
     async fn save_replaces_item_and_files_atomically() {
         let db = SqliteLibrary::in_memory().unwrap();
 
-        let mut x = LibraryItem::new_game("Zelda");
+        let mut x = LibraryItem::new_game("Example Alpha");
         x.platform_slug = Some("snes".into());
         db.add(x.clone()).await.unwrap();
         let last_updated = db
@@ -660,7 +660,7 @@ mod tests {
             .unwrap();
         assert!(last_updated > 0);
         let mut refreshed = x.clone();
-        refreshed.title = "The Legend of Zelda".into();
+        refreshed.title = "Example Alpha Updated".into();
         db.update(refreshed).await.unwrap();
         let preserved_last_updated = db
             .conn
@@ -675,10 +675,10 @@ mod tests {
         assert_eq!(preserved_last_updated, last_updated);
         assert_eq!(
             db.get(&x.id).await.unwrap().unwrap().title,
-            "The Legend of Zelda"
+            "Example Alpha Updated"
         );
         assert_eq!(
-            db.search(SearchQuery::new().text("zel"))
+            db.search(SearchQuery::new().text("alpha"))
                 .await
                 .unwrap()
                 .len(),
@@ -688,7 +688,7 @@ mod tests {
             db.count(SearchQuery::new().platform("snes")).await.unwrap(),
             1
         );
-        let mut y = LibraryItem::new_game("Metroid");
+        let mut y = LibraryItem::new_game("Example Beta");
         y.platform_slug = Some("nes".into());
         db.add(y.clone()).await.unwrap();
         {
@@ -708,7 +708,7 @@ mod tests {
             .search(SearchQuery::new().sort(SearchSort::LastUpdated))
             .await
             .unwrap();
-        assert_eq!(recently_added[0].title, "Metroid");
+        assert_eq!(recently_added[0].title, "Example Beta");
         db.remove(&x.id).await.unwrap();
         assert!(db.get(&x.id).await.unwrap().is_none());
     }
@@ -762,8 +762,11 @@ mod tests {
     #[tokio::test]
     async fn activity_tracks_plays_and_orders_recently_played() {
         let db = SqliteLibrary::in_memory().unwrap();
-        let first = db.add(LibraryItem::new_game("Zelda")).await.unwrap();
-        let second = db.add(LibraryItem::new_game("Metroid")).await.unwrap();
+        let first = db
+            .add(LibraryItem::new_game("Example Alpha"))
+            .await
+            .unwrap();
+        let second = db.add(LibraryItem::new_game("Example Beta")).await.unwrap();
 
         assert!(db.game_activity(&first.id).unwrap().is_none());
         assert!(db.recently_played_items(10).unwrap().is_empty());

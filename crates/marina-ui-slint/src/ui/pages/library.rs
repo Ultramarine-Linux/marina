@@ -18,9 +18,9 @@ use tracing::{debug, error, warn};
 use crate::covers::{self, CoverSource};
 use crate::image;
 use crate::{
-    GameCardData, GameState, HomeState, LibraryState, MainWindow, PlatformCardData,
-    PlatformCardMetadata, ShellPage, ShellState, app, game_cards, platform_asset_path,
-    preview_details,
+    GalleryImageData, GameCardData, GameState, HomeState, LibraryState, MainWindow,
+    PlatformCardData, PlatformCardMetadata, ShellPage, ShellState, app, game_cards,
+    platform_asset_path, preview_details,
 };
 
 pub(crate) fn install(
@@ -64,6 +64,9 @@ pub(crate) fn install(
                 window
                     .global::<GameState>()
                     .set_tags(crate::string_model(Vec::new()));
+                window
+                    .global::<GameState>()
+                    .set_gallery(crate::gallery_model(Vec::new()));
                 window.global::<GameState>().set_details_loading(true);
             });
             tokio::spawn(async move {
@@ -102,6 +105,33 @@ pub(crate) fn install(
                             warn!(game_id = %id, "library preview item has no local cover asset");
                             None
                         };
+                        let gallery_paths = item
+                            .assets
+                            .iter()
+                            .filter_map(|asset| match asset.kind {
+                                marina_core::LibraryAssetKind::Screenshot => {
+                                    asset.local_path.clone().map(|path| ("Screenshot", path))
+                                }
+                                marina_core::LibraryAssetKind::UserScreenshot => asset
+                                    .local_path
+                                    .clone()
+                                    .map(|path| ("User screenshot", path)),
+                                _ => None,
+                            })
+                            .take(12)
+                            .collect::<Vec<_>>();
+                        let mut gallery = Vec::with_capacity(gallery_paths.len());
+                        for (label, path) in gallery_paths {
+                            if let Some(decoded) = image::load_path_scaled(
+                                path,
+                                "library-gallery",
+                                480,
+                            )
+                            .await
+                            {
+                                gallery.push((label, decoded));
+                            }
+                        }
                         let tags = item.tags.clone();
                         let details = preview_details(item);
                         let _ = window.upgrade_in_event_loop(move |window| {
@@ -124,6 +154,19 @@ pub(crate) fn install(
                             }
                             window.global::<GameState>().set_details(details);
                             window.global::<GameState>().set_tags(crate::string_model(tags));
+                            window.global::<GameState>().set_gallery(crate::gallery_model(
+                                gallery
+                                    .into_iter()
+                                    .map(|(label, decoded)| {
+                                        let (image, ratio) = image::into_slint_image(decoded);
+                                        GalleryImageData {
+                                            image,
+                                            label: SharedString::from(label),
+                                            ratio,
+                                        }
+                                    })
+                                    .collect(),
+                            ));
                             window.global::<GameState>().set_details_loading(false);
                         });
                     }
@@ -165,6 +208,9 @@ pub(crate) fn install(
             window
                 .global::<GameState>()
                 .set_tags(crate::string_model(Vec::new()));
+            window
+                .global::<GameState>()
+                .set_gallery(crate::gallery_model(Vec::new()));
             crate::ui::nav::publish(&window);
 
             // Defer the route change until the list click callback has unwound.
@@ -176,6 +222,7 @@ pub(crate) fn install(
                 // Publish again now that the route matches: the title crumb
                 // only appends on the details route.
                 crate::ui::nav::publish(&window);
+                crate::ui::controls::restore_content_focus(&window);
             });
         });
 
@@ -207,6 +254,9 @@ pub(crate) fn install(
         window
             .global::<GameState>()
             .set_tags(crate::string_model(Vec::new()));
+        window
+            .global::<GameState>()
+            .set_gallery(crate::gallery_model(Vec::new()));
         crate::ui::nav::publish(&window);
 
         // Changing routes synchronously from the card's click callback deletes
@@ -222,6 +272,7 @@ pub(crate) fn install(
             // Publish again now that the route matches: the title crumb
             // only appends on the details route.
             crate::ui::nav::publish(&window);
+            crate::ui::controls::restore_content_focus(&window);
         });
 
         let state = open_state
@@ -266,6 +317,29 @@ pub(crate) fn install(
                     } else {
                         None
                     };
+                    let gallery_paths = item
+                        .assets
+                        .iter()
+                        .filter_map(|asset| match asset.kind {
+                            marina_core::LibraryAssetKind::Screenshot => {
+                                asset.local_path.clone().map(|path| ("Screenshot", path))
+                            }
+                            marina_core::LibraryAssetKind::UserScreenshot => asset
+                                .local_path
+                                .clone()
+                                .map(|path| ("User screenshot", path)),
+                            _ => None,
+                        })
+                        .take(12)
+                        .collect::<Vec<_>>();
+                    let mut gallery = Vec::with_capacity(gallery_paths.len());
+                    for (label, path) in gallery_paths {
+                        if let Some(decoded) =
+                            image::load_path_scaled(path, "library-gallery", 480).await
+                        {
+                            gallery.push((label, decoded));
+                        }
+                    }
                     let tags = item.tags.clone();
                     let details = preview_details(item);
                     let _ = detail_window.upgrade_in_event_loop(move |window| {
@@ -289,6 +363,21 @@ pub(crate) fn install(
                         window
                             .global::<GameState>()
                             .set_tags(crate::string_model(tags));
+                        window
+                            .global::<GameState>()
+                            .set_gallery(crate::gallery_model(
+                                gallery
+                                    .into_iter()
+                                    .map(|(label, decoded)| {
+                                        let (image, ratio) = image::into_slint_image(decoded);
+                                        GalleryImageData {
+                                            image,
+                                            label: SharedString::from(label),
+                                            ratio,
+                                        }
+                                    })
+                                    .collect(),
+                            ));
                         window.global::<GameState>().set_details_loading(false);
                     });
                 }
@@ -412,7 +501,10 @@ pub(crate) async fn refresh_platform_cards(
     };
     let platform_names = platforms
         .into_iter()
-        .map(|platform| (platform.slug, platform.name))
+        .map(|platform| {
+            let name = super::super::platform_names::display_name(&platform.slug, &platform.name);
+            (platform.slug, name)
+        })
         .collect::<BTreeMap<_, _>>();
 
     let initial_platforms = platform_names
@@ -487,11 +579,7 @@ pub(crate) async fn refresh_platform_cards(
         for (index, slug) in icon_slugs.into_iter().enumerate() {
             let icon_window = window.as_weak();
             tokio::spawn(async move {
-                let Some(path) = platform_asset_path(
-                    &std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                        .join("ui/assets/platforms/systematic"),
-                    &slug,
-                ) else {
+                let Some(path) = platform_asset_path(&slug) else {
                     return;
                 };
                 let Some(decoded) = image::load_path_scaled(path, "platform-icon", 256).await

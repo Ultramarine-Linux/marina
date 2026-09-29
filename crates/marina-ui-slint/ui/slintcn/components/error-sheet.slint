@@ -1,0 +1,47 @@
+import { Tokens } from "../theme/tokens.slint";
+import { Button, ButtonSize } from "button.slint";
+import { Sheet, SheetSide } from "sheet.slint";
+
+// Application-wide actionable error presentation. Mount exactly once near the
+// window root; callers publish through ErrorSheetState instead of owning modal
+// infrastructure on individual pages.
+export global ErrorSheetState {
+    in-out property <bool> open: false;
+    in-out property <string> title: "Something went wrong";
+    in-out property <string> message;
+}
+
+export component ErrorSheet inherits Rectangle {
+    background: transparent;
+
+    Sheet {
+        open <=> ErrorSheetState.open;
+        side: SheetSide.bottom;
+        panel-extent: min(root.height * 0.55, 220px);
+        title: ErrorSheetState.title;
+        description: ErrorSheetState.message;
+        auto-focus: false;
+        dismissed => { ErrorSheetState.open = false; }
+        opened => { focus-timer.start(); }
+
+        VerticalLayout {
+            spacing: Tokens.spacing-md;
+            Rectangle { vertical-stretch: 1; }
+            dismiss-button := Button {
+                width: 140px;
+                x: (parent.width - self.width) / 2;
+                text: "Dismiss";
+                size: ButtonSize.sm;
+                clicked => { ErrorSheetState.open = false; }
+            }
+        }
+
+        focus-timer := Timer {
+            interval: 50ms;
+            triggered => {
+                self.stop();
+                dismiss-button.focus();
+            }
+        }
+    }
+}

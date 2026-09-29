@@ -3,7 +3,7 @@
 use slint::{Image, ModelRc, SharedString, VecModel};
 
 use crate::ui::pages::library as shelf;
-use crate::{GameCardData, PreviewDetailsData};
+use crate::{GalleryImageData, GameCardData, PreviewDetailsData};
 
 pub(crate) struct PlatformCardMetadata {
     pub(crate) slug: String,
@@ -61,6 +61,10 @@ pub(crate) fn preview_details(item: marina_core::LibraryItem) -> PreviewDetailsD
     }
 }
 
+pub(crate) fn gallery_model(values: Vec<GalleryImageData>) -> ModelRc<GalleryImageData> {
+    ModelRc::from(std::rc::Rc::new(VecModel::from(values)))
+}
+
 pub(crate) fn string_model(values: Vec<String>) -> ModelRc<SharedString> {
     ModelRc::from(std::rc::Rc::new(VecModel::from(
         values
@@ -70,26 +74,23 @@ pub(crate) fn string_model(values: Vec<String>) -> ModelRc<SharedString> {
     )))
 }
 
-pub(crate) fn platform_asset_path(root: &std::path::Path, slug: &str) -> Option<String> {
+pub(crate) fn platform_asset_path(slug: &str) -> Option<String> {
     let exact_name = match slug {
         "ndsi" => "nintendo-dsi",
         "win" => "pc-50x-family",
         _ => slug,
     };
-    let exact_path = root.join(format!("{exact_name}.svg"));
-    if exact_path.is_file() {
-        return Some(exact_path.to_string_lossy().into_owned());
+    let exact_icon = format!("platform-{exact_name}");
+    if let Some(path) = marina_apps::resolve_icon_in_theme(&exact_icon, "marina-assets") {
+        return Some(path);
     }
 
     if let Some(prefix) = slug.split('-').next() {
-        let prefix_path = root.join(format!("{prefix}.svg"));
-        if prefix_path.is_file() {
-            return Some(prefix_path.to_string_lossy().into_owned());
+        let prefix_icon = format!("platform-{prefix}");
+        if let Some(path) = marina_apps::resolve_icon_in_theme(&prefix_icon, "marina-assets") {
+            return Some(path);
         }
     }
 
-    let default_path = root.join("default.svg");
-    default_path
-        .is_file()
-        .then(|| default_path.to_string_lossy().into_owned())
+    marina_apps::resolve_icon_in_theme("platform-default", "marina-assets")
 }

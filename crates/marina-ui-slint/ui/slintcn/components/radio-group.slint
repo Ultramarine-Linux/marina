@@ -15,8 +15,10 @@
 // wrap-around. Tab focuses the group as a whole; Space is a no-op since
 // arrow movement already commits.
 
+import { ListView } from "std-widgets.slint";
 import { Tokens } from "../theme/tokens.slint";
 import { FocusRing } from "focus-ring.slint";
+import { FocusListScroll } from "../../components/focus-list-scroll.slint";
 
 export struct RadioItem {
     value: string,
@@ -34,6 +36,7 @@ component RadioRow inherits Rectangle {
     in property <bool> active: false;
     // When true, the focus ring renders even without keyboard focus.
     in property <bool> show-focus: false;
+
     // When true, this control dims and stops responding.
     in property <bool> disabled: false;
     // Fired when this RadioItem is activated.
@@ -113,18 +116,26 @@ component RadioRow inherits Rectangle {
 export component RadioGroup inherits Rectangle {
     // Options shown in the group.
     in property <[RadioItem]> items;
-    // Two-way; index of the chosen item.
+    // Two-way; index of the committed item whose radio dot is filled.
     in-out property <int> selected: 0;
+    // Optional externally navigated row. This moves only the focus highlight;
+    // it does not change the committed radio selection.
+    in property <int> highlighted: -1;
+    in property <bool> show-external-highlight: false;
+
     // When true, this control dims and stops responding.
     in property <bool> disabled: false;
     // `vertical` (default) or `horizontal`.
     in property <RadioOrientation> orientation: RadioOrientation.vertical;
+    in property <bool> scrollable: false;
+    in-out property <length> scroll-y: 0px;
     // Fired with the new `selected` index.
     callback changed(int);
 
     // True while focus arrived from a pointer press — suppresses the ring so it
     // is keyboard-only (focus-visible emulation).
     property <bool> pointer-focus: false;
+    property <int> navigation-index: root.highlighted >= 0 ? root.highlighted : root.selected;
 
     // `inherits Rectangle` + explicit min sizes so parent layouts honor the
     // RadioGroup's footprint. Without this, sibling columns squished the
@@ -172,13 +183,14 @@ export component RadioGroup inherits Rectangle {
         }
     }
 
-    if orientation == RadioOrientation.vertical: VerticalLayout {
+    if orientation == RadioOrientation.vertical && !root.scrollable: VerticalLayout {
         spacing: 10px;
         alignment: start;
         for item[idx] in items: RadioRow {
             label: item.label;
             active: idx == root.selected;
-            show-focus: nav.has-focus && idx == root.selected && !root.pointer-focus;
+            show-focus: (nav.has-focus || root.show-external-highlight)
+                && idx == root.navigation-index && !root.pointer-focus;
             disabled: root.disabled;
             clicked => {
                 if (root.selected != idx) {
@@ -191,13 +203,51 @@ export component RadioGroup inherits Rectangle {
         }
     }
 
+    if orientation == RadioOrientation.vertical && root.scrollable: Rectangle {
+        vertical-scroll := FocusListScroll {
+            selected-index: root.navigation-index;
+            item-count: root.items.length;
+            item-height: 32px;
+            viewport-height: vertical-list.height;
+            viewport-y <=> root.scroll-y;
+        }
+        vertical-list := ListView {
+            width: parent.width;
+            height: parent.height;
+            viewport-y <=> root.scroll-y;
+            for item[idx] in items: Rectangle {
+                width: parent.width;
+                height: 32px;
+                RadioRow {
+                    width: parent.width;
+                    height: 22px;
+                    y: (parent.height - self.height) / 2;
+                    label: item.label;
+                    active: idx == root.selected;
+                    show-focus: (nav.has-focus || root.show-external-highlight)
+                        && idx == root.navigation-index && !root.pointer-focus;
+                    disabled: root.disabled;
+                    clicked => {
+                        if (root.selected != idx) {
+                            root.selected = idx;
+                            root.changed(idx);
+                        }
+                        nav.focus();
+                    }
+                    pointer-down => { root.pointer-focus = true; }
+                }
+            }
+        }
+    }
+
     if orientation == RadioOrientation.horizontal: HorizontalLayout {
         spacing: 20px;
         alignment: start;
         for item[idx] in items: RadioRow {
             label: item.label;
             active: idx == root.selected;
-            show-focus: nav.has-focus && idx == root.selected && !root.pointer-focus;
+            show-focus: (nav.has-focus || root.show-external-highlight)
+                && idx == root.navigation-index && !root.pointer-focus;
             disabled: root.disabled;
             clicked => {
                 if (root.selected != idx) {

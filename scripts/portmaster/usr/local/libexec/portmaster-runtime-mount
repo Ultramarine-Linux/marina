@@ -2,7 +2,7 @@
 set -eu
 
 encoded_runtime=${1:?missing runtime instance}
-runtime="$(systemd-escape --unescape --path "$encoded_runtime")"
+runtime="$(systemd-escape --unescape "$encoded_runtime")"
 runtime=${runtime#/}
 case "$runtime" in
     ''|*/*|*'..'*|*[!A-Za-z0-9_.-]*)

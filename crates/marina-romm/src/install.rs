@@ -8,7 +8,7 @@ use std::path::PathBuf;
 
 use marina_core::LibraryItem;
 use marina_library::{Library, query::SearchQuery};
-use marina_store::StoreError;
+use marina_store::{InstallProgress, InstallProgressCallback, StoreError};
 use thiserror::Error;
 use tracing::debug;
 
@@ -78,6 +78,7 @@ pub async fn install(
     client: &Client,
     library: &(dyn Library + Send + Sync),
     request: ResolvedInstall,
+    progress: InstallProgressCallback,
 ) -> Result<LibraryItem, InstallError> {
     let title = request
         .rom
@@ -113,8 +114,19 @@ pub async fn install(
             } else {
                 file.rom_id
             };
+            let message = format!("Downloading ROM: {}", file.file_name);
+            progress(InstallProgress::status(message.clone()));
+            let on_progress = |completed, total| {
+                progress(InstallProgress::bytes(message.clone(), completed, total));
+            };
             client
-                .download_file(rom_id, &file.file_name, Some(file.id), &temporary)
+                .download_file(
+                    rom_id,
+                    &file.file_name,
+                    Some(file.id),
+                    &temporary,
+                    Some(&on_progress),
+                )
                 .await?;
             let actual = tokio::fs::metadata(&temporary).await?.len();
             if actual != expected {
@@ -167,9 +179,17 @@ pub async fn install(
         };
         let extension = asset_extension(&source);
         let destination = asset_dir.join(format!("{suffix}-{index}.{extension}"));
-        client.download_url(&source_url, &destination).await?;
+        let message = format!("Downloading {suffix}");
+        progress(InstallProgress::status(message.clone()));
+        let on_progress = |completed, total| {
+            progress(InstallProgress::bytes(message.clone(), completed, total));
+        };
+        client
+            .download_url(&source_url, &destination, Some(&on_progress))
+            .await?;
         asset.local_path = Some(destination.to_string_lossy().into_owned());
     }
+    progress(InstallProgress::status("Adding game to library"));
     let existing = library
         .search(SearchQuery::new().platform(platform).limit(usize::MAX))
         .await?
@@ -194,16 +214,9 @@ pub async fn install(
         existing.updated_at = item.updated_at;
         existing.assets = item.assets;
         existing.provider_ids.extend(item.provider_ids);
-        // Merge file records by path: freshly installed files replace stale
-        // rows (e.g. untagged scanner entries) so provider identities are
-        // recorded; previously installed files for other paths are kept.
-        let mut files: Vec<marina_core::LibraryItemFile> = existing
-            .files
-            .into_iter()
-            .filter(|current| !item.files.iter().any(|file| file.path == current.path))
-            .collect();
-        files.extend(item.files);
-        existing.files = files;
+        // Merge by provider identity or path: reinstalling one artifact
+        // refreshes that row, while other installed versions remain available.
+        existing.files = merge_installed_files(existing.files, item.files);
         existing
             .provider_ids
             .insert("romm_id".into(), rom_id.to_string());
@@ -215,6 +228,24 @@ pub async fn install(
         debug!(title = %saved.title, local_path = ?saved.local_path, "installed game added to library");
         Ok(saved)
     }
+}
+
+fn merge_installed_files(
+    existing: Vec<marina_core::LibraryItemFile>,
+    installed: Vec<marina_core::LibraryItemFile>,
+) -> Vec<marina_core::LibraryItemFile> {
+    let mut files = existing
+        .into_iter()
+        .filter(|current| {
+            !installed.iter().any(|replacement| {
+                replacement.path == current.path
+                    || replacement.provider_id.is_some()
+                        && replacement.provider_id == current.provider_id
+            })
+        })
+        .collect::<Vec<_>>();
+    files.extend(installed);
+    files
 }
 
 pub(crate) fn map_error(error: InstallError) -> StoreError {
@@ -248,7 +279,9 @@ fn asset_extension(source: &str) -> &str {
 
 #[cfg(test)]
 mod tests {
-    use super::{asset_extension, safe_component};
+    use marina_core::LibraryItemFile;
+
+    use super::{asset_extension, merge_installed_files, safe_component};
 
     #[test]
     fn sanitizes_only_path_breaking_characters() {
@@ -260,5 +293,26 @@ mod tests {
         assert_eq!(asset_extension("cover/big.png?ts=2026-08-15"), "png");
         assert_eq!(asset_extension("cover/big.webp#gallery"), "webp");
         assert_eq!(asset_extension("cover/no-extension?ts=1"), "bin");
+    }
+
+    fn artifact(id: i32, name: &str) -> LibraryItemFile {
+        LibraryItemFile {
+            provider_id: Some(format!("romm:file:{id}")),
+            name: name.to_owned(),
+            path: format!("/games/example/{name}"),
+            size_bytes: Some(42),
+        }
+    }
+
+    #[test]
+    fn artifact_installs_are_additive_and_idempotent() {
+        let first = artifact(1, "Example Game A.rom");
+        let second = artifact(2, "Example Game B.rom");
+
+        let files = merge_installed_files(vec![first.clone()], vec![second.clone()]);
+        assert_eq!(files, vec![first.clone(), second.clone()]);
+
+        let files = merge_installed_files(files, vec![second.clone()]);
+        assert_eq!(files, vec![first, second]);
     }
 }

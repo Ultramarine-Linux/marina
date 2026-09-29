@@ -15,7 +15,8 @@ use async_trait::async_trait;
 use marina_core::{LibraryItem, Platform};
 use marina_library::{Library, query::SearchQuery};
 use marina_store::{
-    InstallMode, InstallRequest, StoreBackend, StoreEntry, StoreError, StorePlatform, StoreQuery,
+    InstallMode, InstallProgress, InstallProgressCallback, InstallRequest, StoreBackend,
+    StoreEntry, StoreError, StorePlatform, StoreQuery,
 };
 use serde_json::Value;
 use tokio::sync::Mutex;
@@ -286,7 +287,9 @@ impl StoreBackend for PortMasterStore {
         &self,
         library: &(dyn Library + Send + Sync),
         request: InstallRequest,
+        progress: InstallProgressCallback,
     ) -> Result<LibraryItem, StoreError> {
+        progress(InstallProgress::status("Preparing PortMaster"));
         let payload_url = self
             .asset_url("PortMaster.zip")
             .await
@@ -317,6 +320,7 @@ impl StoreBackend for PortMasterStore {
             .asset_url("runtimes_zips.json")
             .await
             .map_err(StoreError::backend)?;
+        progress(InstallProgress::status("Preparing PortMaster runtimes"));
         installer::ensure_runtimes(
             &self.client,
             runtimes_url,
@@ -347,6 +351,10 @@ impl StoreBackend for PortMasterStore {
             .config
             .ports_dir
             .join(safe_component(&request.entry.title));
+        progress(InstallProgress::status(format!(
+            "Downloading port: {}",
+            request.entry.title
+        )));
         let launcher = installer::install_port(
             &self.client,
             install_target.to_owned(),
@@ -357,6 +365,7 @@ impl StoreBackend for PortMasterStore {
         )
         .await
         .map_err(StoreError::backend)?;
+        progress(InstallProgress::status("Finalizing PortMaster files"));
         installer::write_runtime_manifest(&install_dir, &runtimes)
             .await
             .map_err(StoreError::backend)?;
@@ -369,6 +378,7 @@ impl StoreBackend for PortMasterStore {
             "portmaster.release".into(),
             self.release().await.map_err(StoreError::backend)?,
         );
+        progress(InstallProgress::status("Downloading port artwork"));
         if let Some(image) = self.preview_image(&request.entry).await? {
             item.assets.push(marina_core::LibraryAsset {
                 kind: marina_core::LibraryAssetKind::CoverLarge,
@@ -376,6 +386,7 @@ impl StoreBackend for PortMasterStore {
                 local_path: Some(image.path.to_string_lossy().into_owned()),
             });
         }
+        progress(InstallProgress::status("Adding game to library"));
         let _ = library
             .add_platform(Platform::new("portmaster", "PortMaster"))
             .await;

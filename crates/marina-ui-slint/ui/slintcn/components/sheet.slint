@@ -31,17 +31,28 @@ export component Sheet inherits Rectangle {
     in property <bool> compact: false;
     // Disable when sheet content owns a more specific initial focus target.
     in property <bool> auto-focus: true;
+    // Fired after `open` changes to true, before the transition starts.
+    callback opened();
     // Fired when the sheet closes for any reason.
     callback dismissed();
 
     background: transparent;
-    // Grab focus on mount-open so Esc reaches the scope below; the invoker
+    // Grab focus on open so Esc reaches the scope below; the invoker
     // restores focus on close. (Toggle-open while mounted is the consumer's
     // job: two competing focus grabs have no defined order.) Deferred past
     // mount settling: a synchronous grab in `init` can run inside an
     // accessibility tree rebuild, whose adapter borrow is already held, and
     // panic the backend. A timer always lands on a clean stack.
     init => { mount-focus-timer.start(); }
+    changed open => {
+        if (root.open) {
+            if (root.auto-focus) {
+                mount-focus-timer.stop();
+                mount-focus-timer.start();
+            }
+            root.opened();
+        }
+    }
 
     mount-focus-timer := Timer {
         interval: 50ms;

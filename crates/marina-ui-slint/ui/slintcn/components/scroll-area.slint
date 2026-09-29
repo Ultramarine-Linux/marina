@@ -8,16 +8,32 @@ export component ScrollArea inherits Rectangle {
     in property <length> content-height;
     in property <int> focus-request: 0;
     in property <length> scroll-step: 80px;
+    in-out property <length> viewport-y: 0px;
     callback focus-content;
 
     clip: true;
     background: transparent;
+
+    public function scroll-to-start() {
+        root.viewport-y = 0px;
+    }
+
+    public function center-on(item-y: length, item-height: length) {
+        let minimum-viewport-y = min(0px, flick.height - root.content-height);
+        let target = flick.height / 2 - item-y - item-height / 2;
+        root.viewport-y = min(0px, max(minimum-viewport-y, target));
+    }
 
     flick := Flickable {
         width: parent.width;
         height: parent.height;
         viewport-width: parent.width;
         viewport-height: root.content-height;
+        viewport-y <=> root.viewport-y;
+        animate viewport-y {
+            duration: Tokens.motion-scroll;
+            easing: Tokens.motion-easing-scroll;
+        }
         @children
     }
 

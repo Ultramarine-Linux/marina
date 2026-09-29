@@ -5,19 +5,23 @@
 //! Browse pages retain only lightweight card fields. Full backend records are
 //! scoped to detail/install futures and drop when those operations complete.
 
-use std::sync::{
-    Arc, Mutex,
-    atomic::{AtomicU64, Ordering},
+use std::{
+    sync::{
+        Arc, Mutex,
+        atomic::{AtomicU64, Ordering},
+    },
+    time::{Duration, Instant},
 };
 
-use marina_store::InstallMode;
+use marina_store::{InstallMode, InstallProgressCallback};
 use slint::{ComponentHandle, Image, Model, ModelRc, SharedString, VecModel};
 use tracing::{debug, error, info};
 
 use super::library as shelf;
+use crate::ui::notifications::NOTIFICATION;
 use crate::{
     GameCardData, HomeState, LibraryState, MainWindow, PlatformCardData, PreviewDetailsData,
-    StoreArtifact, StoreState, ToastQueue, ToastVariant, game_cards, platform_asset_path,
+    StoreArtifact, StoreState, game_cards, platform_asset_path,
 };
 use crate::{app, image};
 
@@ -260,6 +264,39 @@ pub(crate) fn install(
                         "Installing {selected_count} file(s)…"
                     )));
                 window.global::<StoreState>().set_install_progress(0.0);
+                window
+                    .global::<StoreState>()
+                    .set_install_indeterminate(true);
+            });
+            let progress_window = window.clone();
+            let last_progress_update = Arc::new(Mutex::new(
+                Instant::now() - Duration::from_secs(1),
+            ));
+            let progress: InstallProgressCallback = Arc::new(move |update| {
+                // Network chunks can be very small. Keep UI work bounded while
+                // still publishing phase changes immediately.
+                if update.completed_bytes.is_some() {
+                    let mut last = last_progress_update
+                        .lock()
+                        .expect("install progress throttle lock poisoned");
+                    if last.elapsed() < Duration::from_millis(100) {
+                        return;
+                    }
+                    *last = Instant::now();
+                }
+                let progress = match (update.completed_bytes, update.total_bytes) {
+                    (Some(completed), Some(total)) if total > 0 => {
+                        (completed as f64 / total as f64).clamp(0.0, 1.0) as f32
+                    }
+                    _ => 0.0,
+                };
+                let indeterminate = update.completed_bytes.is_none() || update.total_bytes.is_none();
+                let _ = progress_window.upgrade_in_event_loop(move |window| {
+                    let store = window.global::<StoreState>();
+                    store.set_install_status(SharedString::from(update.message));
+                    store.set_install_progress(progress);
+                    store.set_install_indeterminate(indeterminate);
+                });
             });
             let result = backend
                 .install(
@@ -269,6 +306,7 @@ pub(crate) fn install(
                         file_ids,
                         library_root: root,
                     },
+                    progress,
                 )
                 .await;
             match result {
@@ -294,6 +332,9 @@ pub(crate) fn install(
                                     .global::<StoreState>()
                                     .set_install_status(SharedString::from("Installed"));
                                 window.global::<StoreState>().set_install_progress(1.0);
+                                window
+                                    .global::<StoreState>()
+                                    .set_install_indeterminate(false);
                                 // Refresh every stale consumer now: the
                                 // library tab reloads platforms/counts, and
                                 // the home shelf reloads recently-added, so
@@ -310,6 +351,9 @@ pub(crate) fn install(
                                     .global::<StoreState>()
                                     .set_install_status(SharedString::from("Installed; library refresh failed"));
                                 window.global::<StoreState>().set_install_progress(1.0);
+                                window
+                                    .global::<StoreState>()
+                                    .set_install_indeterminate(false);
                                 // The save itself succeeded: still refresh both
                                 // consumers so the game appears everywhere.
                                 window.global::<LibraryState>().invoke_entered();
@@ -327,6 +371,9 @@ pub(crate) fn install(
                                 "Install failed: {error}"
                             )));
                         window.global::<StoreState>().set_install_progress(0.0);
+                        window
+                            .global::<StoreState>()
+                            .set_install_indeterminate(false);
                     });
                 }
             }
@@ -383,7 +430,11 @@ pub(crate) fn install(
                         }
                     }
                     Err(error) => {
-                        error!(backend = %backend.id(), %error, "store platform refresh failed")
+                        error!(backend = %backend.id(), %error, "store platform refresh failed");
+                        NOTIFICATION.error(format!(
+                            "{} store failed to load: {error}",
+                            backend.display_name()
+                        ));
                     }
                 }
             }
@@ -404,16 +455,14 @@ pub(crate) fn install(
                 });
                 return;
             }
-            let icon_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
-                .join("ui/assets/platforms/systematic");
+
             // Publish the list immediately; icons resolve
             // concurrently per row instead of blocking the list on
             // a sequential await chain.
             let icon_jobs = platforms
                 .iter()
                 .filter_map(|platform| {
-                    platform_asset_path(&icon_root, &platform.slug)
-                        .map(|path| (platform.slug.clone(), path))
+                    platform_asset_path(&platform.slug).map(|path| (platform.slug.clone(), path))
                 })
                 .collect::<Vec<_>>();
             let count = platforms.len();
@@ -436,10 +485,7 @@ pub(crate) fn install(
                     .global::<StoreState>()
                     .set_platforms(ModelRc::from(std::rc::Rc::new(VecModel::from(cards))));
                 window.global::<StoreState>().set_loading(false);
-                window.global::<ToastQueue>().invoke_show(
-                    SharedString::from(format!("Loaded {count} store platforms")),
-                    ToastVariant::Success,
-                );
+                NOTIFICATION.success(format!("Loaded {count} store platforms"));
             });
             for (slug, path) in icon_jobs {
                 let icon_window = window.clone();

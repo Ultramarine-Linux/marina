@@ -4,13 +4,16 @@ import { Tokens } from "../theme/tokens.slint";
 export component Progress inherits Rectangle {
     // Current value 0–100.
     in property <float> value: 0;
+    // Use a moving segment while the current operation has no byte total.
+    in property <bool> indeterminate: false;
+    private property <float> indeterminate-offset: -0.35;
 
     height: 8px;          // h-2
     border-radius: 4px;
     background: Tokens.color-muted;
     clip: true;
 
-    Rectangle {
+    if !root.indeterminate: Rectangle {
         x: 0;
         y: 0;
         width: parent.width * (max(0, min(100, root.value)) / 100);
@@ -21,5 +24,38 @@ export component Progress inherits Rectangle {
             duration: Tokens.motion-base;
             easing: Tokens.motion-easing-standard;
         }
+    }
+
+    if root.indeterminate: Rectangle {
+        x: parent.width * root.indeterminate-offset;
+        y: 0;
+        width: parent.width * 0.35;
+        height: parent.height;
+        background: Tokens.color-primary;
+        border-radius: 4px;
+        animate x {
+            duration: 650ms;
+            easing: linear;
+        }
+    }
+
+    indeterminate-timer := Timer {
+        interval: 700ms;
+        triggered => {
+            root.indeterminate-offset = root.indeterminate-offset < 0
+                ? 1
+                : -0.35;
+        }
+    }
+    changed indeterminate => {
+        if (root.indeterminate) {
+            indeterminate-timer.start();
+        } else {
+            indeterminate-timer.stop();
+            root.indeterminate-offset = -0.35;
+        }
+    }
+    init => {
+        if (root.indeterminate) { indeterminate-timer.start(); }
     }
 }

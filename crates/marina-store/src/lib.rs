@@ -5,7 +5,7 @@
 //! are cached in *separate* SQLite files (one per backend) owned by
 //! [`StoreCache`] / [`StoreCaches`].
 
-use std::path::PathBuf;
+use std::{path::PathBuf, sync::Arc};
 
 use async_trait::async_trait;
 use marina_core::LibraryItem;
@@ -102,6 +102,43 @@ pub struct InstallRequest {
     pub library_root: PathBuf,
 }
 
+/// A progress update for the artifact currently being installed.
+///
+/// `completed_bytes` and `total_bytes` are both present only when the backend
+/// knows a meaningful byte total. Consumers should render an indeterminate
+/// indicator otherwise.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct InstallProgress {
+    pub message: String,
+    pub completed_bytes: Option<u64>,
+    pub total_bytes: Option<u64>,
+}
+
+impl InstallProgress {
+    pub fn status(message: impl Into<String>) -> Self {
+        Self {
+            message: message.into(),
+            completed_bytes: None,
+            total_bytes: None,
+        }
+    }
+
+    pub fn bytes(
+        message: impl Into<String>,
+        completed_bytes: u64,
+        total_bytes: Option<u64>,
+    ) -> Self {
+        Self {
+            message: message.into(),
+            completed_bytes: Some(completed_bytes),
+            total_bytes,
+        }
+    }
+}
+
+/// Receives installation progress on the async backend task.
+pub type InstallProgressCallback = Arc<dyn Fn(InstallProgress) + Send + Sync>;
+
 /// A pluggable remote store (RomM, etc.).
 #[async_trait]
 pub trait StoreBackend: Send + Sync + std::fmt::Debug {
@@ -124,6 +161,7 @@ pub trait StoreBackend: Send + Sync + std::fmt::Debug {
         &self,
         library: &(dyn Library + Send + Sync),
         request: InstallRequest,
+        progress: InstallProgressCallback,
     ) -> Result<LibraryItem, StoreError>;
     /// Escape hatch for backend-specific operations the trait doesn't cover
     /// (e.g. resolving cover URLs). Prefer trait methods.

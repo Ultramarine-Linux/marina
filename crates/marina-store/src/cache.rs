@@ -241,15 +241,18 @@ mod tests {
     fn cache_round_trips_and_filters() {
         let cache = StoreCache::in_memory("romm").unwrap();
         cache
-            .upsert_entries(&[entry("1", "Zelda", "snes"), entry("2", "Metroid", "nes")])
+            .upsert_entries(&[
+                entry("1", "Example Alpha", "snes"),
+                entry("2", "Example Beta", "nes"),
+            ])
             .unwrap();
         assert_eq!(cache.count().unwrap(), 2);
         let page = cache.browse(Some("snes"), None, 10, 0).unwrap();
         assert_eq!(page.len(), 1);
-        assert_eq!(page[0].title, "Zelda");
+        assert_eq!(page[0].title, "Example Alpha");
         let cards = cache.browse_cards(Some("snes"), None, 10, 0).unwrap();
         assert_eq!(cards.len(), 1);
-        assert_eq!(cards[0].title, "Zelda");
+        assert_eq!(cards[0].title, "Example Alpha");
         assert!(cards[0].payload_json.is_none());
         assert!(cache.get("1").unwrap().is_some());
     }
@@ -261,12 +264,12 @@ mod tests {
         caches
             .cache_for("romm")
             .unwrap()
-            .upsert_entries(&[entry("1", "Zelda", "snes")])
+            .upsert_entries(&[entry("1", "Example Alpha", "snes")])
             .unwrap();
         caches
             .cache_for("other")
             .unwrap()
-            .upsert_entries(&[entry("9", "Sonic", "genesis")])
+            .upsert_entries(&[entry("9", "Example Beta", "genesis")])
             .unwrap();
         assert_eq!(caches.cache_for("romm").unwrap().count().unwrap(), 1);
         assert_eq!(caches.cache_for("other").unwrap().count().unwrap(), 1);

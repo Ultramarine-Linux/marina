@@ -1,0 +1,23 @@
+# systemd user service for Marina's controller-first Wayland overlay
+[Unit]
+Description=Marina window-management overlay
+After=graphical-session.target
+PartOf=marina-shell.service
+
+[Service]
+Type=simple
+Environment=SLINT_SCALE_FACTOR=2.0
+Environment=RUST_LOG=info
+Environment=MALLOC_ARENA_MAX=2
+Environment=MALLOC_TRIM_THRESHOLD_=131072
+ExecStart=/usr/bin/marina-shell-overlay
+Restart=on-failure
+RestartSec=2s
+Slice=graphical-shell.slice
+
+# The transparent layer surface stays mapped while hidden, but has no input
+# region or keyboard interactivity until opened. The service inherits
+# WAYLAND_DISPLAY and XDG_RUNTIME_DIR from the graphical user manager.
+
+[Install]
+WantedBy=graphical-session.target

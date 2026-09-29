@@ -1,0 +1,53 @@
+# Default RetroArch core assignments for the cores supplied by Ultramarine.
+# This is a drop-in so local configuration can override individual platforms.
+
+[runtime.retroarch.platforms."atari2600".retroarch]
+core = "stella2014_libretro.so"
+
+[runtime.retroarch.platforms."atari7800".retroarch]
+core = "prosystem_libretro.so"
+
+[runtime.retroarch.platforms."gameandwatch".retroarch]
+core = "gw_libretro.so"
+
+[runtime.retroarch.platforms."gb".retroarch]
+core = "mgba_libretro.so"
+
+[runtime.retroarch.platforms."gba".retroarch]
+core = "mgba_libretro.so"
+
+[runtime.retroarch.platforms."gbc".retroarch]
+core = "mgba_libretro.so"
+
+[runtime.retroarch.platforms."lynx".retroarch]
+core = "handy_libretro.so"
+
+[runtime.retroarch.platforms."nes".retroarch]
+core = "nestopia_libretro.so"
+
+[runtime.retroarch.platforms."ngp".retroarch]
+core = "mednafen_ngp_libretro.so"
+
+[runtime.retroarch.platforms."ngpc".retroarch]
+core = "mednafen_ngp_libretro.so"
+
+[runtime.retroarch.platforms."pcengine".retroarch]
+core = "mednafen_pce_fast_libretro.so"
+
+[runtime.retroarch.platforms."pcenginecd".retroarch]
+core = "mednafen_pce_fast_libretro.so"
+
+[runtime.retroarch.platforms."psx".retroarch]
+core = "pcsx_rearmed_libretro.so"
+
+[runtime.retroarch.platforms."snes".retroarch]
+core = "bsnes_mercury_performance_libretro.so"
+
+[runtime.retroarch.platforms."virtualboy".retroarch]
+core = "mednafen_vb_libretro.so"
+
+[runtime.retroarch.platforms."wswan".retroarch]
+core = "mednafen_wswan_libretro.so"
+
+[runtime.retroarch.platforms."wswanc".retroarch]
+core = "mednafen_wswan_libretro.so"

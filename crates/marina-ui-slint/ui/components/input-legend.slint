@@ -1,0 +1,26 @@
+import { Tokens } from "../slintcn/theme/tokens.slint";
+
+// Controller input legend used by sheets and other controller-first surfaces.
+// The icon is resolved and supplied by the Rust UI layer; this component owns
+// only the shared visual treatment.
+export component InputLegend inherits HorizontalLayout {
+    in property <image> icon;
+    in property <string> label;
+
+    spacing: Tokens.spacing-xs;
+    alignment: center;
+    height: 20px;
+
+    Image {
+        source: root.icon;
+        width: 20px;
+        height: 20px;
+        image-fit: contain;
+    }
+    Text {
+        text: root.label;
+        color: Tokens.color-muted-foreground;
+        font-size: Tokens.typography-body-sm-size;
+        vertical-alignment: center;
+    }
+}

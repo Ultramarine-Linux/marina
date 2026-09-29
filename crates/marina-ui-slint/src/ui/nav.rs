@@ -15,8 +15,8 @@
 use std::sync::{Mutex, OnceLock};
 
 use crate::{
-    BreadcrumbItem, GameState, HomeState, LibraryState, MainWindow, ShellPage, ShellState,
-    StoreState,
+    BreadcrumbItem, ErrorSheetState, GameState, HomeState, LibraryState, MainWindow, ShellPage,
+    ShellState, StoreState,
 };
 use slint::{ComponentHandle, Model, ModelRc, SharedString, VecModel};
 
@@ -243,7 +243,21 @@ fn pop() -> Option<Crumb> {
 /// entry editing, …) register an arm here instead of growing tab-specific
 /// helpers.
 pub(crate) fn dismiss_overlay(window: &MainWindow) -> bool {
+    let error = window.global::<ErrorSheetState>();
+    if error.get_open() {
+        error.set_open(false);
+        return true;
+    }
+
     match window.global::<ShellState>().get_page() {
+        ShellPage::GameDetails => {
+            let game = window.global::<GameState>();
+            if game.get_launch_sheet_open() {
+                game.set_launch_sheet_open(false);
+                return true;
+            }
+            false
+        }
         ShellPage::Store => {
             let store = window.global::<StoreState>();
             if store.get_artifact_sheet_open() {
@@ -320,6 +334,9 @@ fn unload_game_details(window: &MainWindow) {
     game.set_selected_game(crate::empty_game_card());
     game.set_details(crate::empty_preview_details());
     game.set_tags(crate::string_model(Vec::new()));
+    game.set_gallery(crate::gallery_model(Vec::new()));
+    game.set_launch_artifacts(ModelRc::default());
+    game.set_launch_sheet_open(false);
     game.set_details_loading(false);
 }
 

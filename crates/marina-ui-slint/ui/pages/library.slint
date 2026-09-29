@@ -3,9 +3,8 @@ import { Tokens } from "../slintcn/theme/tokens.slint";
 
 import { Skeleton } from "../slintcn/components/skeleton.slint";
 import { Empty } from "../slintcn/components/empty.slint";
-import { Text as Typography } from "../slintcn/components/text.slint";
-import { TextVariant, TextTone } from "../slintcn/components/text.slint";
 import { PlatformCardData } from "../components/platform-card.slint";
+import { PlatformListRow } from "../components/platform-list-row.slint";
 import { GameCardData } from "../components/card.slint";
 import { PlatformGameList } from "../components/platform-game-list.slint";
 import { PreviewDetailsData } from "../components/preview-details.slint";
@@ -102,8 +101,8 @@ export component LibraryPage inherits Rectangle {
     }
 
     page-focus := FocusScope {
-        width: 0px;
-        height: 0px;
+        width: parent.width;
+        height: parent.height;
         key-pressed(event) => {
             if (event.text == "\u{1b}" && root.page == 1) {
                 ShellState.back-requested();
@@ -154,7 +153,6 @@ export component LibraryPage inherits Rectangle {
             }
             return reject;
         }
-    }
 
     if root.page == 0: VerticalLayout {
         spacing: Tokens.spacing-lg;
@@ -198,65 +196,13 @@ export component LibraryPage inherits Rectangle {
                 width: parent.width;
                 height: parent.height;
                 viewport-y <=> root.platform-list-scroll-y;
-            for platform[i] in root.platforms: Rectangle {
+            for platform[i] in root.platforms: PlatformListRow {
                 width: parent.width;
-                height: 52px;
-                background: i == root.selected-platform-index && page-focus.has-focus
-                    ? Tokens.color-surface-3
-                    : (platform-touch.has-hover ? Tokens.color-surface-2 : transparent);
-                border-radius: Tokens.radius-sm;
-                border-width: i == root.selected-platform-index && page-focus.has-focus ? Tokens.focus-ring-width : 0px;
-                border-color: Tokens.color-ring-muted;
-
-
-                Image {
-                    x: Tokens.spacing-2xl;
-                    y: 8px;
-                    width: 36px;
-                    height: 36px;
-                    source: platform.icon;
-                    image-fit: contain;
-                }
-                // Text {
-                //     x: Tokens.spacing-sm;
-                //     y: 8px;
-                //     width: 36px;
-                //     height: 36px;
-                //     text: platform.icon;
-                //     font-size: 22px;
-                //     horizontal-alignment: center;
-                //     vertical-alignment: center;
-                // }
-
-                Typography {
-                    x: Tokens.spacing-2xl + 48px;
-                    y: 0px;
-                    width: parent.width - 2 * Tokens.spacing-2xl - 48px - 88px;
-                    height: parent.height;
-                    text: platform.name;
-                    variant: TextVariant.body-lg;
-                    vertical-alignment: center;
-                    overflow: elide;
-                }
-
-                Typography {
-                    x: parent.width - Tokens.spacing-2xl - 72px;
-                    y: 0px;
-                    width: 72px;
-                    height: parent.height;
-                    text: platform.game-count;
-                    variant: TextVariant.caption;
-                    tone: TextTone.muted;
-                    horizontal-alignment: right;
-                    vertical-alignment: center;
-                }
-
-                platform-touch := TouchArea {
-                    mouse-cursor: pointer;
-                    clicked => {
-                        page-focus.focus();
-                        root.open-platform(i);
-                    }
+                platform: platform;
+                selected: i == root.selected-platform-index && page-focus.has-focus;
+                clicked => {
+                    page-focus.focus();
+                    root.open-platform(i);
                 }
             }
         }
@@ -312,5 +258,6 @@ export component LibraryPage inherits Rectangle {
         }
 
 
+    }
     }
 }

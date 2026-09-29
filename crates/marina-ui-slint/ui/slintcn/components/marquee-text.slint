@@ -1,0 +1,39 @@
+import { Tokens } from "../theme/tokens.slint";
+
+// Pure single-line marquee. The owning list supplies `scroll-offset` from one
+// stable timer; repeated rows contain no timers, change handlers, or Flickable
+// state that can outlive a recycled ListView item (Slint issue #6426).
+export component MarqueeText inherits Rectangle {
+    in property <string> text;
+    in property <bool> active: false;
+    in property <length> scroll-offset: 0px;
+    in property <color> text-color: Tokens.color-foreground;
+    in property <length> font-size: Tokens.typography-body-sm-size;
+    in property <string> font-family: "";
+    in property <int> font-weight: 400;
+    private property <length> overflow-distance:
+        max(0px, label.preferred-width - root.width);
+    private property <length> cycle-length:
+        root.overflow-distance + 120px;
+    private property <length> cycle-position:
+        Math.mod(root.scroll-offset / 1px, max(1, root.cycle-length / 1px)) * 1px;
+    private property <length> marquee-position:
+        min(root.overflow-distance, max(0px, root.cycle-position - 40px));
+
+    min-width: 0px;
+    preferred-width: 0px;
+    horizontal-stretch: 1;
+    clip: true;
+
+    label := Text {
+        x: root.active ? -root.marquee-position : 0px;
+        y: (parent.height - self.preferred-height) / 2;
+        width: max(parent.width, self.preferred-width);
+        text: root.text;
+        color: root.text-color;
+        font-size: root.font-size;
+        font-family: root.font-family;
+        font-weight: root.font-weight;
+        vertical-alignment: center;
+    }
+}

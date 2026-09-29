@@ -33,7 +33,7 @@ export component SheetPanel inherits Rectangle {
             padding: root.compact ? Tokens.spacing-md : Tokens.spacing-xl;
             spacing: root.compact ? Tokens.spacing-sm : Tokens.spacing-lg;
 
-            VerticalLayout {
+            if root.title != "" || root.description != "": VerticalLayout {
                 spacing: root.compact ? Tokens.spacing-xs : Tokens.spacing-sm;
                 if root.title != "": Text {
                     text: root.title;

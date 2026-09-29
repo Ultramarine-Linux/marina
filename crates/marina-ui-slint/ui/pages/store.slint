@@ -11,8 +11,8 @@ import { Sheet, SheetSide } from "../slintcn/components/sheet.slint";
 import { Checkbox } from "../slintcn/components/checkbox.slint";
 import { FocusRing } from "../slintcn/components/focus-ring.slint";
 import { Card, CardPadding, CardRadius } from "../slintcn/components/card.slint";
-import { Badge, BadgeSize, BadgeVariant } from "../slintcn/components/badge.slint";
 import { PlatformCardData } from "../components/platform-card.slint";
+import { PlatformListRow } from "../components/platform-list-row.slint";
 import { GameCardData } from "../components/card.slint";
 import { ShellState } from "../components/app-shell.slint";
 import { PlatformGameList } from "../components/platform-game-list.slint";
@@ -22,6 +22,8 @@ import { LucideIcon } from "../slintcn/components/lucide-icon.slint";
 import { IconSet } from "@lucide/lucide.slint";
 import { CrumbHeader } from "../components/crumb-header.slint";
 import { FocusListScroll } from "../components/focus-list-scroll.slint";
+import { Progress } from "../slintcn/components/progress.slint";
+import { MarqueeText } from "../slintcn/components/marquee-text.slint";
 
 export struct StoreArtifact {
     path: string,
@@ -50,6 +52,7 @@ export global StoreState {
     in-out property <bool> details-loading: false;
     in-out property <string> install-status;
     in-out property <float> install-progress: 0;
+    in-out property <bool> install-indeterminate: false;
     // Sheet/modal visibility lives here so Rust back-handling can dismiss.
     in-out property <bool> artifact-sheet-open;
     in-out property <bool> direct-install;
@@ -83,6 +86,7 @@ export component StorePage inherits Rectangle {
     in-out property <bool> details-loading: false;
     in-out property <string> install-status;
     in-out property <float> install-progress: 0;
+    in-out property <bool> install-indeterminate: false;
     in-out property <bool> artifact-sheet-open: false;
     in property <bool> direct-install: false;
 
@@ -156,8 +160,8 @@ export component StorePage inherits Rectangle {
     }
 
     page-focus := FocusScope {
-        width: 0px;
-        height: 0px;
+        width: parent.width;
+        height: parent.height;
         key-pressed(event) => {
             if (event.text == "\u{1b}") {
                 if (root.artifact-sheet-open) {
@@ -225,12 +229,12 @@ export component StorePage inherits Rectangle {
                 if (root.page == 1 && root.games.length > 0) {
                     root.select-game(root.selected-game-index);
                     root.page = 2;
+                    root.details-focus-request += 1;
                     return accept;
                 }
             }
             return reject;
         }
-    }
 
     if root.page == 0: VerticalLayout {
         spacing: Tokens.spacing-lg;
@@ -269,56 +273,13 @@ export component StorePage inherits Rectangle {
                 width: parent.width;
                 height: parent.height;
                 viewport-y <=> root.platform-list-scroll-y;
-            for platform[i] in root.platforms: Rectangle {
+            for platform[i] in root.platforms: PlatformListRow {
                 width: parent.width;
-                height: 52px;
-                background: i == root.selected-platform-index && page-focus.has-focus
-                    ? Tokens.color-surface-3
-                    : (touch.has-hover ? Tokens.color-surface-2 : transparent);
-                border-radius: Tokens.radius-sm;
-                border-width: i == root.selected-platform-index && page-focus.has-focus ? Tokens.focus-ring-width : 0px;
-                border-color: Tokens.color-ring-muted;
-                HorizontalLayout {
-                    padding-left: Tokens.spacing-2xl;
-                    padding-right: Tokens.spacing-2xl;
-                    spacing: Tokens.spacing-md;
-                    Image {
-                        width: 36px;
-                        height: 36px;
-                        source: platform.icon;
-                        image-fit: contain;
-                    }
-                    Typography {
-                        horizontal-stretch: 1;
-                        text: platform.name;
-                        variant: TextVariant.body-lg;
-                        vertical-alignment: center;
-                        overflow: elide;
-                    }
-                    VerticalLayout {
-                        horizontal-stretch: 0;
-                        alignment: center;
-                        Badge {
-                            text: platform.slug;
-                            variant: BadgeVariant.outline;
-                            size: BadgeSize.sm;
-                        }
-                    }
-                    Typography {
-                        width: 96px;
-                        text: platform.game-count;
-                        variant: TextVariant.caption;
-                        tone: TextTone.muted;
-                        horizontal-alignment: right;
-                        vertical-alignment: center;
-                    }
-                }
-                touch := TouchArea {
-                    mouse-cursor: pointer;
-                    clicked => {
-                        page-focus.focus();
-                        root.open-platform(i);
-                    }
+                platform: platform;
+                selected: i == root.selected-platform-index && page-focus.has-focus;
+                clicked => {
+                    page-focus.focus();
+                    root.open-platform(i);
                 }
             }
         }
@@ -349,7 +310,11 @@ export component StorePage inherits Rectangle {
             scroll-y <=> root.game-list-scroll-y;
             details-loading <=> root.details-loading;
             keyboard-active: page-focus.has-focus;
-            selected(id, index) => { root.game-selected(id, index); root.page = 2; }
+            selected(id, index) => { root.game-selected(id, index); }
+            activate-requested => {
+                root.page = 2;
+                root.details-focus-request += 1;
+            }
             focus-header => { root.focus-header(); }
             vertical-stretch: 1;
         }
@@ -362,6 +327,7 @@ export component StorePage inherits Rectangle {
         tags: root.tags;
         loading: root.details-loading;
         action-label: "Download";
+        suspend-action-focus: root.artifact-sheet-open || root.install-status != "";
         focus-request: root.details-focus-request;
         action-requested => {
             if root.direct-install {
@@ -375,24 +341,23 @@ export component StorePage inherits Rectangle {
 
 
     // Install progress/result rides the shared Sheet: scrim, focus grab,
-    // backdrop + Back dismissal come for free. Mounted while status text
-    // is set; clearing it (dismissed, backdrop, Back) unmounts.
-    if root.install-status != "": Sheet {
-        open: true;
+    // backdrop + Back dismissal come for free. Keep it mounted while closed
+    // so status changes toggle `open` and receive the shared slide animation.
+    Sheet {
+        open: root.install-status != "";
         side: SheetSide.bottom;
         panel-extent: 220px;
         title: "Install";
         description: root.install-status;
         dismissed() => { root.install-status = ""; }
-        Rectangle {
-            height: 5px;
-            background: Tokens.color-accent;
-            width: parent.width * root.install-progress;
-            border-radius: 3px;
+        Progress {
+            width: parent.width;
+            value: root.install-progress * 100;
+            indeterminate: root.install-indeterminate;
         }
     }
 
-    if root.artifact-sheet-open && root.games.length > 0: Sheet {
+    if root.games.length > 0: Sheet {
         open <=> root.artifact-sheet-open;
         side: SheetSide.right;
         panel-extent: 440px;
@@ -401,13 +366,14 @@ export component StorePage inherits Rectangle {
         title: "Download Artifacts";
         description: "";
         dismiss-on-backdrop: root.install-status == "";
+        opened => {
+            nav-focus-timer.start();
+            sheet-body.marquee-offset = 0px;
+            marquee-timer.start();
+        }
         artifact-nav := FocusScope {
             width: 0px;
             height: 0px;
-            // Deferred past mount settling: init-order between the sheet and
-            // its body is undefined, so a timer wins deterministically over
-            // the sheet's own mount focus grab.
-            init => { nav-focus-timer.start(); }
             key-pressed(event) => {
                 // Virtual cursor spans every list row plus the Download
                 // button past the end, so focus never leaves this scope:
@@ -467,6 +433,17 @@ export component StorePage inherits Rectangle {
                 artifact-nav.focus();
             }
         }
+        marquee-timer := Timer {
+            interval: 24ms;
+            triggered => {
+                if (root.artifact-sheet-open) {
+                    sheet-body.marquee-offset += 1px;
+                } else {
+                    self.stop();
+                }
+            }
+        }
+
         sheet-body := VerticalLayout {
             vertical-stretch: 1;
             padding-left: Tokens.spacing-lg;
@@ -476,7 +453,9 @@ export component StorePage inherits Rectangle {
             // Download button below. Uniform rows keep offsets exact without
             // needing prefix sums.
             property <int> row-cursor: 0;
+            property <length> marquee-offset: 0px;
             property <length> artifact-row-height: 40px;
+            changed row-cursor => { self.marquee-offset = 0px; }
             property <length> list-scroll: 0px;
             // Reported by the list itself: elements inside conditionals
             // aren't referenceable from outside them.
@@ -510,6 +489,10 @@ export component StorePage inherits Rectangle {
                     width: parent.width;
                     height: parent.height;
                     viewport-y <=> sheet-body.list-scroll;
+                    animate viewport-y {
+                        duration: Tokens.motion-scroll;
+                        easing: Tokens.motion-easing-scroll;
+                    }
                     // changed alone misses the initial value, leaving
                     // list-height 0 and scrolling every row out of view.
                     init => { sheet-body.list-height = self.height; }
@@ -567,13 +550,21 @@ export component StorePage inherits Rectangle {
                                         }
                                     }
                                 }
-                                Typography {
+
+                                Rectangle {
+                                    // weird marquee scroll broken
+                                    min-width: 256px;
+                                    // preferred-width: 500px;
                                     horizontal-stretch: 1;
-                                    text: artifact.path;
-                                    variant: TextVariant.body-sm;
-                                    font-family: "monospace";
-                                    vertical-alignment: center;
-                                    overflow: elide;
+                                    clip: true;
+                                    MarqueeText {
+                                        width: parent.width;
+                                        height: parent.height;
+                                        text: artifact.path;
+                                        active: artifact-nav.has-focus && i == sheet-body.row-cursor;
+                                        scroll-offset: sheet-body.marquee-offset;
+                                        font-family: "monospace";
+                                    }
                                 }
                                 Typography {
                                     width: 72px;
@@ -605,5 +596,6 @@ export component StorePage inherits Rectangle {
                 }
             }
         }
+    }
     }
 }

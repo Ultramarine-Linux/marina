@@ -18,6 +18,18 @@ use crate::{
 };
 
 const CONTROLLER_STARTUP_DELAY: Duration = Duration::from_secs(1);
+const WINDOW_FOCUS_RESTORE_DELAY: Duration = Duration::from_millis(50);
+
+fn schedule_content_focus_restore(window: slint::Weak<MainWindow>, window_active: Arc<AtomicBool>) {
+    slint::Timer::single_shot(WINDOW_FOCUS_RESTORE_DELAY, move || {
+        if !window_active.load(Ordering::Acquire) {
+            return;
+        }
+        if let Some(window) = window.upgrade() {
+            ui::controls::restore_content_focus(&window);
+        }
+    });
+}
 
 pub(crate) async fn run() -> Result<(), slint::PlatformError> {
     // Keep the first window construction independent of filesystem-backed profile
@@ -25,6 +37,7 @@ pub(crate) async fn run() -> Result<(), slint::PlatformError> {
     // asynchronously once the event loop is running.
     let username = std::env::var("USER").unwrap_or_else(|_| "user".into());
     let window = MainWindow::new()?;
+    ui::notifications::NOTIFICATION.configure(&window);
     let library_state: Arc<Mutex<Option<app::AppStateHandle>>> = Arc::new(Mutex::new(None));
     ui::settings::configure(&window, &library_state);
     // Controller events are allowed only while Marina owns the native window,
@@ -34,25 +47,30 @@ pub(crate) async fn run() -> Result<(), slint::PlatformError> {
     let focus_state = window_active.clone();
     let focus_window = window.as_weak();
     i_slint_core::context::set_window_event_hook(Some(Box::new(
-        move |_adapter, event, _result| {
-            if let i_slint_core::platform::WindowEvent::WindowActiveChanged(active) = event {
+        move |_adapter, event, result| match event {
+            i_slint_core::platform::WindowEvent::WindowActiveChanged(active) => {
                 focus_state.store(*active, Ordering::Release);
                 if *active {
-                    // A controller hot-unplug can make the compositor rebuild
-                    // its input focus. Reassert the mounted page's focus scope
-                    // after the native window becomes active again, including
-                    // for keyboard- and pointer-only use.
-                    let focus_window = focus_window.clone();
-                    let _ = focus_window.upgrade_in_event_loop(move |window| {
-                        ui::controls::restore_content_focus(&window);
-                    });
+                    // Restore after compositor activation and its associated
+                    // pointer event have settled. Restoring synchronously can
+                    // be undone by the click that activated the window.
+                    schedule_content_focus_restore(focus_window.clone(), focus_state.clone());
                 }
             }
+            i_slint_core::platform::WindowEvent::PointerPressed { .. }
+                if focus_state.load(Ordering::Acquire)
+                    && result == i_slint_core::context::WindowEventDispatchResult::Ignored =>
+            {
+                // Clicking non-interactive background focuses the native
+                // window without selecting a Slint item. Keep controller
+                // navigation anchored to the mounted page in that case.
+                schedule_content_focus_restore(focus_window.clone(), focus_state.clone());
+            }
+            _ => {}
         },
     )))?;
     slint::set_xdg_app_id("org.ultramarinelinux.MarinaShell")?;
     info!("main window constructed; completing lightweight UI setup");
-    ui::controls::configure_toasts(&window);
     ui::controls::configure_navigation(&window);
     ui::controls::configure_profile_menu(&window);
 
@@ -136,6 +154,9 @@ pub(crate) async fn run() -> Result<(), slint::PlatformError> {
             SharedString,
         >::new(
         )))));
+    window
+        .global::<GameState>()
+        .set_gallery(crate::gallery_model(Vec::new()));
 
     window.global::<HomeState>().set_loading(true);
     window.global::<LibraryState>().set_loading(false);
@@ -199,6 +220,8 @@ pub(crate) async fn run() -> Result<(), slint::PlatformError> {
                 Ok(state) => state,
                 Err(error) => {
                     error!(%error, "application initialization failed");
+                    ui::notifications::NOTIFICATION
+                        .error(format!("Marina configuration or startup failed: {error}"));
                     return;
                 }
             };

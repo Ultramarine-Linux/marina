@@ -26,7 +26,13 @@ export component PageRouter inherits Rectangle {
         game: GameState.selected-game;
         details: GameState.details;
         tags: GameState.tags;
+        gallery: GameState.gallery;
         loading: GameState.details-loading;
+        action-label: GameState.playing-game-id == GameState.selected-game.id
+            ? "Playing"
+            : (GameState.launching-game-id == GameState.selected-game.id ? "Launching…" : "Play");
+        action-disabled: GameState.playing-game-id == GameState.selected-game.id
+            || GameState.launching-game-id == GameState.selected-game.id;
         focus-request: ShellState.content-focus-request;
         action-requested => { GameState.play-requested(GameState.selected-game.id); }
         focus-header => { root.focus-header(); }
@@ -128,6 +134,7 @@ export component PageRouter inherits Rectangle {
         details-loading <=> StoreState.details-loading;
         install-status <=> StoreState.install-status;
         install-progress <=> StoreState.install-progress;
+        install-indeterminate <=> StoreState.install-indeterminate;
         artifact-sheet-open: StoreState.artifact-sheet-open;
         direct-install: StoreState.direct-install;
         platform-query(slug) => { StoreState.platform-query(slug); }

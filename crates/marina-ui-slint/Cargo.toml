@@ -3,6 +3,7 @@ name = "marina-ui-slint"
 version.workspace = true
 edition.workspace = true
 license.workspace = true
+default-run = "marina-ui-slint"
 
 [features]
 default = []
@@ -11,6 +12,7 @@ live-preview = ["slint/live-preview"]
 
 [build-dependencies]
 lucide-slint = "1.38.0"
+serde_json.workspace = true
 slint-build = "1.17.1"
 
 [dependencies]
@@ -37,6 +39,7 @@ dirs.workspace = true
 dotenvy.workspace = true
 figment.workspace = true
 marina-apps.workspace = true
+marina-audio.workspace = true
 marina-config-derive.workspace = true
 marina-core.workspace = true
 serde.workspace = true
@@ -54,8 +57,11 @@ marina-runtime.workspace = true
 marina-portmaster.workspace = true
 marina-power.workspace = true
 marina-networking.workspace = true
+marina-shell.workspace = true
+layer-shika.workspace = true
 reqwest.workspace = true
 resvg.workspace = true
 tokio = { workspace = true, features = ["fs"] }
 tracing.workspace = true
+zbus.workspace = true
 

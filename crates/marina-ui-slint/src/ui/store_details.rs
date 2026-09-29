@@ -42,12 +42,11 @@ pub(crate) fn populate_store_details(
                 .map(|screenshot| screenshot.download_path.clone())
         });
     let screenshot_source = covers::source_for(screenshot.as_deref(), None, Some(base_url));
-    let rom_prefix = rom.files.full_path.trim_end_matches('/').to_owned();
     let artifact_count = rom.files.files.len();
     let mut artifact_tree = ArtifactTree::default();
     for (file_index, file) in rom.files.files.iter().enumerate() {
         artifact_tree.insert(
-            &display_artifact_path(file, &rom_prefix),
+            &display_artifact_path(file),
             file_index,
             file.file_size_bytes,
         );
@@ -217,19 +216,46 @@ fn format_file_size(bytes: i64) -> String {
         .unwrap_or_else(|_| "Unknown size".to_owned())
 }
 
-fn display_artifact_path(file: &marina_romm::RomFile, rom_prefix: &str) -> String {
-    let source = if file.full_path.is_empty() {
-        &file.file_path
-    } else {
-        &file.full_path
-    };
-    let stripped = source
-        .strip_prefix(rom_prefix)
-        .unwrap_or(source)
-        .trim_start_matches('/');
-    if stripped.is_empty() {
-        file.file_name.clone()
-    } else {
-        stripped.to_owned()
+fn display_artifact_path(file: &marina_romm::RomFile) -> String {
+    artifact_path(&file.file_name, file.category.as_deref())
+}
+
+/// Store artifact presentation must not expose RomM's backing directory tree.
+/// Files are siblings unless RomM explicitly classifies one with a category
+/// (for example, a supplemental artifact family).
+fn artifact_path(file_name: &str, category: Option<&str>) -> String {
+    let category = category
+        .map(str::trim)
+        .filter(|category| !category.is_empty() && !category.eq_ignore_ascii_case("game"))
+        .map(|category| category.replace(['/', '\\'], "_"));
+    match category {
+        Some(category) => format!("{category}/{file_name}"),
+        None => file_name.to_owned(),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::artifact_path;
+
+    #[test]
+    fn plain_artifacts_ignore_romm_storage_directories() {
+        assert_eq!(artifact_path("Example Game.gba", None), "Example Game.gba");
+    }
+
+    #[test]
+    fn categorized_artifacts_receive_their_explicit_group() {
+        assert_eq!(
+            artifact_path("track02.bin", Some("Disc 1")),
+            "Disc 1/track02.bin"
+        );
+    }
+
+    #[test]
+    fn default_game_category_keeps_artifacts_as_siblings() {
+        assert_eq!(
+            artifact_path("Example Game.z64", Some("game")),
+            "Example Game.z64"
+        );
     }
 }

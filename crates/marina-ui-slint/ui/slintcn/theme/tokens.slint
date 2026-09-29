@@ -82,8 +82,11 @@ export global Tokens {
     // motion
     out property <duration> motion-fast: 150ms;
     out property <duration> motion-base: 200ms;
+    out property <duration> motion-scroll: 200ms;
+    out property <duration> motion-slow: 400ms;
     out property <easing>   motion-easing-standard:    cubic-bezier(0.4, 0.0, 0.2, 1.0);
     out property <easing>   motion-easing-emphasized:  cubic-bezier(0.05, 0.7, 0.1, 1.0);
+    out property <easing>   motion-easing-scroll:      cubic-bezier(0.1, 0.7, 0.1, 1.0);
 
     // elevation shadows (same shadow tone for both themes — natural)
     out property <length> shadow-e2-blur:     8px;

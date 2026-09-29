@@ -43,6 +43,11 @@ export component Button inherits Rectangle {
     callback navigation-requested(string);
     in property <bool> directional-navigation: false;
     in property <int> focus-request: 0;
+    // Exposes focus to composite controller views that must repair focus after
+    // asynchronous subtree updates. `force-focus-ring` bridges only that short
+    // deferred repair window; it does not alter key dispatch.
+    out property <bool> keyboard-focused: focus-scope.has-focus;
+    in property <bool> force-focus-ring: false;
 
     // True while focus arrived from a pointer press — suppresses the ring so it
     // is keyboard-only (focus-visible emulation). Set on pointer down, cleared
@@ -228,7 +233,7 @@ export component Button inherits Rectangle {
 
     // Outer focus ring — keyboard-only, drawn last so it's visually unclipped.
     // (Default radius is already radius-md + focus-ring-offset.)
-    if focus-scope.has-focus && !root.pointer-focus : FocusRing {
+    if (focus-scope.has-focus || root.force-focus-ring) && !root.pointer-focus : FocusRing {
         host-width: parent.width;
         host-height: parent.height;
     }

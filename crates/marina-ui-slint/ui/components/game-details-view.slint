@@ -1,3 +1,4 @@
+import { ListView } from "std-widgets.slint";
 import { Tokens } from "../slintcn/theme/tokens.slint";
 import { Button, ButtonVariant, ButtonSize } from "../slintcn/components/button.slint";
 import { Skeleton } from "../slintcn/components/skeleton.slint";
@@ -9,25 +10,69 @@ import { CrumbHeader } from "crumb-header.slint";
 import { GameCardData } from "card.slint";
 import { PreviewDetailsData } from "preview-details.slint";
 import { ShellState } from "app-shell.slint";
+import { Sheet, SheetSide } from "../slintcn/components/sheet.slint";
+import { Card, CardPadding, CardRadius } from "../slintcn/components/card.slint";
+import { FocusListScroll } from "focus-list-scroll.slint";
+import { MarqueeText } from "../slintcn/components/marquee-text.slint";
+
+export struct LaunchArtifactData {
+    name: string,
+    size: string,
+}
+
+export struct GalleryImageData {
+    image: image,
+    label: string,
+    ratio: float,
+}
 
 export global GameState {
     in-out property <GameCardData> selected-game;
     in-out property <PreviewDetailsData> details;
     in-out property <[string]> tags;
+    in-out property <[GalleryImageData]> gallery;
+    in-out property <[LaunchArtifactData]> launch-artifacts;
+    in-out property <bool> launch-sheet-open: false;
+    in-out property <int> selected-launch-artifact: 0;
     in-out property <bool> details-loading: false;
+    in-out property <string> launching-game-id;
+    in-out property <string> playing-game-id;
     callback play-requested(string);
+    callback launch-artifact-requested(string, int);
 }
 
 export component GameDetailsView inherits Rectangle {
     in property <GameCardData> game;
     in property <PreviewDetailsData> details;
     in property <[string]> tags: [];
+    in property <[GalleryImageData]> gallery: [];
     in property <bool> loading: false;
     in property <string> action-label: "Play";
+    in property <bool> action-disabled: false;
+    // Parent-owned overlays (for example Store artifact/install sheets) suspend
+    // action focus while they own controller input.
+    in property <bool> suspend-action-focus: false;
     in property <int> focus-request: 0;
+    private property <int> gallery-selected: 0;
+    private property <length> launch-list-scroll-y: 0px;
+    private property <length> launch-marquee-offset: 0px;
     private property <int> scroll-focus-request: 0;
+    private property <length> details-scroll-y: 0px;
+    private property <length> gallery-section-y: 0px;
+    private property <length> gallery-section-height: 0px;
+    private property <bool> action-focus-owned: true;
+    private property <bool> action-focus-active: action-button.keyboard-focused;
     private property <length> scroll-content-height:
         max(root.height, details-content.preferred-height + Tokens.spacing-2xl);
+    // Keep the details column aligned while sizing each cover to its natural
+    // aspect ratio inside a transparent, fixed-width cover slot.
+    private property <float> cover-ratio:
+        min(max(root.game.cover-ratio, 0.4), 2.0);
+    private property <length> cover-width: 220px;
+    private property <length> cover-slot-height: 220px;
+    private property <length> cover-image-height:
+        min(root.cover-slot-height,
+            max(120px, root.cover-width / root.cover-ratio));
     callback action-requested;
     callback focus-header;
 
@@ -37,17 +82,86 @@ export component GameDetailsView inherits Rectangle {
     // be nonzero on remount, and a synchronous grab inside setup can run
     // within an accessibility tree rebuild and panic the backend. A timer
     // always lands on a clean stack.
-    init => { focus-defer-timer.start(); }
+    init => {
+        root.action-focus-owned = true;
+        focus-defer-timer.start();
+    }
     changed focus-request => {
+        root.action-focus-owned = true;
         focus-defer-timer.stop();
         focus-defer-timer.start();
+    }
+    changed action-focus-active => {
+        if (!root.action-focus-active && root.action-focus-owned && !root.action-disabled) {
+            focus-defer-timer.stop();
+            focus-defer-timer.start();
+        }
+    }
+    changed action-disabled => {
+        if (!root.action-disabled && root.action-focus-owned) {
+            focus-defer-timer.stop();
+            focus-defer-timer.start();
+        }
+    }
+    changed suspend-action-focus => {
+        focus-defer-timer.stop();
+        root.action-focus-owned = !root.suspend-action-focus;
+        if (!root.suspend-action-focus && !root.action-disabled) {
+            focus-defer-timer.start();
+        }
+    }
+    changed gallery => { root.gallery-selected = 0; }
+
+    function focus-action() {
+        root.action-focus-owned = true;
+        action-button.focus();
+        // Play/Download belongs to the opening details section. Returning focus
+        // there should restore the page start, not center the button and crop
+        // the title/cover above it.
+        details-scroll.scroll-to-start();
+    }
+
+    function focus-gallery() {
+        root.action-focus-owned = false;
+        gallery-focus.focus();
+        details-scroll.center-on(
+            root.gallery-section-y,
+            root.gallery-section-height,
+        );
     }
 
     focus-defer-timer := Timer {
         interval: 50ms;
         triggered => {
             self.stop();
-            action-button.focus();
+            if (root.action-focus-owned && !root.action-disabled && !root.suspend-action-focus) {
+                root.focus-action();
+            }
+        }
+    }
+
+    gallery-focus := FocusScope {
+        width: 0px;
+        height: 0px;
+        key-pressed(event) => {
+            if (event.text == Key.LeftArrow) {
+                root.gallery-selected = max(0, root.gallery-selected - 1);
+                return accept;
+            }
+            if (event.text == Key.RightArrow) {
+                root.gallery-selected = min(root.gallery.length - 1, root.gallery-selected + 1);
+                return accept;
+            }
+            if (event.text == Key.UpArrow) {
+                root.focus-action();
+                return accept;
+            }
+            if (event.text == Key.DownArrow) {
+                root.action-focus-owned = false;
+                root.scroll-focus-request += 1;
+                return accept;
+            }
+            return reject;
         }
     }
 
@@ -60,10 +174,11 @@ export component GameDetailsView inherits Rectangle {
             crumb-navigate(index) => { ShellState.crumb-navigate(index); }
         }
 
-        ScrollArea {
+        details-scroll := ScrollArea {
             width: parent.width;
+            viewport-y <=> root.details-scroll-y;
             focus-request: root.scroll-focus-request;
-            focus-content => { action-button.focus(); }
+            focus-content => { root.focus-action(); }
             vertical-stretch: 1;
             content-height: root.scroll-content-height;
             details-content := VerticalLayout {
@@ -73,18 +188,28 @@ export component GameDetailsView inherits Rectangle {
                 padding-bottom: Tokens.spacing-2xl;
                 spacing: Tokens.spacing-lg;
                 HorizontalLayout {
-                    height: 300px;
+                    height: root.cover-slot-height;
                     spacing: Tokens.spacing-lg;
-                    Rectangle {
-                        width: 220px;
-                        background: Tokens.color-surface-1;
-                        border-radius: Tokens.radius-md;
+                    details-cover := Rectangle {
+                        width: root.cover-width;
+                        height: root.cover-slot-height;
                         clip: true;
-                        if root.game.cover.width == 0: Skeleton { width: parent.width; height: parent.height; radius: Tokens.radius-md; }
-                        if root.game.cover.width > 0: Image { width: parent.width; height: parent.height; source: root.game.cover; image-fit: contain; }
+                        if root.game.cover.width == 0: Skeleton {
+                            y: (parent.height - root.cover-image-height) / 2;
+                            width: parent.width;
+                            height: root.cover-image-height;
+                            radius: Tokens.radius-md;
+                        }
+                        if root.game.cover.width > 0: Image {
+                            y: (parent.height - root.cover-image-height) / 2;
+                            width: parent.width;
+                            height: root.cover-image-height;
+                            source: root.game.cover;
+                            image-fit: contain;
+                        }
                     }
                     VerticalLayout {
-                        width: parent.width - 220px - Tokens.spacing-lg;
+                        width: parent.width - details-cover.width - Tokens.spacing-lg;
                         spacing: Tokens.spacing-md;
                         Typography {
                             width: parent.width;
@@ -98,12 +223,21 @@ export component GameDetailsView inherits Rectangle {
                         action-button := Button {
                             width: 150px;
                             text: root.action-label;
+                            disabled: root.action-disabled;
                             directional-navigation: true;
+                            force-focus-ring: root.action-focus-owned
+                                && !root.action-disabled
+                                && !root.suspend-action-focus;
                             navigation-requested(direction) => {
                                 if (direction == "up") {
+                                    root.action-focus-owned = false;
                                     root.focus-header();
                                 } else if (direction == "down") {
-                                    root.scroll-focus-request += 1;
+                                    if (root.gallery.length > 0) {
+                                        root.focus-gallery();
+                                    } else {
+                                        root.scroll-focus-request += 1;
+                                    }
                                 }
                             }
                             clicked => { root.action-requested(); }
@@ -117,6 +251,67 @@ export component GameDetailsView inherits Rectangle {
                             }
                         }
                         Rectangle { vertical-stretch: 1; }
+                    }
+                }
+                if root.gallery.length > 0: gallery-section := VerticalLayout {
+                    spacing: Tokens.spacing-sm;
+                    init => {
+                        root.gallery-section-y = self.y;
+                        root.gallery-section-height = self.height;
+                    }
+                    changed y => { root.gallery-section-y = self.y; }
+                    changed height => { root.gallery-section-height = self.height; }
+                    Typography { text: "Gallery"; variant: TextVariant.title; }
+                    Rectangle {
+                        height: 148px;
+                        clip: true;
+
+                        gallery-scroll := Flickable {
+                            width: parent.width;
+                            height: parent.height;
+                            viewport-width: gallery-row.preferred-width;
+                            viewport-height: parent.height;
+                            animate viewport-x {
+                                duration: Tokens.motion-scroll;
+                                easing: Tokens.motion-easing-scroll;
+                            }
+                            gallery-row := HorizontalLayout {
+                                height: parent.height;
+                                spacing: Tokens.spacing-sm;
+                                for asset[i] in root.gallery: Rectangle {
+                                    width: 132px * min(max(asset.ratio, 0.8), 1.8);
+                                    height: parent.height;
+                                    border-radius: Tokens.radius-md;
+                                    border-width: gallery-focus.has-focus && i == root.gallery-selected
+                                        ? Tokens.focus-ring-width
+                                        : 0px;
+                                    border-color: Tokens.color-ring;
+                                    clip: true;
+                                    private property <bool> selected: i == root.gallery-selected;
+                                    changed selected => {
+                                        if (self.selected) {
+                                            let minimum-viewport-x = min(
+                                                0px,
+                                                gallery-scroll.width - gallery-row.preferred-width,
+                                            );
+                                            let target = gallery-scroll.width / 2
+                                                - self.x
+                                                - self.width / 2;
+                                            gallery-scroll.viewport-x = min(
+                                                0px,
+                                                max(minimum-viewport-x, target),
+                                            );
+                                        }
+                                    }
+                                    Image {
+                                        width: parent.width;
+                                        height: parent.height;
+                                        source: asset.image;
+                                        image-fit: contain;
+                                    }
+                                }
+                            }
+                        }
                     }
                 }
                 Typography { text: root.loading ? "Loading details..." : "Description"; variant: TextVariant.title; }
@@ -134,6 +329,151 @@ export component GameDetailsView inherits Rectangle {
 
                 }
                 Rectangle { vertical-stretch: 1; }
+            }
+        }
+    }
+
+    Sheet {
+        open <=> GameState.launch-sheet-open;
+        side: SheetSide.right;
+        panel-extent: 440px;
+        compact: true;
+        auto-focus: false;
+        title: "Choose game file";
+        description: "Select the artifact to launch";
+        opened => {
+            root.action-focus-owned = false;
+            GameState.selected-launch-artifact = 0;
+            root.launch-list-scroll-y = 0px;
+            root.launch-marquee-offset = 0px;
+            launch-focus-timer.start();
+            launch-marquee-timer.start();
+        }
+        dismissed => {
+            GameState.launch-sheet-open = false;
+            root.action-focus-owned = true;
+            focus-defer-timer.stop();
+            focus-defer-timer.start();
+        }
+
+        launch-focus := FocusScope {
+            width: 0px;
+            height: 0px;
+            key-pressed(event) => {
+                if (event.text == Key.UpArrow) {
+                    GameState.selected-launch-artifact = max(0, GameState.selected-launch-artifact - 1);
+                    root.launch-marquee-offset = 0px;
+                    return accept;
+                }
+                if (event.text == Key.DownArrow) {
+                    GameState.selected-launch-artifact = min(GameState.launch-artifacts.length - 1, GameState.selected-launch-artifact + 1);
+                    root.launch-marquee-offset = 0px;
+                    return accept;
+                }
+                if ((event.text == "\n" || event.text == " ") && GameState.launch-artifacts.length > 0) {
+                    GameState.launch-sheet-open = false;
+                    GameState.launch-artifact-requested(root.game.id, GameState.selected-launch-artifact);
+                    return accept;
+                }
+                if (event.text == "\u{1b}") {
+                    GameState.launch-sheet-open = false;
+                    root.focus-action();
+                    return accept;
+                }
+                return reject;
+            }
+        }
+        launch-focus-timer := Timer {
+            interval: 50ms;
+            triggered => {
+                self.stop();
+                launch-focus.focus();
+            }
+        }
+        launch-marquee-timer := Timer {
+            interval: 24ms;
+            triggered => {
+                if (GameState.launch-sheet-open) {
+                    root.launch-marquee-offset += 1px;
+                } else {
+                    self.stop();
+                }
+            }
+        }
+
+        launch-body := VerticalLayout {
+            vertical-stretch: 1;
+            padding-left: Tokens.spacing-lg;
+            padding-right: Tokens.spacing-lg;
+
+            Card {
+                vertical-stretch: 1;
+                background: Tokens.color-background;
+                card-padding: CardPadding.none;
+                card-radius: CardRadius.md;
+                clip: true;
+
+                launch-list-scroll := FocusListScroll {
+                    selected-index: GameState.selected-launch-artifact;
+                    item-count: GameState.launch-artifacts.length;
+                    item-height: 48px;
+                    viewport-height: launch-list.height;
+                    viewport-y <=> root.launch-list-scroll-y;
+                }
+
+                launch-list := ListView {
+                    width: parent.width;
+                    height: parent.height;
+                    viewport-y <=> root.launch-list-scroll-y;
+                    for artifact[i] in GameState.launch-artifacts: Rectangle {
+                        width: parent.width;
+                        height: 48px;
+                        background: i == GameState.selected-launch-artifact
+                            ? Tokens.color-surface-3
+                            : transparent;
+                        border-radius: Tokens.radius-sm;
+                        border-width: launch-focus.has-focus && i == GameState.selected-launch-artifact
+                            ? Tokens.focus-ring-width
+                            : 0px;
+                        border-color: Tokens.color-ring-muted;
+
+                        HorizontalLayout {
+                            padding-left: Tokens.spacing-md;
+                            padding-right: Tokens.spacing-md;
+                            spacing: Tokens.spacing-sm;
+                            Rectangle {
+                                min-width: 250px;
+                                horizontal-stretch: 1;
+                                clip: true;
+                                MarqueeText {
+                                    width: parent.width;
+                                    height: parent.height;
+                                    text: artifact.name;
+                                    active: launch-focus.has-focus
+                                        && i == GameState.selected-launch-artifact;
+                                    scroll-offset: root.launch-marquee-offset;
+                                    font-size: Tokens.typography-body-size;
+                                }
+                            }
+                            Text {
+                                width: 72px;
+                                text: artifact.size;
+                                color: Tokens.color-muted-foreground;
+                                font-size: Tokens.typography-label-size;
+                                horizontal-alignment: right;
+                                vertical-alignment: center;
+                            }
+                        }
+                        TouchArea {
+                            mouse-cursor: pointer;
+                            clicked => {
+                                GameState.selected-launch-artifact = i;
+                                GameState.launch-sheet-open = false;
+                                GameState.launch-artifact-requested(root.game.id, i);
+                            }
+                        }
+                    }
+                }
             }
         }
     }

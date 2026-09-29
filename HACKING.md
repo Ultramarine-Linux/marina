@@ -26,19 +26,19 @@ to get started, get build dependencies for slint (`fontconfig-devel`), then conf
 
 ```toml
 # marina.toml (repo root), ~/.config/marina/config.toml, or $MARINA_CONFIG
-[store.romm]
+[library.romm]
 enable = true
 # cappy's personal RomM server, so you can fetch assets from the fixtures below
 url = "https://romm.cappuchino.xyz"
 token = "my_romm_token"
 import_on_startup = false
 
-[library]
+[library.local]
 # Root directory containing locally installed games. The local library is
 # intentionally based on installed content; RomM remains the online Store and
 # save-sync source.
 root = "/path/to/marina/library"
-# SQLite database path; the default is sqlite://marina.db
+# SQLite database path; the default uses the XDG state directory.
 storage_uri = "sqlite://marina.db"
 # test search
 ```

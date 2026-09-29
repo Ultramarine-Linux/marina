@@ -1,4 +1,6 @@
 fn main() {
+    minify_platform_catalog();
+
     if std::env::var_os("CARGO_FEATURE_DEBUG_MCP").is_some()
         && std::env::var("PROFILE").as_deref() == Ok("debug")
     {
@@ -26,4 +28,20 @@ fn main() {
     )]);
     let configuration = slint_build::CompilerConfiguration::new().with_library_paths(libraries);
     slint_build::compile_with_config("ui/pages/main.slint", configuration).unwrap();
+}
+
+fn minify_platform_catalog() {
+    const SOURCE: &str = "src/ui/platform-names.json";
+    println!("cargo:rerun-if-changed={SOURCE}");
+
+    let source = std::fs::read_to_string(SOURCE).expect("read RomM platform catalog");
+    let catalog: serde_json::Value =
+        serde_json::from_str(&source).expect("parse RomM platform catalog");
+    let output = std::path::PathBuf::from(std::env::var_os("OUT_DIR").expect("OUT_DIR"))
+        .join("platform-names.json");
+    std::fs::write(
+        output,
+        serde_json::to_vec(&catalog).expect("serialize RomM platform catalog"),
+    )
+    .expect("write minified RomM platform catalog");
 }

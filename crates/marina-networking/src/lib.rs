@@ -80,6 +80,17 @@ fn emit(
     }
 }
 
+/// Reads the current NetworkManager connection status once.
+pub async fn read_network_status() -> NetworkStatus {
+    let Ok(network_manager) = NetworkManager::new().await else {
+        return NetworkStatus::unavailable();
+    };
+    match network_manager.list_active_connections().await {
+        Ok(connections) => status_from_connections(&connections),
+        Err(_) => NetworkStatus::unavailable(),
+    }
+}
+
 /// Continuously reports NetworkManager connection status.
 ///
 /// The callback fires with the initial state, on NetworkManager events, and
