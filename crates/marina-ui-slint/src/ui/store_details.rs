@@ -21,6 +21,7 @@ pub(crate) fn populate_store_details(
     generation_guard: Arc<AtomicU64>,
     generation: u64,
     load_preview: bool,
+    refresh_complete: bool,
 ) -> Option<tokio::task::AbortHandle> {
     let rom_id = rom.id.to_string();
     let cover_source = covers::source_for(rom.cover_path().as_deref(), None, Some(base_url));
@@ -53,6 +54,7 @@ pub(crate) fn populate_store_details(
     }
     let mut artifacts = Vec::new();
     artifact_tree.flatten(0, &mut artifacts);
+    let has_artifacts = !artifacts.is_empty();
     let item: marina_core::LibraryItem = rom.into();
     let tags = item.tags.clone();
     let details = PreviewDetailsData {
@@ -92,6 +94,12 @@ pub(crate) fn populate_store_details(
         window.global::<StoreState>().set_selected_artifacts(
             std::rc::Rc::new(VecModel::from(vec![false; artifact_count])).into(),
         );
+        window
+            .global::<StoreState>()
+            .set_artifact_load_error(SharedString::default());
+        if has_artifacts || refresh_complete {
+            window.global::<StoreState>().set_artifact_loading(false);
+        }
         window.global::<StoreState>().set_details_loading(false);
     });
 

@@ -153,6 +153,32 @@ fn cards_from(parts: Vec<CardParts>) -> Vec<GameCardData> {
         .collect()
 }
 
+fn publish_detail_failure(
+    window: &slint::Weak<MainWindow>,
+    active_session: ActiveStoreSession,
+    generation: u64,
+    card_id: String,
+    message: &'static str,
+) {
+    let _ = window.upgrade_in_event_loop(move |window| {
+        if !session_is_active(&active_session, generation) {
+            return;
+        }
+        let store = window.global::<StoreState>();
+        let games = store.get_games();
+        let selected_index = store.get_selected_game_index().max(0) as usize;
+        if games
+            .row_data(selected_index)
+            .is_none_or(|game| game.id.as_str() != card_id)
+        {
+            return;
+        }
+        store.set_details_loading(false);
+        store.set_artifact_loading(false);
+        store.set_artifact_load_error(SharedString::from(message));
+    });
+}
+
 fn publish_cards(
     window: &slint::Weak<MainWindow>,
     active_session: ActiveStoreSession,
@@ -641,6 +667,9 @@ pub(crate) fn install(
         store.set_game_list_scroll_y(0.0);
         store.set_loading(false);
         store.set_details_loading(false);
+        store.set_artifact_loading(false);
+        store.set_artifact_load_error(SharedString::default());
+        store.set_artifact_sheet_open(false);
         crate::image::schedule_allocator_trim();
     });
 
@@ -670,6 +699,7 @@ pub(crate) fn install(
             let Some(backend) = state.store(&backend_id) else {
                 return;
             };
+            let direct_install = backend.install_mode() == InstallMode::SingleArtifact;
             // Cover URLs need the backend's native base URL, which the trait
             // doesn't cover: downcast back to RomM for that one value.
             // Detail hydration itself (`get`) stays on the trait.
@@ -682,7 +712,10 @@ pub(crate) fn install(
             // hydrates. An empty pane beats a stale one.
             if let Some(window) = detail_window.upgrade() {
                 let store = window.global::<StoreState>();
-                store.set_direct_install(backend.install_mode() == InstallMode::SingleArtifact);
+                store.set_direct_install(direct_install);
+                store.set_artifact_loading(true);
+                store.set_artifact_load_error(SharedString::default());
+                store.set_artifact_sheet_open(false);
                 let games = store.get_games();
                 for index in 0..games.row_count() {
                     if let Some(mut game) = games.row_data(index)
@@ -703,6 +736,9 @@ pub(crate) fn install(
                         StoreArtifact,
                     >::new(
                     )))));
+                store.set_selected_artifacts(
+                    std::rc::Rc::new(VecModel::from(Vec::<bool>::new())).into(),
+                );
                 window
                     .global::<StoreState>()
                     .set_preview_image(Image::default());
@@ -727,6 +763,7 @@ pub(crate) fn install(
                         generation_guard.clone(),
                         generation,
                         false,
+                        false,
                     ) {
                         register_selection_task(&active_session, generation, task);
                     }
@@ -735,6 +772,7 @@ pub(crate) fn install(
                 if !session_is_active(&active_session, generation) {
                     return;
                 }
+                let selected_card_id = card_id(&backend_id, &entry_id);
                 match backend.get(&entry_id).await {
                     Ok(Some(entry)) => {
                         if base_url.is_none() {
@@ -765,7 +803,6 @@ pub(crate) fn install(
                                 .ok()
                                 .flatten()
                                 .map(|image| image.path);
-                            let selected_card_id = card_id(&backend_id, &entry_id);
                             let details = PreviewDetailsData {
                                 title: SharedString::from(entry.title),
                                 summary: SharedString::from(summary),
@@ -775,16 +812,28 @@ pub(crate) fn install(
                                 tags: SharedString::from(tags.join(", ")),
                             };
                             let details_session = active_session.clone();
+                            let details_card_id = selected_card_id.clone();
                             let _ = detail_window.upgrade_in_event_loop({
                                 let tags = tags.clone();
                                 move |window| {
-                                    if session_is_active(&details_session, generation) {
-                                        window.global::<StoreState>().set_details(details);
-                                        window
-                                            .global::<StoreState>()
-                                            .set_tags(crate::string_model(tags));
-                                        window.global::<StoreState>().set_details_loading(false);
+                                    if !session_is_active(&details_session, generation) {
+                                        return;
                                     }
+                                    let store = window.global::<StoreState>();
+                                    let games = store.get_games();
+                                    let selected_index =
+                                        store.get_selected_game_index().max(0) as usize;
+                                    if games
+                                        .row_data(selected_index)
+                                        .is_none_or(|game| game.id.as_str() != details_card_id)
+                                    {
+                                        return;
+                                    }
+                                    store.set_details(details);
+                                    store.set_tags(crate::string_model(tags));
+                                    store.set_details_loading(false);
+                                    store.set_artifact_loading(false);
+                                    store.set_artifact_load_error(SharedString::default());
                                 }
                             });
                             if let Some(image_path) = image_path {
@@ -849,14 +898,39 @@ pub(crate) fn install(
                                 generation_guard,
                                 generation,
                                 true,
+                                true,
                             ) {
                                 register_selection_task(&active_session, generation, task);
                             }
+                        } else {
+                            error!(entry_id, "store game detail payload could not be decoded");
+                            publish_detail_failure(
+                                &detail_window,
+                                active_session.clone(),
+                                generation,
+                                selected_card_id,
+                                "Download information is unavailable.",
+                            );
                         }
                     }
-                    Ok(None) => {}
+                    Ok(None) => {
+                        publish_detail_failure(
+                            &detail_window,
+                            active_session.clone(),
+                            generation,
+                            selected_card_id,
+                            "This store entry is no longer available.",
+                        );
+                    }
                     Err(error) => {
-                        error!(%error, entry_id, "store game detail hydration failed")
+                        error!(%error, entry_id, "store game detail hydration failed");
+                        publish_detail_failure(
+                            &detail_window,
+                            active_session.clone(),
+                            generation,
+                            selected_card_id,
+                            "Could not load download information.",
+                        );
                     }
                 }
             });

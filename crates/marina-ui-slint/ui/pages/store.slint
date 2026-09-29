@@ -50,6 +50,8 @@ export global StoreState {
     in-out property <length> game-list-scroll-y: 0px;
     in-out property <bool> loading: false;
     in-out property <bool> details-loading: false;
+    in-out property <bool> artifact-loading: false;
+    in-out property <string> artifact-load-error;
     in-out property <string> install-status;
     in-out property <float> install-progress: 0;
     in-out property <bool> install-indeterminate: false;
@@ -84,6 +86,8 @@ export component StorePage inherits Rectangle {
     in-out property <length> game-list-scroll-y: 0px;
     in-out property <bool> loading: false;
     in-out property <bool> details-loading: false;
+    in-out property <bool> artifact-loading: false;
+    in-out property <string> artifact-load-error;
     in-out property <string> install-status;
     in-out property <float> install-progress: 0;
     in-out property <bool> install-indeterminate: false;
@@ -101,6 +105,32 @@ export component StorePage inherits Rectangle {
     forward-focus: page-focus;
     changed focus-request => { root.restore-focus(); }
     private property <int> details-focus-request: 0;
+    // Keep controller confirmation meaningful while artifact discovery is in
+    // flight. South queues the selector and it opens as soon as this entry is
+    // ready, rather than falling into a disabled focus target.
+    private property <bool> download-action-pending: false;
+    changed artifact-loading => {
+        if (!root.artifact-loading && root.download-action-pending) {
+            root.download-action-pending = false;
+            if (root.artifact-load-error == "" && root.games.length > 0) {
+                if (root.direct-install) {
+                    root.install-requested(root.games[root.selected-game-index].id, []);
+                } else if (root.artifacts.length > 0) {
+                    root.artifact-sheet-open = true;
+                }
+            }
+        }
+    }
+    changed selected-game-index => {
+        root.download-action-pending = false;
+        root.artifact-sheet-open = false;
+    }
+    changed page => {
+        if (root.page != 2) {
+            root.download-action-pending = false;
+            root.artifact-sheet-open = false;
+        }
+    }
     // Overlays steal focus on open; hand it back when they close so
     // controller input is never stranded. Closes over the details view
     // return there, otherwise to the page scope. Deferred like every other
@@ -129,6 +159,19 @@ export component StorePage inherits Rectangle {
         }
     }
     changed install-status => { if (root.install-status == "") { root.restore-focus(); } }
+
+    function request-download() {
+        if (root.games.length <= 0) { return; }
+        if (root.artifact-loading) {
+            root.download-action-pending = true;
+        } else if (root.artifact-load-error == "") {
+            if (root.direct-install) {
+                root.install-requested(root.games[root.selected-game-index].id, []);
+            } else if (root.artifacts.length > 0) {
+                root.artifact-sheet-open = true;
+            }
+        }
+    }
 
     function download-selected() {
         if (root.artifacts.length > 0) {
@@ -232,6 +275,13 @@ export component StorePage inherits Rectangle {
                     root.details-focus-request += 1;
                     return accept;
                 }
+                // The details button grabs focus on a short deferred timer.
+                // Handle confirmation here too so South during that mount gap
+                // still queues or opens the correct download flow.
+                if (root.page == 2 && root.games.length > 0) {
+                    root.request-download();
+                    return accept;
+                }
             }
             return reject;
         }
@@ -326,16 +376,25 @@ export component StorePage inherits Rectangle {
         details: root.details;
         tags: root.tags;
         loading: root.details-loading;
-        action-label: "Download";
+        action-label: root.artifact-loading
+            ? "Loading…"
+            : (root.artifact-load-error != "" || (!root.direct-install && root.artifacts.length == 0)
+                ? "Unavailable"
+                : "Download");
+        // A busy action remains focusable so controller confirmation can queue
+        // opening the selector. Terminal unavailable states are truly disabled.
+        action-disabled: !root.artifact-loading
+            && (root.artifact-load-error != ""
+                || (!root.direct-install && root.artifacts.length == 0));
+        action-loading: root.artifact-loading;
+        action-status: root.artifact-loading
+            ? (root.download-action-pending
+                ? "Download will continue when ready…"
+                : "Loading downloadable artifacts…")
+            : root.artifact-load-error;
         suspend-action-focus: root.artifact-sheet-open || root.install-status != "";
         focus-request: root.details-focus-request;
-        action-requested => {
-            if root.direct-install {
-                root.install-requested(root.games[root.selected-game-index].id, []);
-            } else {
-                root.artifact-sheet-open = true;
-            }
-        }
+        action-requested => { root.request-download(); }
         focus-header => { root.focus-header(); }
     }
 
