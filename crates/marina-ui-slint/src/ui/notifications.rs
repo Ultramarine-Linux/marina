@@ -1,9 +1,11 @@
 //! Application-wide transient notifications backed by the shared toast queue.
 
 use std::{
-    cell::Cell,
     rc::Rc,
-    sync::{Mutex, OnceLock},
+    sync::{
+        Mutex, OnceLock,
+        atomic::{AtomicI32, Ordering},
+    },
     time::Duration,
 };
 
@@ -19,12 +21,19 @@ pub(crate) static NOTIFICATION: NotificationService = NotificationService::new()
 
 pub(crate) struct NotificationService {
     window: OnceLock<Mutex<slint::Weak<MainWindow>>>,
+    next_id: AtomicI32,
+}
+
+#[must_use = "loading notifications remain visible until they are completed"]
+pub(crate) struct LoadingNotification {
+    id: i32,
 }
 
 impl NotificationService {
     const fn new() -> Self {
         Self {
             window: OnceLock::new(),
+            next_id: AtomicI32::new(0),
         }
     }
 
@@ -38,21 +47,14 @@ impl NotificationService {
             dismiss_toast(dismiss_items.clone(), id);
         });
 
-        let next_id = Rc::new(Cell::new(0_i32));
-        toast_queue.on_show(move |text, variant| {
-            let id = next_id.get();
-            next_id.set(id.saturating_add(1));
-            items.push(ToastItem {
-                id,
-                text,
-                variant,
-                dismissed: false,
-            });
+        let push_items = items.clone();
+        toast_queue.on_push(move |id, text, variant, loading| {
+            push_toast(push_items.clone(), id, text, variant, loading);
+        });
 
-            let auto_dismiss_items = items.clone();
-            slint::Timer::single_shot(TOAST_DURATION, move || {
-                dismiss_toast(auto_dismiss_items, id);
-            });
+        let update_items = items.clone();
+        toast_queue.on_update(move |id, text, variant| {
+            update_toast(update_items.clone(), id, text, variant);
         });
 
         let weak = window.as_weak();
@@ -66,21 +68,50 @@ impl NotificationService {
     }
 
     pub(crate) fn show(&self, text: impl Into<String>, variant: ToastVariant) {
-        let Some(window) = self.window.get().map(|window| {
+        self.push(text.into(), variant, false);
+    }
+
+    pub(crate) fn loading(&self, text: impl Into<String>) -> LoadingNotification {
+        let id = self.push(text.into(), ToastVariant::Default, true);
+        LoadingNotification { id }
+    }
+
+    fn push(&self, text: String, variant: ToastVariant, loading: bool) -> i32 {
+        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
+        let Some(window) = self.window() else {
+            tracing::warn!(message = %text, "notification dropped before UI initialization");
+            return id;
+        };
+        let _ = window.upgrade_in_event_loop(move |window| {
+            window.global::<ToastQueue>().invoke_push(
+                id,
+                SharedString::from(text),
+                variant,
+                loading,
+            );
+        });
+        id
+    }
+
+    fn update(&self, id: i32, text: String, variant: ToastVariant) {
+        let Some(window) = self.window() else {
+            tracing::warn!(message = %text, "notification update dropped before UI initialization");
+            return;
+        };
+        let _ = window.upgrade_in_event_loop(move |window| {
+            window
+                .global::<ToastQueue>()
+                .invoke_update(id, SharedString::from(text), variant);
+        });
+    }
+
+    fn window(&self) -> Option<slint::Weak<MainWindow>> {
+        self.window.get().map(|window| {
             window
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .clone()
-        }) else {
-            tracing::warn!(message = %text.into(), "notification dropped before UI initialization");
-            return;
-        };
-        let text = text.into();
-        let _ = window.upgrade_in_event_loop(move |window| {
-            window
-                .global::<ToastQueue>()
-                .invoke_show(SharedString::from(text), variant);
-        });
+        })
     }
 
     pub(crate) fn error(&self, text: impl Into<String>) {
@@ -107,17 +138,71 @@ impl NotificationService {
         });
     }
 
-    pub(crate) fn info(&self, text: impl Into<String>) {
-        self.show(text, ToastVariant::Default);
-    }
-
     pub(crate) fn success(&self, text: impl Into<String>) {
         self.show(text, ToastVariant::Success);
     }
+}
 
-    pub(crate) fn error_toast(&self, text: impl Into<String>) {
-        self.show(text, ToastVariant::Error);
+impl LoadingNotification {
+    pub(crate) fn info(self, text: impl Into<String>) {
+        NOTIFICATION.update(self.id, text.into(), ToastVariant::Default);
     }
+
+    pub(crate) fn success(self, text: impl Into<String>) {
+        NOTIFICATION.update(self.id, text.into(), ToastVariant::Success);
+    }
+
+    pub(crate) fn error(self, text: impl Into<String>) {
+        NOTIFICATION.update(self.id, text.into(), ToastVariant::Error);
+    }
+}
+
+fn push_toast(
+    items: Rc<VecModel<ToastItem>>,
+    id: i32,
+    text: SharedString,
+    variant: ToastVariant,
+    loading: bool,
+) {
+    items.push(ToastItem {
+        id,
+        text,
+        variant,
+        loading,
+        dismissed: false,
+    });
+    if !loading {
+        schedule_dismiss(items, id);
+    }
+}
+
+fn update_toast(
+    items: Rc<VecModel<ToastItem>>,
+    id: i32,
+    text: SharedString,
+    variant: ToastVariant,
+) {
+    let Some(index) = (0..items.row_count())
+        .find(|&index| items.row_data(index).is_some_and(|item| item.id == id))
+    else {
+        push_toast(items, id, text, variant, false);
+        return;
+    };
+    let Some(mut item) = items.row_data(index) else {
+        return;
+    };
+    item.text = text;
+    item.variant = variant;
+    item.loading = false;
+    item.dismissed = false;
+    items.set_row_data(index, item);
+    schedule_dismiss(items, id);
+}
+
+fn schedule_dismiss(items: Rc<VecModel<ToastItem>>, id: i32) {
+    slint::Timer::single_shot(TOAST_DURATION, move || {
+        dismiss_toast(items, id);
+    });
 }
 
 fn dismiss_toast(items: Rc<VecModel<ToastItem>>, id: i32) {
@@ -129,7 +214,7 @@ fn dismiss_toast(items: Rc<VecModel<ToastItem>>, id: i32) {
     let Some(mut item) = items.row_data(index) else {
         return;
     };
-    if item.dismissed {
+    if item.loading || item.dismissed {
         return;
     }
 

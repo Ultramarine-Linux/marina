@@ -88,7 +88,7 @@ fn report_romm_play_activity(target: RommSessionTarget) {
 }
 
 async fn download_romm_save_snapshots(target: &RommSessionTarget) {
-    NOTIFICATION.info("Checking RomM saves…");
+    let notification = NOTIFICATION.loading("Checking RomM saves…");
     match marina_romm::download_save_directory(
         &target.client,
         target.rom_id,
@@ -106,23 +106,30 @@ async fn download_romm_save_snapshots(target: &RommSessionTarget) {
                 failed = report.failures.len(),
                 "RomM save download completed"
             );
-            if report.downloaded > 0 {
-                NOTIFICATION.success(format!(
+            let failed = report.failures.len();
+            if failed > 0 {
+                if report.downloaded > 0 {
+                    notification.error(format!(
+                        "Downloaded {} save snapshot{}, but failed to download {failed}",
+                        report.downloaded,
+                        if report.downloaded == 1 { "" } else { "s" }
+                    ));
+                } else {
+                    notification.error(format!(
+                        "Failed to download {failed} RomM save{}",
+                        if failed == 1 { "" } else { "s" }
+                    ));
+                }
+            } else if report.downloaded > 0 {
+                notification.success(format!(
                     "Downloaded {} save snapshot{} from RomM",
                     report.downloaded,
                     if report.downloaded == 1 { "" } else { "s" }
                 ));
-            } else if report.failures.is_empty() && report.available > 0 {
-                NOTIFICATION.info("RomM saves are up to date");
-            } else if report.failures.is_empty() {
-                NOTIFICATION.info("No RomM saves found");
-            }
-            if !report.failures.is_empty() {
-                NOTIFICATION.error_toast(format!(
-                    "Failed to download {} RomM save{}",
-                    report.failures.len(),
-                    if report.failures.len() == 1 { "" } else { "s" }
-                ));
+            } else if report.available > 0 {
+                notification.info("RomM saves are up to date");
+            } else {
+                notification.info("No RomM saves found");
             }
             for failure in report.failures {
                 warn!(
@@ -140,12 +147,13 @@ async fn download_romm_save_snapshots(target: &RommSessionTarget) {
                 save_directory = %target.save_directory.display(),
                 "failed to synchronize RomM saves before launch"
             );
-            NOTIFICATION.error_toast(format!("Could not download RomM saves: {error}"));
+            notification.error(format!("Could not download RomM saves: {error}"));
         }
     }
 }
 
 fn upload_romm_save_snapshots(target: RommSessionTarget) {
+    let notification = NOTIFICATION.loading("Uploading save snapshots to RomM…");
     tokio::spawn(async move {
         match marina_romm::upload_save_directory(
             &target.client,
@@ -164,19 +172,28 @@ fn upload_romm_save_snapshots(target: RommSessionTarget) {
                     failed = report.failures.len(),
                     "RomM save snapshot upload completed"
                 );
-                if report.uploaded > 0 {
-                    NOTIFICATION.success(format!(
+                let failed = report.failures.len();
+                if failed > 0 {
+                    if report.uploaded > 0 {
+                        notification.error(format!(
+                            "Uploaded {} save snapshot{}, but failed to upload {failed}",
+                            report.uploaded,
+                            if report.uploaded == 1 { "" } else { "s" }
+                        ));
+                    } else {
+                        notification.error(format!(
+                            "Failed to upload {failed} RomM save{}",
+                            if failed == 1 { "" } else { "s" }
+                        ));
+                    }
+                } else if report.uploaded > 0 {
+                    notification.success(format!(
                         "Uploaded {} save snapshot{} to RomM",
                         report.uploaded,
                         if report.uploaded == 1 { "" } else { "s" }
                     ));
-                }
-                if !report.failures.is_empty() {
-                    NOTIFICATION.error_toast(format!(
-                        "Failed to upload {} RomM save{}",
-                        report.failures.len(),
-                        if report.failures.len() == 1 { "" } else { "s" }
-                    ));
+                } else {
+                    notification.info("No save snapshots found to upload");
                 }
                 for failure in report.failures {
                     warn!(
@@ -194,7 +211,7 @@ fn upload_romm_save_snapshots(target: RommSessionTarget) {
                     save_directory = %target.save_directory.display(),
                     "failed to scan game saves for RomM upload"
                 );
-                NOTIFICATION.error_toast(format!("Could not upload saves to RomM: {error}"));
+                notification.error(format!("Could not upload saves to RomM: {error}"));
             }
         }
     });
