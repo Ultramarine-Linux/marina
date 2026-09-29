@@ -170,13 +170,13 @@ export component SettingsPage inherits Rectangle {
         if (!WifiState.enabled || index - 1 >= WifiState.networks.length) { return; }
         let network = WifiState.networks[index - 1];
         if (network.active) {
-            root.detail-ssid = network.ssid;
+            root.menu-stack = [root.menu-open-target, network.ssid];
+            root.detail-ssid = root.menu-stack[1];
             root.detail-active = true;
-            root.menu-stack = [root.menu-open-target, network.ssid];
         } else if (network.secured && !network.saved) {
-            root.detail-ssid = network.ssid;
-            root.detail-active = false;
             root.menu-stack = [root.menu-open-target, network.ssid];
+            root.detail-ssid = root.menu-stack[1];
+            root.detail-active = false;
         } else {
             WifiState.connect(network.ssid, "");
         }
