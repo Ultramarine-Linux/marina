@@ -203,6 +203,44 @@ impl Client {
         self.write_download(response, destination.as_ref()).await
     }
 
+    pub async fn list_states(
+        &self,
+        rom_id: i32,
+    ) -> Result<Vec<crate::models::metadata::State>, Error> {
+        let response = self
+            .http
+            .get(format!("{}/api/states", self.base_url))
+            .headers(self.auth_headers()?)
+            .query(&[("rom_id", rom_id)])
+            .send()
+            .await?;
+        self.decode_response(response).await
+    }
+
+    pub async fn upload_state_snapshot(
+        &self,
+        rom_id: i32,
+        path: impl AsRef<Path>,
+        snapshot_name: &str,
+        emulator: &str,
+    ) -> Result<crate::models::metadata::State, Error> {
+        let part = reqwest::multipart::Part::file(path)
+            .await?
+            .file_name(snapshot_name.to_owned());
+        let response = self
+            .http
+            .post(format!("{}/api/states", self.base_url))
+            .headers(self.auth_headers()?)
+            .query(&[
+                ("rom_id", rom_id.to_string()),
+                ("emulator", emulator.to_owned()),
+            ])
+            .multipart(reqwest::multipart::Form::new().part("stateFile", part))
+            .send()
+            .await?;
+        self.decode_response(response).await
+    }
+
     /// Uploads one immutable save snapshot for a ROM.
     ///
     /// RomM's `overwrite` and `autocleanup` flags are explicitly disabled so

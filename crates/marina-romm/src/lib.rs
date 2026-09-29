@@ -103,6 +103,7 @@ mod error;
 pub mod install;
 mod models;
 mod save_sync;
+mod state_sync;
 mod store;
 
 pub use client::{Auth, Client};
@@ -117,6 +118,7 @@ pub use save_sync::{
     AUTOSAVE_SLOT, MARINA_SAVE_TAG, SaveDownloadReport, SaveSyncFailure, SaveSyncReport,
     download_save_directory, upload_save_directory,
 };
+pub use state_sync::{download_state_directory, upload_state_directory};
 pub use store::RommStore;
 
 #[cfg(test)]

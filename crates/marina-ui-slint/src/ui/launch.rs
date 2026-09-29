@@ -19,6 +19,7 @@ use crate::{GameState, LaunchArtifactData, MainWindow, app};
 const GAME_STATUS_POLL_INTERVAL: Duration = Duration::from_millis(250);
 const GAME_STARTUP_GRACE: Duration = Duration::from_secs(5);
 const GAME_SAVES_ROOT: &str = "/var/games/saves";
+const GAME_STATES_ROOT: &str = "/var/games/states";
 
 #[derive(Clone, Copy)]
 enum LaunchUiStatus {
@@ -31,6 +32,7 @@ struct RommSessionTarget {
     client: RommClient,
     rom_id: i32,
     save_directory: PathBuf,
+    state_directory: PathBuf,
     rom_basename: String,
 }
 
@@ -72,6 +74,7 @@ fn romm_session_target(state: &app::AppState, item: &LibraryItem) -> Option<Romm
         client: store.client().clone(),
         rom_id,
         save_directory: Path::new(GAME_SAVES_ROOT).join(safe_path_component(&item.title)),
+        state_directory: Path::new(GAME_STATES_ROOT).join(safe_path_component(&item.title)),
         rom_basename: safe_path_component(&rom_basename),
     })
 }
@@ -152,6 +155,63 @@ async fn download_romm_save_snapshots(target: &RommSessionTarget) {
     }
 }
 
+async fn download_romm_state_snapshots(target: &RommSessionTarget) {
+    let notification = NOTIFICATION.loading("Checking RomM save states…");
+    match marina_romm::download_state_directory(
+        &target.client,
+        target.rom_id,
+        &target.state_directory,
+        &target.rom_basename,
+    )
+    .await
+    {
+        Ok(report) => {
+            info!(
+                rom_id = target.rom_id,
+                state_directory = %target.state_directory.display(),
+                available = report.available,
+                downloaded = report.downloaded,
+                failed = report.failures.len(),
+                "RomM state download completed"
+            );
+            let failed = report.failures.len();
+            if failed > 0 {
+                notification.error(format!(
+                    "Failed to download {failed} RomM save state{}",
+                    if failed == 1 { "" } else { "s" }
+                ));
+            } else if report.downloaded > 0 {
+                notification.success(format!(
+                    "Downloaded {} save state{} from RomM",
+                    report.downloaded,
+                    if report.downloaded == 1 { "" } else { "s" }
+                ));
+            } else if report.available > 0 {
+                notification.info("RomM save states are up to date");
+            } else {
+                notification.info("No RomM save states found");
+            }
+            for failure in report.failures {
+                warn!(
+                    rom_id = target.rom_id,
+                    path = %failure.path.display(),
+                    error = %failure.error,
+                    "failed to download RomM save state"
+                );
+            }
+        }
+        Err(error) => {
+            warn!(
+                %error,
+                rom_id = target.rom_id,
+                state_directory = %target.state_directory.display(),
+                "failed to synchronize RomM states before launch"
+            );
+            notification.error(format!("Could not download RomM save states: {error}"));
+        }
+    }
+}
+
 fn upload_romm_save_snapshots(target: RommSessionTarget) {
     let notification = NOTIFICATION.loading("Uploading save snapshots to RomM…");
     tokio::spawn(async move {
@@ -217,6 +277,63 @@ fn upload_romm_save_snapshots(target: RommSessionTarget) {
     });
 }
 
+fn upload_romm_state_snapshots(target: RommSessionTarget) {
+    let notification = NOTIFICATION.loading("Uploading save states to RomM…");
+    tokio::spawn(async move {
+        match marina_romm::upload_state_directory(
+            &target.client,
+            target.rom_id,
+            &target.state_directory,
+            &target.rom_basename,
+        )
+        .await
+        {
+            Ok(report) => {
+                info!(
+                    rom_id = target.rom_id,
+                    state_directory = %target.state_directory.display(),
+                    discovered = report.discovered,
+                    uploaded = report.uploaded,
+                    failed = report.failures.len(),
+                    "RomM state upload completed"
+                );
+                let failed = report.failures.len();
+                if failed > 0 {
+                    notification.error(format!(
+                        "Failed to upload {failed} RomM save state{}",
+                        if failed == 1 { "" } else { "s" }
+                    ));
+                } else if report.uploaded > 0 {
+                    notification.success(format!(
+                        "Uploaded {} save state{} to RomM",
+                        report.uploaded,
+                        if report.uploaded == 1 { "" } else { "s" }
+                    ));
+                } else {
+                    notification.info("No save states found to upload");
+                }
+                for failure in report.failures {
+                    warn!(
+                        rom_id = target.rom_id,
+                        path = %failure.path.display(),
+                        error = %failure.error,
+                        "failed to upload RomM save state"
+                    );
+                }
+            }
+            Err(error) => {
+                warn!(
+                    %error,
+                    rom_id = target.rom_id,
+                    state_directory = %target.state_directory.display(),
+                    "failed to scan save states for RomM upload"
+                );
+                notification.error(format!("Could not upload save states to RomM: {error}"));
+            }
+        }
+    });
+}
+
 fn publish_launch_status(
     window: &slint::Weak<MainWindow>,
     game_id: String,
@@ -259,7 +376,8 @@ async fn monitor_launched_game(
             }
             Ok(false) if observed_active || Instant::now() >= startup_deadline => {
                 if observed_active && let Some(target) = romm_session.take() {
-                    upload_romm_save_snapshots(target);
+                    upload_romm_save_snapshots(target.clone());
+                    upload_romm_state_snapshots(target);
                 }
                 publish_launch_status(&window, game_id, LaunchUiStatus::Idle);
                 return;
@@ -359,7 +477,10 @@ fn queue_launch(
 
                 let romm_session = romm_session_target(&state, &item);
                 if let Some(target) = &romm_session {
-                    download_romm_save_snapshots(target).await;
+                    tokio::join!(
+                        download_romm_save_snapshots(target),
+                        download_romm_state_snapshots(target)
+                    );
                 }
                 match game_launcher.launch_item(&item).await {
                     Ok(launched) => {
