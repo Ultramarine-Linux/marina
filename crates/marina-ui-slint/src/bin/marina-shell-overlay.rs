@@ -38,6 +38,42 @@ const RUNTIME_INPUT_PROFILE_INTERVAL: Duration = Duration::from_millis(500);
 const RESUME_CLOCK_GAP: Duration = Duration::from_millis(500);
 const RESUME_EXIT_CODE: i32 = 75;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum OverlayRequestDisposition {
+    Show,
+    Hide,
+    Ignore,
+}
+
+fn reserve_overlay_request(
+    visible: &AtomicBool,
+    request: OverlayRequest,
+) -> OverlayRequestDisposition {
+    match request {
+        OverlayRequest::Hide => {
+            visible.store(false, Ordering::Release);
+            OverlayRequestDisposition::Hide
+        }
+        OverlayRequest::Toggle => {
+            if visible.fetch_xor(true, Ordering::AcqRel) {
+                OverlayRequestDisposition::Hide
+            } else {
+                OverlayRequestDisposition::Show
+            }
+        }
+        OverlayRequest::Show | OverlayRequest::QuickSettings => {
+            if visible
+                .compare_exchange(false, true, Ordering::AcqRel, Ordering::Acquire)
+                .is_ok()
+            {
+                OverlayRequestDisposition::Show
+            } else {
+                OverlayRequestDisposition::Ignore
+            }
+        }
+    }
+}
+
 thread_local! {
     static SWITCH_ICON_CACHE: RefCell<Vec<(String, Image)>> = RefCell::new(Vec::new());
 }
@@ -388,16 +424,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let request_visible = visible.clone();
     let request_inputplumber = inputplumber_control.clone();
     let request_handler: Arc<dyn Fn(OverlayRequest) + Send + Sync> = Arc::new(move |request| {
-        let should_show = match request {
-            OverlayRequest::Show | OverlayRequest::QuickSettings => true,
-            OverlayRequest::Hide => false,
-            OverlayRequest::Toggle => !request_visible.load(Ordering::Acquire),
-        };
-        if !should_show {
-            request_visible.store(false, Ordering::Release);
-            request_inputplumber.set_mode(marina_input::inputplumber::InterceptMode::Pass);
-            send_overlay_message(&request_sender, OverlayMessage::Hide);
-            return;
+        match reserve_overlay_request(&request_visible, request) {
+            OverlayRequestDisposition::Hide => {
+                request_inputplumber.set_mode(marina_input::inputplumber::InterceptMode::Pass);
+                send_overlay_message(&request_sender, OverlayMessage::Hide);
+                return;
+            }
+            OverlayRequestDisposition::Ignore => {
+                debug!(
+                    ?request,
+                    "ignored overlay request while another overlay is open"
+                );
+                return;
+            }
+            OverlayRequestDisposition::Show => {}
         }
 
         if request == OverlayRequest::QuickSettings {
@@ -405,7 +445,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .lock()
                 .expect("overlay state lock poisoned")
                 .begin_quick_settings();
-            request_visible.store(true, Ordering::Release);
             send_overlay_message(&request_sender, OverlayMessage::Show(presentation));
             spawn_quick_settings_hydration(
                 request_state.clone(),
@@ -421,7 +460,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .refresh();
         match presentation {
             Ok(presentation) => {
-                request_visible.store(true, Ordering::Release);
                 send_overlay_message(&request_sender, OverlayMessage::Show(presentation));
             }
             Err(error) => {
@@ -757,5 +795,45 @@ fn overlay_ui_path() -> PathBuf {
         installed
     } else {
         PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("ui/pages/window-overlay.slint")
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn first_overlay_request_wins_until_the_overlay_is_hidden() {
+        let visible = AtomicBool::new(false);
+
+        assert_eq!(
+            reserve_overlay_request(&visible, OverlayRequest::QuickSettings),
+            OverlayRequestDisposition::Show
+        );
+        assert_eq!(
+            reserve_overlay_request(&visible, OverlayRequest::Show),
+            OverlayRequestDisposition::Ignore
+        );
+        assert!(visible.load(Ordering::Acquire));
+
+        assert_eq!(
+            reserve_overlay_request(&visible, OverlayRequest::Hide),
+            OverlayRequestDisposition::Hide
+        );
+        assert_eq!(
+            reserve_overlay_request(&visible, OverlayRequest::Show),
+            OverlayRequestDisposition::Show
+        );
+    }
+
+    #[test]
+    fn toggle_closes_an_open_overlay_and_releases_the_reservation() {
+        let visible = AtomicBool::new(true);
+
+        assert_eq!(
+            reserve_overlay_request(&visible, OverlayRequest::Toggle),
+            OverlayRequestDisposition::Hide
+        );
+        assert!(!visible.load(Ordering::Acquire));
     }
 }

@@ -324,7 +324,17 @@ pub async fn monitor_input_events(
     let dispatcher = tokio::spawn(async move {
         while let Some((event, value)) = events_rx.recv().await {
             if let Some(semantic) = semantic_event(&event, value) {
-                debug!(raw_event = %event, value, action = ?semantic.action, kind = ?semantic.kind, "received InputPlumber input event");
+                if matches!(
+                    semantic.action,
+                    InputAction::Menu
+                        | InputAction::Accept
+                        | InputAction::Back
+                        | InputAction::Context
+                ) {
+                    info!(raw_event = %event, value, action = ?semantic.action, kind = ?semantic.kind, "received InputPlumber overlay input event");
+                } else {
+                    debug!(raw_event = %event, value, action = ?semantic.action, kind = ?semantic.kind, "received InputPlumber input event");
+                }
                 handler(semantic);
             }
         }
