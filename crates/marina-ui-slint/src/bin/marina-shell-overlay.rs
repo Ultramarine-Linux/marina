@@ -225,8 +225,10 @@ fn spawn_quick_settings_hydration(
 fn runtime_intercept_activation(
     retroarch_running: bool,
 ) -> marina_input::inputplumber::InterceptActivation {
+    // RetroArch receives every Guide chord except Guide + South, which remains
+    // Marina's QAM shortcut. In particular, Guide + North passes through.
     if retroarch_running {
-        marina_input::inputplumber::InterceptActivation::guide_north()
+        marina_input::inputplumber::InterceptActivation::guide_south()
     } else {
         marina_input::inputplumber::InterceptActivation::guide()
     }
@@ -795,10 +797,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn retroarch_reserves_only_the_marina_guide_chord() {
+    fn retroarch_reserves_guide_south_for_the_marina_overlay() {
         assert_eq!(
             runtime_intercept_activation(true),
-            marina_input::inputplumber::InterceptActivation::guide_north()
+            marina_input::inputplumber::InterceptActivation::guide_south()
         );
         assert_eq!(
             runtime_intercept_activation(false),

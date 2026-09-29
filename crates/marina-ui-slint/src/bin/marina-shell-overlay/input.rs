@@ -45,6 +45,18 @@ impl DbusOverlayRouter {
             self.back_held = false;
         }
 
+        // During RetroArch pass-through, InputPlumber emits a synthetic South
+        // event only after the complete Guide + South activation chord. Normal
+        // South presses stay on RetroArch's virtual controller and never reach
+        // this D-Bus router while the overlay is hidden.
+        if !visible
+            && !self.guide_held
+            && event.action == InputAction::Accept
+            && event.kind == InputEventKind::Pressed
+        {
+            return DbusOverlayAction::ShowQuickSettings;
+        }
+
         if event.action == InputAction::Menu {
             match event.kind {
                 InputEventKind::Pressed => {
@@ -164,12 +176,8 @@ mod tests {
     }
 
     #[test]
-    fn guide_south_then_orphan_back_release_closes_quick_settings() {
+    fn guide_south_activation_opens_quick_settings() {
         let mut router = DbusOverlayRouter::default();
-        assert_eq!(
-            router.route(event(InputAction::Menu, InputEventKind::Pressed), false),
-            DbusOverlayAction::Ignore
-        );
         assert_eq!(
             router.route(event(InputAction::Accept, InputEventKind::Pressed), false),
             DbusOverlayAction::ShowQuickSettings
@@ -177,10 +185,6 @@ mod tests {
         assert_eq!(
             router.route(event(InputAction::Accept, InputEventKind::Released), true),
             DbusOverlayAction::Dispatch(event(InputAction::Accept, InputEventKind::Released))
-        );
-        assert_eq!(
-            router.route(event(InputAction::Menu, InputEventKind::Released), true),
-            DbusOverlayAction::Ignore
         );
         assert_eq!(
             router.route(event(InputAction::Back, InputEventKind::Released), true),
@@ -232,7 +236,7 @@ mod tests {
     }
 
     #[test]
-    fn guide_north_opens_the_game_menu_without_reopening_after_back() {
+    fn guide_context_opens_the_game_menu_without_reopening_after_back() {
         let mut router = DbusOverlayRouter::default();
         assert_eq!(
             router.route(event(InputAction::Menu, InputEventKind::Pressed), false),

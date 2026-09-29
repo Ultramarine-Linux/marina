@@ -28,10 +28,10 @@ pub const ROOT_PATH: &str = "/org/shadowblip/InputPlumber";
 pub const COMPOSITE_DEVICE_INTERFACE: &str = "org.shadowblip.Input.CompositeDevice";
 pub const DBUS_DEVICE_INTERFACE: &str = "org.shadowblip.Input.DBusDevice";
 
-/// InputPlumber capabilities used to reserve Guide + North for Marina while
+/// InputPlumber capabilities used to reserve Guide + South for Marina while
 /// replaying Guide and every other incomplete chord to ordinary targets.
 pub const GUIDE_CAPABILITY: &str = "Gamepad:Button:Guide";
-pub const NORTH_CAPABILITY: &str = "Gamepad:Button:North";
+pub const SOUTH_CAPABILITY: &str = "Gamepad:Button:South";
 
 const RECONNECT_DELAY: Duration = Duration::from_secs(2);
 // Object topology changes rarely on the built-in handheld controller. Keep a
@@ -218,12 +218,13 @@ impl InterceptActivation {
         }
     }
 
-    /// Reserve Guide + North for Marina. InputPlumber replays an incomplete
-    /// Guide chord to its ordinary virtual controller targets.
-    pub fn guide_north() -> Self {
+    /// Reserve Guide + South for Marina's quick settings. InputPlumber replays
+    /// an incomplete Guide chord to its ordinary virtual controller targets and
+    /// emits South to Marina only when the complete chord activates.
+    pub fn guide_south() -> Self {
         Self {
-            events: vec![GUIDE_CAPABILITY.to_owned(), NORTH_CAPABILITY.to_owned()],
-            target_event: GUIDE_CAPABILITY.to_owned(),
+            events: vec![GUIDE_CAPABILITY.to_owned(), SOUTH_CAPABILITY.to_owned()],
+            target_event: SOUTH_CAPABILITY.to_owned(),
         }
     }
 }
@@ -581,12 +582,12 @@ mod tests {
     }
 
     #[test]
-    fn guide_north_activation_preserves_guide_for_incomplete_chords() {
+    fn guide_south_activation_emits_south_for_quick_settings() {
         assert_eq!(
-            InterceptActivation::guide_north(),
+            InterceptActivation::guide_south(),
             InterceptActivation {
-                events: vec![GUIDE_CAPABILITY.to_owned(), NORTH_CAPABILITY.to_owned()],
-                target_event: GUIDE_CAPABILITY.to_owned(),
+                events: vec![GUIDE_CAPABILITY.to_owned(), SOUTH_CAPABILITY.to_owned()],
+                target_event: SOUTH_CAPABILITY.to_owned(),
             }
         );
     }
@@ -608,14 +609,14 @@ mod tests {
             intercept_control(InterceptMode::Pass, InterceptActivation::guide());
         assert!(!receiver.has_changed().expect("activation sender"));
 
-        control.set_activation(InterceptActivation::guide_north());
+        control.set_activation(InterceptActivation::guide_south());
 
         assert!(receiver.has_changed().expect("activation sender"));
         assert_eq!(
             *receiver.borrow_and_update(),
-            InterceptActivation::guide_north()
+            InterceptActivation::guide_south()
         );
-        assert_eq!(control.activation(), InterceptActivation::guide_north());
+        assert_eq!(control.activation(), InterceptActivation::guide_south());
     }
 
     #[test]
