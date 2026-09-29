@@ -6,6 +6,9 @@ import { TextVariant, TextTone } from "../slintcn/components/text.slint";
 import { Input } from "../slintcn/components/input.slint";
 import { Switch } from "../slintcn/components/switch.slint";
 import { CrumbHeader } from "../components/crumb-header.slint";
+import { WifiState } from "../components/wifi-state.slint";
+import { LucideIcon } from "../slintcn/components/lucide-icon.slint";
+import { IconSet } from "@lucide/lucide.slint";
 import { ShellState } from "../components/app-shell.slint";
 import { FocusListScroll } from "../components/focus-list-scroll.slint";
 
@@ -68,17 +71,23 @@ export component SettingsPage inherits Rectangle {
     private property <int> active-pane: 0;
     private property <int> selected-entry: 0;
     private property <int> selected-platform: 0;
+    private property <int> selected-network: 0;
     private property <length> panel-list-scroll-y: 0px;
     private property <length> entry-list-scroll-y: 0px;
     private property <length> platform-list-scroll-y: 0px;
+    private property <length> network-list-scroll-y: 0px;
     private property <[string]> menu-stack: [];
     private property <string> menu-open-target: "";
     private property <[string]> platform-names: SettingsState.platform-names;
+    private property <string> detail-ssid: "";
+    private property <bool> detail-active: false;
 
     private property <SettingsSection> current-section: root.sections[root.selected-section];
     private property <SettingsPanel> current-panel: root.current-section.panels[root.selected-panel];
     private property <bool> menu-open: root.menu-stack.length > 0;
-    private property <bool> platform-detail-open: root.menu-stack.length > 1;
+    private property <bool> detail-open: root.menu-stack.length > 1;
+    private property <bool> platform-menu: root.menu-open-target == "runtime.retroarch.platforms";
+    private property <bool> wifi-menu: root.menu-open-target == "network.wifi";
 
     background: transparent;
     forward-focus: page-focus;
@@ -108,12 +117,17 @@ export component SettingsPage inherits Rectangle {
     }
 
     function open-menu(target: string) {
-        if (target != "runtime.retroarch.platforms") { return; }
+        if (target != "runtime.retroarch.platforms" && target != "network.wifi") { return; }
         root.menu-open-target = target;
         root.menu-stack = [target];
         root.selected-platform = 0;
         root.platform-list-scroll-y = 0px;
+        root.selected-network = 0;
+        root.network-list-scroll-y = 0px;
         root.active-pane = 1;
+        if (target == "network.wifi") {
+            WifiState.refresh();
+        }
     }
 
     function activate-entry(index: int) {
@@ -138,12 +152,33 @@ export component SettingsPage inherits Rectangle {
 
     function close-menu() {
         if (!root.menu-open) { return; }
-        if (root.platform-detail-open) {
+        if (root.detail-open) {
             root.menu-stack = [root.menu-open-target];
         } else {
             root.menu-stack = [];
             root.menu-open-target = "";
             root.active-pane = 0;
+        }
+    }
+
+    function activate-network(index: int) {
+        if (!WifiState.available) { return; }
+        if (index == 0) {
+            WifiState.set-enabled(!WifiState.enabled);
+            return;
+        }
+        if (!WifiState.enabled || index - 1 >= WifiState.networks.length) { return; }
+        let network = WifiState.networks[index - 1];
+        if (network.active) {
+            root.detail-ssid = network.ssid;
+            root.detail-active = true;
+            root.menu-stack = [root.menu-open-target, network.ssid];
+        } else if (network.secured && !network.saved) {
+            root.detail-ssid = network.ssid;
+            root.detail-active = false;
+            root.menu-stack = [root.menu-open-target, network.ssid];
+        } else {
+            WifiState.connect(network.ssid, "");
         }
     }
 
@@ -155,6 +190,10 @@ export component SettingsPage inherits Rectangle {
     function move-platform(delta: int) {
         if (root.platform-names.length <= 0) { return; }
         root.selected-platform = min(max(root.selected-platform + delta, 0), root.platform-names.length - 1);
+    }
+
+    function move-network(delta: int) {
+        root.selected-network = min(max(root.selected-network + delta, 0), WifiState.networks.length);
     }
 
     function move-panel(delta: int) {
@@ -175,15 +214,30 @@ export component SettingsPage inherits Rectangle {
             }
             if (root.menu-open) {
                 if (event.text == Key.UpArrow) {
-                    if (!root.platform-detail-open) { root.move-platform(-1); }
+                    if (!root.detail-open) {
+                        if (root.wifi-menu) { root.move-network(-1); } else { root.move-platform(-1); }
+                    }
                     return accept;
                 }
                 if (event.text == Key.DownArrow) {
-                    if (!root.platform-detail-open) { root.move-platform(1); }
+                    if (!root.detail-open) {
+                        if (root.wifi-menu) { root.move-network(1); } else { root.move-platform(1); }
+                    }
                     return accept;
                 }
-                if (event.text == Key.Return && !root.platform-detail-open) {
-                    root.open-platform(root.selected-platform);
+                if (event.text == Key.Return) {
+                    if (root.detail-open) {
+                        if (root.wifi-menu && root.detail-active) {
+                            WifiState.disconnect();
+                            root.close-menu();
+                        }
+                        return accept;
+                    }
+                    if (root.wifi-menu) {
+                        root.activate-network(root.selected-network);
+                    } else {
+                        root.open-platform(root.selected-platform);
+                    }
                     return accept;
                 }
                 return reject;
@@ -418,7 +472,7 @@ export component SettingsPage inherits Rectangle {
                     }
                 }
 
-                if root.menu-open && !root.platform-detail-open: VerticalLayout {
+                if root.menu-open && !root.detail-open && root.platform-menu: VerticalLayout {
                     padding: Tokens.spacing-xl;
                     spacing: Tokens.spacing-md;
 
@@ -476,7 +530,7 @@ export component SettingsPage inherits Rectangle {
                     }
                 }
 
-                if root.platform-detail-open: VerticalLayout {
+                if root.detail-open && root.platform-menu: VerticalLayout {
                     padding: Tokens.spacing-xl;
                     spacing: Tokens.spacing-md;
 
@@ -495,6 +549,227 @@ export component SettingsPage inherits Rectangle {
                         text: "Press Back to return to Platforms.";
                         variant: TextVariant.caption;
                         tone: TextTone.muted;
+                    }
+                }
+
+                if root.menu-open && !root.detail-open && root.wifi-menu: VerticalLayout {
+                    padding: Tokens.spacing-xl;
+                    spacing: Tokens.spacing-md;
+
+                    Typography {
+                        text: "Wi-Fi";
+                        variant: TextVariant.title;
+                    }
+                    Typography {
+                        text: "Turn Wi-Fi on or off and choose a network.";
+                        variant: TextVariant.caption;
+                        tone: TextTone.muted;
+                    }
+
+                    if !WifiState.available: Typography {
+                        text: "NetworkManager is not available.";
+                        variant: TextVariant.body;
+                        tone: TextTone.muted;
+                    }
+
+                    Rectangle {
+                        vertical-stretch: 1;
+                        visible: WifiState.available;
+                        clip: true;
+
+                        network-list-scroll := FocusListScroll {
+                            selected-index: root.selected-network;
+                            item-count: WifiState.networks.length + 1;
+                            item-height: 58px;
+                            viewport-height: network-flick.height;
+                            viewport-y <=> root.network-list-scroll-y;
+                        }
+
+                        network-flick := Flickable {
+                            width: parent.width;
+                            height: parent.height;
+                            viewport-height: network-content.preferred-height;
+                            viewport-y <=> root.network-list-scroll-y;
+
+                            network-content := VerticalLayout {
+                                width: network-flick.width;
+                            // Row 0: the radio toggle.
+                            Rectangle {
+                                width: parent.width;
+                                height: 58px;
+                                background: root.selected-network == 0 ? Tokens.color-surface-3 : Tokens.color-surface-2;
+                                border-radius: Tokens.radius-sm;
+                                border-width: root.selected-network == 0 && page-focus.has-focus
+                                    ? Tokens.focus-ring-width : 0px;
+                                border-color: Tokens.color-ring-muted;
+
+                                Typography {
+                                    x: Tokens.spacing-lg;
+                                    width: parent.width - 2 * Tokens.spacing-lg;
+                                    height: parent.height;
+                                    text: "Wi-Fi";
+                                    variant: TextVariant.body-lg;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                }
+                                Switch {
+                                    x: parent.width - self.preferred-width - Tokens.spacing-lg;
+                                    y: (parent.height - self.preferred-height) / 2;
+                                    label: "";
+                                    checked: WifiState.enabled;
+                                    toggled(value) => {
+                                        WifiState.set-enabled(value);
+                                    }
+                                }
+                                TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => {
+                                        page-focus.focus();
+                                        root.selected-network = 0;
+                                        WifiState.set-enabled(!WifiState.enabled);
+                                    }
+                                }
+                            }
+
+                            for network[network-index] in WifiState.networks: Rectangle {
+                                width: parent.width;
+                                height: 58px;
+                                background: network-index + 1 == root.selected-network ? Tokens.color-surface-3 : Tokens.color-surface-2;
+                                border-radius: Tokens.radius-sm;
+                                border-width: network-index + 1 == root.selected-network && page-focus.has-focus
+                                    ? Tokens.focus-ring-width : 0px;
+                                border-color: Tokens.color-ring-muted;
+
+                                Typography {
+                                    x: Tokens.spacing-lg;
+                                    width: parent.width - 2 * Tokens.spacing-lg - 170px;
+                                    height: parent.height;
+                                    text: network.ssid;
+                                    variant: TextVariant.body-lg;
+                                    vertical-alignment: center;
+                                    overflow: elide;
+                                }
+                                if network.secured: LucideIcon {
+                                    x: parent.width - 140px - Tokens.spacing-lg;
+                                    y: (parent.height - self.height) / 2;
+                                    icon: IconSet.Lock;
+                                    size: 14px;
+                                    tint: Tokens.color-muted-foreground;
+                                }
+                                Typography {
+                                    x: parent.width - 120px - Tokens.spacing-lg;
+                                    width: 120px;
+                                    height: parent.height;
+                                    text: WifiState.connecting && WifiState.connecting-ssid == network.ssid ? "Connecting…" :
+                                        network.active ? "Connected" :
+                                        network.strength >= 0 ? network.strength + "%" : "";
+                                    variant: TextVariant.body;
+                                    tone: network.active ? TextTone.default : TextTone.muted;
+                                    horizontal-alignment: right;
+                                    vertical-alignment: center;
+                                }
+                                TouchArea {
+                                    mouse-cursor: pointer;
+                                    clicked => {
+                                        page-focus.focus();
+                                        root.selected-network = network-index + 1;
+                                        root.activate-network(network-index + 1);
+                                    }
+                                }
+                            }
+
+                            if WifiState.enabled && WifiState.networks.length == 0: Typography {
+                                height: 58px;
+                                text: "No networks found.";
+                                variant: TextVariant.body;
+                                tone: TextTone.muted;
+                                vertical-alignment: center;
+                            }
+                            if !WifiState.enabled: Typography {
+                                height: 58px;
+                                text: "Wi-Fi is turned off.";
+                                variant: TextVariant.body;
+                                tone: TextTone.muted;
+                                vertical-alignment: center;
+                            }
+                        }
+                        }
+                    }
+                }
+
+                if root.detail-open && root.wifi-menu: VerticalLayout {
+                    padding: Tokens.spacing-xl;
+                    spacing: Tokens.spacing-md;
+
+                    Typography {
+                        text: root.detail-ssid;
+                        variant: TextVariant.title;
+                        overflow: elide;
+                    }
+
+                    if root.detail-active: VerticalLayout {
+                        spacing: Tokens.spacing-md;
+
+                        Typography {
+                            text: "Connected to this network.";
+                            variant: TextVariant.body;
+                            tone: TextTone.muted;
+                        }
+                        Rectangle {
+                            height: 58px;
+                            background: Tokens.color-surface-2;
+                            border-radius: Tokens.radius-sm;
+                            border-width: page-focus.has-focus ? Tokens.focus-ring-width : 0px;
+                            border-color: Tokens.color-ring-muted;
+
+                            Typography {
+                                x: Tokens.spacing-lg;
+                                width: parent.width - 2 * Tokens.spacing-lg;
+                                height: parent.height;
+                                text: "Disconnect";
+                                variant: TextVariant.body-lg;
+                                vertical-alignment: center;
+                            }
+                            TouchArea {
+                                mouse-cursor: pointer;
+                                clicked => {
+                                    page-focus.focus();
+                                    WifiState.disconnect();
+                                    root.close-menu();
+                                }
+                            }
+                        }
+                        Typography {
+                            text: "Press Back to return to Wi-Fi.";
+                            variant: TextVariant.caption;
+                            tone: TextTone.muted;
+                        }
+                    }
+
+                    if !root.detail-active: VerticalLayout {
+                        spacing: Tokens.spacing-md;
+
+                        Typography {
+                            text: "Enter the password for this network.";
+                            variant: TextVariant.body;
+                            tone: TextTone.muted;
+                        }
+                        Input {
+                            password: true;
+                            auto-focus: true;
+                            placeholder: "Password";
+                            accepted(value) => {
+                                if (value != "") {
+                                    WifiState.connect(root.detail-ssid, value);
+                                    root.close-menu();
+                                }
+                            }
+                        }
+                        Typography {
+                            text: "Press Back to return to Wi-Fi.";
+                            variant: TextVariant.caption;
+                            tone: TextTone.muted;
+                        }
                     }
                 }
             }

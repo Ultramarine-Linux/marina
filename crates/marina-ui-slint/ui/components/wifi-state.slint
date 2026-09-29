@@ -1,0 +1,19 @@
+export struct WifiNetworkInfo {
+    ssid: string,
+    strength: int, //can be negative 1
+    secured: bool,
+    active: bool,
+    saved: bool,
+}
+
+export global WifiState {
+    in-out property <bool> available: false;
+    in-out property <bool> enabled: false;
+    in-out property <bool> connecting: false;
+    in-out property <string> connecting-ssid: "";
+    in-out property <[WifiNetworkInfo]> networks: [];
+    callback set-enabled(bool);
+    callback refresh();
+    callback connect(string, string);
+    callback disconnect();
+}

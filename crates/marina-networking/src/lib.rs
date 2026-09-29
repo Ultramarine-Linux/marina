@@ -10,6 +10,13 @@ use std::time::Duration;
 use futures_util::StreamExt;
 use nmrs::{ActiveConnection, ActiveConnectionState, NetworkManager};
 
+mod wifi;
+
+pub use wifi::{
+    WifiConnectError, WifiControlError, WifiNetwork, WifiSnapshot, connect_wifi, disconnect_wifi,
+    monitor_wifi, read_wifi_snapshot, request_wifi_scan, set_wifi_enabled,
+};
+
 /// Delay before retrying NetworkManager after its system-bus service is absent
 /// or an event stream ends (for example, during a daemon restart).
 const RECONNECT_DELAY: Duration = Duration::from_secs(5);
@@ -69,13 +76,13 @@ fn status_from_connections(connections: &[ActiveConnection]) -> NetworkStatus {
     }
 }
 
-fn emit(
-    on_change: &(impl Fn(NetworkStatus) + Send + Sync),
-    last: &mut Option<NetworkStatus>,
-    status: NetworkStatus,
+pub(crate) fn emit<T: PartialEq + Clone>(
+    on_change: &(impl Fn(T) + Send + Sync),
+    last: &mut Option<T>,
+    status: T,
 ) {
-    if *last != Some(status) {
-        on_change(status);
+    if last.as_ref() != Some(&status) {
+        on_change(status.clone());
         *last = Some(status);
     }
 }

@@ -181,6 +181,25 @@ fn publish(window: &MainWindow, values: HashMap<String, crate::config::ScalarSet
         });
     }
 
+    grouped.push((
+        "network".to_string(),
+        "Network".to_string(),
+        vec![(
+            "wifi".to_string(),
+            "Wi-Fi".to_string(),
+            vec![SettingsEntry {
+                path: SharedString::from("network.wifi"),
+                title: SharedString::from("Wi-Fi"),
+                summary: SharedString::from("Wireless networks"),
+                control: SharedString::from("menu"),
+                value: SharedString::default(),
+                bool_value: false,
+                sensitive: false,
+                environment_overridden: false,
+            }],
+        )],
+    ));
+
     let mut panel_items = Vec::new();
     let mut navigation = Vec::new();
     let mut scroll_y = 0.0;

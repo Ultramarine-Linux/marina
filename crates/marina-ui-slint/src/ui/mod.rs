@@ -13,3 +13,4 @@ pub(crate) mod platform_names;
 pub(crate) mod profile;
 pub(crate) mod settings;
 pub(crate) mod store_details;
+pub(crate) mod wifi;
