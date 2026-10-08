@@ -9,8 +9,7 @@ PartOf=graphical-session.target
 [Service]
 Type=simple
 
-# 640x360 logical pixels render at 1280x720 physical pixels.
-Environment=SLINT_SCALE_FACTOR=2.0
+
 # FemtoVG uses the handheld's EGL/OpenGL ES stack and matches the renderer
 # expected by the planned layer-shika Wayland shell integration.
 Environment=SLINT_BACKEND=winit-femtovg

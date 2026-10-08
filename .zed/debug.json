@@ -17,7 +17,7 @@
       "SLINT_LIVE_PREVIEW": "1",
       "SLINT_BACKEND": "winit-femtovg",
       "MARINA_IMPORT_ROMM_ON_STARTUP": "false",
-      "SLINT_SCALE_FACTOR": "2",
+
       "MARINA_FAKE_BATTERY": "42,charging"
     },
     "sourceLanguages": ["rust"],
