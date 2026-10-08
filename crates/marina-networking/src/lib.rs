@@ -19,10 +19,10 @@ const RECONNECT_DELAY: Duration = Duration::from_secs(5);
 pub struct NetworkStatus {
     /// False when NetworkManager is unreachable.
     pub available: bool,
-    /// True when any NetworkManager connection is activated.
+    /// True when a Wi-Fi connection is activated; wired/VPN connections are ignored.
     pub connected: bool,
     /// Signal strength (0–100) of an active Wi-Fi connection, when reported.
-    /// `None` represents a wired/VPN connection or unavailable Wi-Fi strength.
+    /// `None` represents no active Wi-Fi connection or unavailable Wi-Fi strength.
     pub wifi_signal_strength: Option<u8>,
 }
 
@@ -37,30 +37,32 @@ impl NetworkStatus {
     }
 }
 
-fn connection_state(connection: &ActiveConnection) -> ActiveConnectionState {
-    match connection {
-        ActiveConnection::Wired(connection) => connection.state,
-        ActiveConnection::Wifi(connection) => connection.state,
-        ActiveConnection::Vpn(connection) => connection.state,
-        ActiveConnection::Other(connection) => connection.state,
-        _ => ActiveConnectionState::Unknown,
-    }
-}
-
 fn connected_from_state(state: ActiveConnectionState) -> bool {
     matches!(state, ActiveConnectionState::Activated)
 }
 
 fn status_from_connections(connections: &[ActiveConnection]) -> NetworkStatus {
-    let connected = connections
-        .iter()
-        .any(|connection| connected_from_state(connection_state(connection)));
-    let wifi_signal_strength = connections.iter().find_map(|connection| match connection {
-        ActiveConnection::Wifi(connection) if connected_from_state(connection.state) => {
-            connection.strength
+    status_from_wifi_connections(
+        connections
+            .iter()
+            .filter_map(|connection| match connection {
+                ActiveConnection::Wifi(connection) => Some((connection.state, connection.strength)),
+                _ => None,
+            }),
+    )
+}
+
+fn status_from_wifi_connections(
+    connections: impl Iterator<Item = (ActiveConnectionState, Option<u8>)>,
+) -> NetworkStatus {
+    let mut connected = false;
+    let mut wifi_signal_strength = None;
+    for (state, strength) in connections {
+        if connected_from_state(state) {
+            connected = true;
+            wifi_signal_strength = wifi_signal_strength.or(strength);
         }
-        _ => None,
-    });
+    }
 
     NetworkStatus {
         available: true,
@@ -171,6 +173,40 @@ mod tests {
         assert!(!connected_from_state(ActiveConnectionState::Deactivating));
         assert!(!connected_from_state(ActiveConnectionState::Deactivated));
         assert!(!connected_from_state(ActiveConnectionState::Unknown));
+    }
+
+    #[test]
+    fn no_wifi_connections_is_disconnected() {
+        // Wired, USB tether, and VPN connections are filtered out before aggregation.
+        let status = status_from_wifi_connections(std::iter::empty());
+        assert!(status.available);
+        assert!(!status.connected);
+        assert_eq!(status.wifi_signal_strength, None);
+        assert_eq!(status_from_connections(&[]), status);
+    }
+
+    #[test]
+    fn wifi_connection_status_is_independent_of_signal_strength() {
+        for strength in [None, Some(0), Some(75)] {
+            let status = status_from_wifi_connections(
+                [(ActiveConnectionState::Activated, strength)].into_iter(),
+            );
+            assert!(status.connected);
+            assert_eq!(status.wifi_signal_strength, strength);
+        }
+    }
+
+    #[test]
+    fn inactive_wifi_does_not_report_connection_or_signal() {
+        let status = status_from_wifi_connections(
+            [
+                (ActiveConnectionState::Activating, Some(75)),
+                (ActiveConnectionState::Deactivated, Some(50)),
+            ]
+            .into_iter(),
+        );
+        assert!(!status.connected);
+        assert_eq!(status.wifi_signal_strength, None);
     }
 
     #[test]

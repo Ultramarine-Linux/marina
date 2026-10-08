@@ -11,7 +11,7 @@ mod sway;
 pub use ipc::{OverlayClient, OverlayIpcError, OverlayRequest, spawn_overlay_server};
 pub use sway::SwayWindowManager;
 
-use std::{collections::HashMap, env, path::Path};
+use std::{collections::HashMap, path::Path};
 
 use layer_shika::{
     prelude::{AnchorEdges, KeyboardInteractivity, Layer, OutputPolicy, Shell},
@@ -68,12 +68,6 @@ pub enum WindowManagerError {
 /// a configured render target. The overlay process gives it an empty input
 /// region and no keyboard interactivity while the Sheet is closed.
 pub fn build_overlay_shell(ui_path: impl AsRef<Path>) -> Result<Shell, layer_shika::Error> {
-    let scale_factor = env::var("SLINT_SCALE_FACTOR")
-        .ok()
-        .and_then(|value| value.parse::<f32>().ok())
-        .filter(|value| value.is_finite() && *value > 0.0)
-        .unwrap_or(1.0);
-
     let ui_path = ui_path.as_ref();
     Shell::from_file_with_compiler(ui_path, overlay_compiler(ui_path))
         .surface("WindowOverlay")
@@ -82,7 +76,6 @@ pub fn build_overlay_shell(ui_path: impl AsRef<Path>) -> Result<Shell, layer_shi
         .layer(Layer::Overlay)
         .keyboard_interactivity(KeyboardInteractivity::None)
         .exclusive_zone(-1)
-        .scale_factor(scale_factor)
         .output_policy(OutputPolicy::PrimaryOnly)
         .namespace("org.ultramarinelinux.MarinaShell.shell-overlay")
         .build()

@@ -7,8 +7,8 @@ export global NetworkState {
     // False while NetworkManager is unavailable; the applet occupies no space.
     in-out property <bool> available: false;
     in-out property <bool> connected: false;
-    // 0–100 for an active Wi-Fi connection, or -1 when the active connection
-    // is wired/VPN or NetworkManager does not report a Wi-Fi signal level.
+    // 0–100 for an active Wi-Fi connection, or -1 when NetworkManager
+    // does not report a Wi-Fi signal level.
     in-out property <int> signal-strength: -1;
 }
 

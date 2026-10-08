@@ -30,6 +30,76 @@ use wayland_protocols::xdg::shell::client::{
 };
 use xkbcommon::xkb;
 
+// Layer-shell configure dimensions are already in surface-local logical pixels
+// and account for output transforms. Only the raw wl_output mode fallback needs
+// conversion from physical pixels; dividing a configure again doubles UI scaling.
+#[allow(
+    clippy::cast_precision_loss,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
+fn layer_surface_logical_size(
+    width: u32,
+    height: u32,
+    output_size: PhysicalSize,
+    scale_factor: f32,
+) -> PhysicalSize {
+    let fallback = |physical: u32| (physical as f32 / scale_factor).round() as u32;
+    PhysicalSize::new(
+        if width > 0 {
+            width
+        } else {
+            fallback(output_size.width)
+        },
+        if height > 0 {
+            height
+        } else {
+            fallback(output_size.height)
+        },
+    )
+}
+
+#[cfg(test)]
+mod scaling_tests {
+    use super::layer_surface_logical_size;
+    use slint::PhysicalSize;
+
+    #[test]
+    fn configure_size_is_logical_at_any_output_scale() {
+        for scale in [1.0, 1.5, 2.0] {
+            assert_eq!(
+                layer_surface_logical_size(640, 360, PhysicalSize::new(1280, 720), scale),
+                PhysicalSize::new(640, 360),
+            );
+        }
+    }
+
+    #[test]
+    fn configure_size_takes_precedence_over_rotated_output_mode() {
+        assert_eq!(
+            layer_surface_logical_size(640, 360, PhysicalSize::new(720, 1280), 2.0),
+            PhysicalSize::new(640, 360),
+        );
+    }
+
+    #[test]
+    fn only_unspecified_dimensions_use_scaled_output_mode() {
+        let output = PhysicalSize::new(1280, 720);
+        assert_eq!(
+            layer_surface_logical_size(0, 0, output, 2.0),
+            PhysicalSize::new(640, 360)
+        );
+        assert_eq!(
+            layer_surface_logical_size(800, 0, output, 2.0),
+            PhysicalSize::new(800, 360)
+        );
+        assert_eq!(
+            layer_surface_logical_size(0, 480, output, 2.0),
+            PhysicalSize::new(640, 480)
+        );
+    }
+}
+
 impl SurfaceState {
     #[allow(clippy::cast_possible_truncation)]
     #[allow(clippy::cast_sign_loss)]
@@ -46,25 +116,9 @@ impl SurfaceState {
 
         let output_size = self.output_size();
         let scale_factor = self.scale_factor();
-        let to_logical = |physical: u32| {
-            if scale_factor > 1.0 {
-                (physical as f32 / scale_factor).round() as u32
-            } else {
-                physical
-            }
-        };
-
-        // A layer-surface configure is authoritative and already accounts for
-        // output transforms. Clamping its landscape dimensions against the raw
-        // portrait wl_output mode incorrectly turns 1280×720 into 720×720.
-        let compositor_width = if width > 0 { width } else { output_size.width };
-        let compositor_height = if height > 0 {
-            height
-        } else {
-            output_size.height
-        };
-        let target_width = to_logical(compositor_width);
-        let target_height = to_logical(compositor_height);
+        let logical_size = layer_surface_logical_size(width, height, output_size, scale_factor);
+        let target_width = logical_size.width;
+        let target_height = logical_size.height;
 
         logger::info!(
             "Using logical dimensions: {}x{} (compositor: {}x{}, output mode: {}x{}, scale: {})",
@@ -80,8 +134,8 @@ impl SurfaceState {
         self.update_size_from_compositor(
             target_width.max(1),
             target_height.max(1),
-            compositor_width.max(1),
-            compositor_height.max(1),
+            target_width.max(1),
+            target_height.max(1),
         );
     }
 
