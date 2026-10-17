@@ -126,6 +126,43 @@ impl DbusOverlayRouter {
     }
 }
 
+/// Keeps InputPlumber interception until the button that dismissed the overlay
+/// is released.
+///
+/// InputPlumber's D-Bus target only reports value changes. Returning to
+/// pass-through on the dismissing press sends that button's release to the
+/// virtual gamepad instead, so the D-Bus target still considers it held and
+/// swallows its next press in a later overlay: only the release arrives.
+#[derive(Debug, Default)]
+pub(super) struct ReleaseGate {
+    pending: Option<InputAction>,
+}
+
+impl ReleaseGate {
+    pub(super) fn hold(&mut self, action: InputAction) {
+        self.pending = Some(action);
+    }
+
+    pub(super) fn is_holding(&self) -> bool {
+        self.pending.is_some()
+    }
+
+    /// Returns true when `event` is the awaited release; the caller then
+    /// restores pass-through and drops the event.
+    pub(super) fn release(&mut self, event: InputEvent) -> bool {
+        if event.kind == InputEventKind::Released && self.pending == Some(event.action) {
+            self.pending = None;
+            return true;
+        }
+        false
+    }
+
+    /// Abandons the hold, returning whether one was pending.
+    pub(super) fn clear(&mut self) -> bool {
+        self.pending.take().is_some()
+    }
+}
+
 pub(super) fn spawn_gilrs(handler: impl Fn(InputEvent) + Send + 'static) -> io::Result<()> {
     thread::Builder::new()
         .name("marina-overlay-controller".to_owned())
@@ -254,6 +291,30 @@ mod tests {
             router.route(event(InputAction::Back, InputEventKind::Pressed), true),
             DbusOverlayAction::Dispatch(event(InputAction::Back, InputEventKind::Pressed))
         );
+    }
+
+    #[test]
+    fn release_gate_waits_for_the_dismissing_button() {
+        let mut gate = ReleaseGate::default();
+        gate.hold(InputAction::Accept);
+        assert!(gate.is_holding());
+
+        assert!(!gate.release(event(InputAction::Down, InputEventKind::Released)));
+        assert!(!gate.release(event(InputAction::Accept, InputEventKind::Pressed)));
+        assert!(gate.is_holding());
+
+        assert!(gate.release(event(InputAction::Accept, InputEventKind::Released)));
+        assert!(!gate.is_holding());
+        assert!(!gate.release(event(InputAction::Accept, InputEventKind::Released)));
+    }
+
+    #[test]
+    fn release_gate_clear_reports_an_abandoned_hold() {
+        let mut gate = ReleaseGate::default();
+        assert!(!gate.clear());
+        gate.hold(InputAction::Back);
+        assert!(gate.clear());
+        assert!(!gate.is_holding());
     }
 
     #[test]

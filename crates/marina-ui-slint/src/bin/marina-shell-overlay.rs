@@ -17,7 +17,7 @@ use layer_shika::{
     slint::{Image, ModelRc, SharedString, VecModel},
     slint_interpreter::{ComponentInstance, Struct, Value},
 };
-use marina_input::InputEvent;
+use marina_input::{InputEvent, InputEventKind};
 use marina_shell::{
     OverlayRequest, SwayWindowManager, build_overlay_shell, layer_shell::Surface,
     spawn_overlay_server, validate_overlay_ui,
@@ -37,6 +37,9 @@ const ANIMATION_FRAME_INTERVAL: Duration = Duration::from_millis(16);
 const RUNTIME_INPUT_PROFILE_INTERVAL: Duration = Duration::from_millis(500);
 const RESUME_CLOCK_GAP: Duration = Duration::from_millis(500);
 const RESUME_EXIT_CODE: i32 = 75;
+// Upper bound on holding interception for a dismissing button's release, so a
+// release that never reaches the D-Bus target cannot strand the game's input.
+const RELEASE_GATE_TIMEOUT: Duration = Duration::from_secs(1);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum OverlayRequestDisposition {
@@ -292,6 +295,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     spawn_runtime_input_profile_monitor(&runtime, inputplumber_control.clone());
 
+    let release_gate = Arc::new(Mutex::new(input::ReleaseGate::default()));
+
     let mut shell = build_overlay_shell(&ui_path)?;
     let control = capture_shell_control(&shell)?;
     control.surface(SURFACE_NAME).set_input_region(0, 0, 0, 0)?;
@@ -300,6 +305,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let event_control = control.clone();
     let event_visible = visible.clone();
     let event_inputplumber = inputplumber_control.clone();
+    let event_release_gate = release_gate.clone();
     let (_token, sender) =
         handle.add_channel(move |message: OverlayMessage, app_state| match message {
             OverlayMessage::Show(presentation) => {
@@ -309,6 +315,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     profile_mode = presentation.profile_mode,
                     "showing overlay"
                 );
+                event_release_gate
+                    .lock()
+                    .expect("overlay release gate lock poisoned")
+                    .clear();
                 event_inputplumber.set_mode(marina_input::inputplumber::InterceptMode::All);
                 for surface in app_state.all_outputs() {
                     apply_presentation_to_component(surface.component_instance(), &presentation);
@@ -325,8 +335,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 }
             }
             OverlayMessage::Hide => {
-                debug!("hiding overlay");
-                event_inputplumber.set_mode(marina_input::inputplumber::InterceptMode::Pass);
+                let holding = event_release_gate
+                    .lock()
+                    .expect("overlay release gate lock poisoned")
+                    .is_holding();
+                debug!(holding, "hiding overlay");
+                if !holding {
+                    event_inputplumber.set_mode(marina_input::inputplumber::InterceptMode::Pass);
+                }
                 event_visible.store(false, Ordering::Release);
                 for surface in app_state.all_outputs() {
                     set_open_on_component(surface.component_instance(), false);
@@ -434,6 +450,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let request_runtime = runtime.clone();
     let request_visible = visible.clone();
     let request_inputplumber = inputplumber_control.clone();
+    let request_release_gate = release_gate.clone();
     let request_handler: Arc<dyn Fn(OverlayRequest) + Send + Sync> = Arc::new(move |request| {
         let disposition = reserve_overlay_request(&request_visible, request);
         debug!(
@@ -444,6 +461,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
         match disposition {
             OverlayRequestDisposition::Hide => {
+                request_release_gate
+                    .lock()
+                    .expect("overlay release gate lock poisoned")
+                    .clear();
                 request_inputplumber.set_mode(marina_input::inputplumber::InterceptMode::Pass);
                 send_overlay_message(&request_sender, OverlayMessage::Hide);
                 return;
@@ -491,58 +512,96 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let input_visible = visible.clone();
     let input_runtime = runtime.clone();
     let dispatch_inputplumber = inputplumber_control.clone();
-    let dispatch_visible: Arc<dyn Fn(InputEvent) + Send + Sync> = Arc::new(move |event| {
-        let overlay_visible = input_visible.load(Ordering::Acquire);
-        debug!(
-            ?event,
-            overlay_visible, "dispatching overlay controller event"
-        );
-        if !overlay_visible {
-            return;
-        }
-        let message = input_state
-            .lock()
-            .expect("overlay state lock poisoned")
-            .handle(event);
-        if let Some(message) = message {
-            if matches!(message, OverlayMessage::Hide) {
-                input_visible.store(false, Ordering::Release);
-                dispatch_inputplumber.set_mode(marina_input::inputplumber::InterceptMode::Pass);
+    let dispatch_release_gate = release_gate.clone();
+    // `from_inputplumber` marks events from InputPlumber's D-Bus target, whose
+    // dismissing press must keep interception until its release arrives.
+    let dispatch_visible: Arc<dyn Fn(InputEvent, bool) + Send + Sync> =
+        Arc::new(move |event, from_inputplumber| {
+            let overlay_visible = input_visible.load(Ordering::Acquire);
+            debug!(
+                ?event,
+                overlay_visible, from_inputplumber, "dispatching overlay controller event"
+            );
+            if !overlay_visible {
+                return;
             }
-            match message {
-                OverlayMessage::SwitchProfile(_)
-                | OverlayMessage::SetBrightness(_)
-                | OverlayMessage::SetVolume(_) => {
-                    spawn_control_operation(
-                        input_state.clone(),
-                        input_sender.clone(),
-                        input_runtime.clone(),
-                        message,
-                    );
+            let message = input_state
+                .lock()
+                .expect("overlay state lock poisoned")
+                .handle(event);
+            if let Some(message) = message {
+                if matches!(message, OverlayMessage::Hide) {
+                    input_visible.store(false, Ordering::Release);
+                    if from_inputplumber && event.kind != InputEventKind::Released {
+                        dispatch_release_gate
+                            .lock()
+                            .expect("overlay release gate lock poisoned")
+                            .hold(event.action);
+                        let gate = dispatch_release_gate.clone();
+                        let inputplumber = dispatch_inputplumber.clone();
+                        input_runtime.spawn(async move {
+                            tokio::time::sleep(RELEASE_GATE_TIMEOUT).await;
+                            if gate
+                                .lock()
+                                .expect("overlay release gate lock poisoned")
+                                .clear()
+                            {
+                                debug!(
+                                    "dismissing button release timed out; restoring pass-through"
+                                );
+                                inputplumber
+                                    .set_mode(marina_input::inputplumber::InterceptMode::Pass);
+                            }
+                        });
+                    } else {
+                        dispatch_inputplumber
+                            .set_mode(marina_input::inputplumber::InterceptMode::Pass);
+                    }
                 }
-                message => {
-                    let _ = input_sender.send(message);
+                match message {
+                    OverlayMessage::SwitchProfile(_)
+                    | OverlayMessage::SetBrightness(_)
+                    | OverlayMessage::SetVolume(_) => {
+                        spawn_control_operation(
+                            input_state.clone(),
+                            input_sender.clone(),
+                            input_runtime.clone(),
+                            message,
+                        );
+                    }
+                    message => {
+                        let _ = input_sender.send(message);
+                    }
                 }
             }
-        }
-    });
+        });
 
     let gilrs_dispatch = dispatch_visible.clone();
     input::spawn_gilrs(move |event| {
         debug!(?event, "received gilrs overlay input event");
-        gilrs_dispatch(event);
+        gilrs_dispatch(event, false);
     })?;
 
     let dbus_dispatch = dispatch_visible.clone();
     let dbus_visible = visible.clone();
     let dbus_request = request_handler.clone();
     let dbus_inputplumber = inputplumber_control.clone();
+    let dbus_release_gate = release_gate.clone();
     let dbus_router = Arc::new(Mutex::new(input::DbusOverlayRouter::default()));
     input::spawn_inputplumber(
         &runtime,
         inputplumber_modes,
         inputplumber_activations,
         move |event| {
+            if dbus_release_gate
+                .lock()
+                .expect("overlay release gate lock poisoned")
+                .release(event)
+            {
+                debug!(?event, "dismissing button released; restoring pass-through");
+                dbus_inputplumber.set_mode(marina_input::inputplumber::InterceptMode::Pass);
+                return;
+            }
             let action = dbus_router
                 .lock()
                 .expect("InputPlumber router lock poisoned")
@@ -556,7 +615,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     dbus_inputplumber.observe_mode(marina_input::inputplumber::InterceptMode::All);
                     dbus_request(OverlayRequest::QuickSettings);
                 }
-                input::DbusOverlayAction::Dispatch(event) => dbus_dispatch(event),
+                input::DbusOverlayAction::Dispatch(event) => dbus_dispatch(event, true),
                 input::DbusOverlayAction::Ignore => {}
             }
         },
