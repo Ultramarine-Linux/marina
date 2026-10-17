@@ -1,6 +1,6 @@
 [profile.release]
 opt-level = "z"          # Optimization level (0-3, s, z)
-lto = "fat"
+lto = "thin"
 codegen-units = 1      # Better optimization, slower compile
 panic = "abort"        # Smaller binary, no unwinding
 strip = true            # Strip debug symbols
