@@ -379,12 +379,18 @@ impl StoreBackend for PortMasterStore {
             self.release().await.map_err(StoreError::backend)?,
         );
         progress(InstallProgress::status("Downloading port artwork"));
-        if let Some(image) = self.preview_image(&request.entry).await? {
-            item.assets.push(marina_core::LibraryAsset {
+        // Artwork is optional: the port is already installed, so a missing or
+        // unreachable screenshot must not fail the install.
+        match self.preview_image(&request.entry).await {
+            Ok(Some(image)) => item.assets.push(marina_core::LibraryAsset {
                 kind: marina_core::LibraryAssetKind::CoverLarge,
                 source: None,
                 local_path: Some(image.path.to_string_lossy().into_owned()),
-            });
+            }),
+            Ok(None) => {}
+            Err(error) => {
+                tracing::warn!(%error, title = %request.entry.title, "skipping unavailable PortMaster artwork");
+            }
         }
         progress(InstallProgress::status("Adding game to library"));
         let _ = library

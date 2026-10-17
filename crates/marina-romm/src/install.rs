@@ -10,7 +10,7 @@ use marina_core::LibraryItem;
 use marina_library::{Library, query::SearchQuery};
 use marina_store::{InstallProgress, InstallProgressCallback, StoreError};
 use thiserror::Error;
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::{Client, Rom, RomFile};
 
@@ -184,9 +184,17 @@ pub async fn install(
         let on_progress = |completed, total| {
             progress(InstallProgress::bytes(message.clone(), completed, total));
         };
-        client
+        // Media is optional: RomM can list an asset whose file is missing
+        // (e.g. a 404 normalized video). Skip it rather than discard the
+        // already-downloaded game; the asset stays without a local path.
+        if let Err(error) = client
             .download_url(&source_url, &destination, Some(&on_progress))
-            .await?;
+            .await
+        {
+            warn!(%error, title = %item.title, asset = suffix, "skipping unavailable RomM media asset");
+            let _ = tokio::fs::remove_file(&destination).await;
+            continue;
+        }
         asset.local_path = Some(destination.to_string_lossy().into_owned());
     }
     progress(InstallProgress::status("Adding game to library"));
