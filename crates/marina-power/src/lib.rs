@@ -170,6 +170,35 @@ pub async fn power_off() -> Result<(), zbus::Error> {
     manager.power_off(false).await
 }
 
+/// Calls `on_resume` each time systemd-logind reports the system has returned
+/// from sleep (`PrepareForSleep(false)`).
+///
+/// Prefer this to comparing wall and monotonic clocks: boards without a
+/// persistent clock stop both during suspend, so no gap is observable. The
+/// monitor reconnects after bus errors and never resolves under normal
+/// operation; spawn it as a process-lifetime task.
+pub async fn monitor_resume(on_resume: impl Fn() + Send + Sync + 'static) {
+    loop {
+        if let Err(error) = watch_resume(&on_resume).await {
+            tracing::debug!(%error, "logind resume monitor failed; reconnecting");
+        }
+        tokio::time::sleep(RECONNECT_DELAY).await;
+    }
+}
+
+async fn watch_resume(on_resume: &(impl Fn() + Send + Sync)) -> zbus::Result<()> {
+    let connection = zbus::Connection::system().await?;
+    let manager = marina_systemd::zbus_systemd::login1::ManagerProxy::new(&connection).await?;
+    let mut signals = manager.receive_prepare_for_sleep().await?;
+    tracing::debug!("logind resume monitor started");
+    while let Some(signal) = signals.next().await {
+        if !*signal.args()?.start() {
+            on_resume();
+        }
+    }
+    Ok(())
+}
+
 /// Returns display brightness as reported by `brightnessctl`.
 pub fn display_brightness() -> io::Result<u8> {
     let output = Command::new("brightnessctl").arg("-m").output()?;

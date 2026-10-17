@@ -5,6 +5,7 @@ pub(crate) use marina_ui_slint::config;
 mod covers;
 mod fixtures;
 mod image;
+mod resume_input;
 mod startup;
 mod storage;
 mod ui;

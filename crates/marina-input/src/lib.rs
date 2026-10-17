@@ -15,6 +15,7 @@ use gilrs::{Axis, Button, EventType, GamepadId, GilrsBuilder};
 use thiserror::Error;
 
 pub mod inputplumber;
+pub mod virtual_keyboard;
 
 /// A controller action understood by Marina's user interfaces.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]

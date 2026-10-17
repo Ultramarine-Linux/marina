@@ -16,6 +16,19 @@ impl SwayWindowManager {
             .map_err(|error| WindowManagerError::Connection(error.to_string()))
     }
 
+    /// Number of keyboards on Sway's seat. Zero means Sway has no device that
+    /// can give a window keyboard focus.
+    pub fn keyboard_count(&self) -> Result<usize, WindowManagerError> {
+        let inputs = self
+            .connection()?
+            .get_inputs()
+            .map_err(|error| WindowManagerError::Query(error.to_string()))?;
+        Ok(inputs
+            .iter()
+            .filter(|input| input.input_type == "keyboard")
+            .count())
+    }
+
     fn connection(&self) -> Result<Connection, WindowManagerError> {
         Connection::new().map_err(|error| WindowManagerError::Connection(error.to_string()))
     }

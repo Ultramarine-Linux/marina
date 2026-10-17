@@ -133,6 +133,7 @@ pub(crate) async fn run() -> Result<(), slint::PlatformError> {
     ui::battery::initialize(&window);
     ui::networking::initialize(&window);
     ui::clock::initialize(&window);
+    crate::resume_input::spawn_monitor();
     window
         .global::<HomeState>()
         .set_games(ModelRc::from(std::rc::Rc::new(VecModel::from(Vec::new()))));

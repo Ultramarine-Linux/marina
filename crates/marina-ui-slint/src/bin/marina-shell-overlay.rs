@@ -7,8 +7,7 @@ use std::{
         Arc, Mutex,
         atomic::{AtomicBool, Ordering},
     },
-    thread,
-    time::{Duration, Instant, SystemTime},
+    time::Duration,
 };
 
 use layer_shika::{
@@ -35,7 +34,6 @@ const INSTALLED_UI_ROOT: &str = "/usr/share/marina/ui";
 const SURFACE_NAME: &str = "WindowOverlay";
 const ANIMATION_FRAME_INTERVAL: Duration = Duration::from_millis(16);
 const RUNTIME_INPUT_PROFILE_INTERVAL: Duration = Duration::from_millis(500);
-const RESUME_CLOCK_GAP: Duration = Duration::from_millis(500);
 const RESUME_EXIT_CODE: i32 = 75;
 // Upper bound on holding interception for a dismissing button's release, so a
 // release that never reaches the D-Bus target cannot strand the game's input.
@@ -278,7 +276,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         return Ok(());
     }
 
-    monitor_suspend_resume();
     let manager = SwayWindowManager::new()?;
     let runtime = Arc::new(
         tokio::runtime::Builder::new_multi_thread()
@@ -286,6 +283,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .enable_all()
             .build()?,
     );
+    monitor_suspend_resume(&runtime);
     let state = Arc::new(Mutex::new(ControllerState::new(manager)));
     let visible = Arc::new(AtomicBool::new(false));
     let (inputplumber_control, inputplumber_modes, inputplumber_activations) =
@@ -648,31 +646,11 @@ fn send_overlay_message(
     let _ = sender.send(message);
 }
 
-fn monitor_suspend_resume() {
-    thread::Builder::new()
-        .name("marina-overlay-resume-monitor".to_owned())
-        .spawn(|| {
-            let mut wall = SystemTime::now();
-            let mut monotonic = Instant::now();
-            loop {
-                thread::sleep(Duration::from_secs(1));
-                let next_wall = SystemTime::now();
-                let next_monotonic = Instant::now();
-                let wall_elapsed = next_wall.duration_since(wall).unwrap_or_default();
-                let monotonic_elapsed = next_monotonic.duration_since(monotonic);
-                if wall_elapsed.saturating_sub(monotonic_elapsed) > RESUME_CLOCK_GAP {
-                    warn!(
-                        wall_elapsed_ms = wall_elapsed.as_millis() as u64,
-                        monotonic_elapsed_ms = monotonic_elapsed.as_millis() as u64,
-                        "resume detected; restarting overlay to recreate its Wayland surface"
-                    );
-                    process::exit(RESUME_EXIT_CODE);
-                }
-                wall = next_wall;
-                monotonic = next_monotonic;
-            }
-        })
-        .expect("failed to start overlay resume monitor");
+fn monitor_suspend_resume(runtime: &tokio::runtime::Runtime) {
+    runtime.spawn(marina_power::monitor_resume(|| {
+        warn!("resume detected; restarting overlay to recreate its Wayland surface");
+        process::exit(RESUME_EXIT_CODE);
+    }));
 }
 
 fn capture_shell_control(shell: &Shell) -> Result<ShellControl, Box<dyn std::error::Error>> {
