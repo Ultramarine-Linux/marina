@@ -36,7 +36,10 @@ export component ErrorSheet inherits Rectangle {
             }
         }
 
+        // Started by `opened`; running from creation would focus the hidden
+        // Dismiss button at startup.
         focus-timer := Timer {
+            running: false;
             interval: 50ms;
             triggered => {
                 self.stop();

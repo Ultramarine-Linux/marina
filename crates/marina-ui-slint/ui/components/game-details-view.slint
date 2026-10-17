@@ -399,7 +399,12 @@ export component GameDetailsView inherits Rectangle {
                 return reject;
             }
         }
+        // Timers run from creation unless told otherwise. These two belong
+        // to the launch sheet and are started by `opened`; left running, the
+        // focus timer fires on mount and pulls focus into the closed sheet,
+        // stranding controller input while Play still shows its ring.
         launch-focus-timer := Timer {
+            running: false;
             interval: 50ms;
             triggered => {
                 self.stop();
@@ -407,6 +412,7 @@ export component GameDetailsView inherits Rectangle {
             }
         }
         launch-marquee-timer := Timer {
+            running: false;
             interval: 24ms;
             triggered => {
                 if (GameState.launch-sheet-open) {

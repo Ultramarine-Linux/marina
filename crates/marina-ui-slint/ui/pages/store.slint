@@ -491,7 +491,10 @@ export component StorePage inherits Rectangle {
                 return reject;
             }
         }
+        // Started when the artifact sheet opens; running from creation would
+        // pull focus into the closed sheet on mount.
         nav-focus-timer := Timer {
+            running: false;
             interval: 50ms;
             triggered => {
                 self.stop();
@@ -499,6 +502,7 @@ export component StorePage inherits Rectangle {
             }
         }
         marquee-timer := Timer {
+            running: false;
             interval: 24ms;
             triggered => {
                 if (root.artifact-sheet-open) {
